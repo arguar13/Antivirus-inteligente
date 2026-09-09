@@ -7,13 +7,17 @@ members = [
     "crates/aegis-net",
     "crates/aegis-resp",
     "crates/aegis-scan",
+    "crates/aegis-ml",
     "crates/aegis-e2e",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.77"
+# MSRV real, no aspiracional. Se subio de 1.77 a 1.82 cuando entro tract-onnx:
+# mantener una declaracion que el codigo ya no cumple hace que clippy avise de
+# violaciones inexistentes y, peor, oculta las reales.
+rust-version = "1.82"
 license = "Apache-2.0"
 repository = "https://github.com/arguar13/Antivirus-inteligente"
 

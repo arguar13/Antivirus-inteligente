@@ -1,0 +1,27 @@
+//! # aegis-ml
+//!
+//! Analisis estatico de binarios e inferencia local.
+//!
+//! Extrae 256 caracteristicas estructurales de un PE o un ELF **sin
+//! ejecutarlo** y las pasa por un modelo ONNX residente. Las caracteristicas
+//! son estructurales y no bytes crudos a proposito: un modelo sobre bytes se
+//! evade anadiendo relleno al final del fichero, sin tocar una sola
+//! instruccion, mientras que uno sobre la estructura obliga a modificar el
+//! binario de verdad.
+
+#![deny(missing_docs)]
+
+pub mod entropy;
+pub mod features;
+pub mod model;
+
+pub use features::{BinaryFeatures, BinaryFormat, FeatureExtractor, SectionInfo, FEATURE_DIM};
+pub use model::{MalwareModel, ModelError, Prediction, Thresholds, Verdict};
+
+/// Modelo empotrado en el binario.
+///
+/// Va empotrado y no como fichero suelto por la misma razon que el objeto eBPF
+/// y las reglas YARA: un `.onnx` junto al binario es algo que un atacante con
+/// permisos de escritura puede sustituir, y el agente lo cargaria sin saberlo.
+/// Un modelo decide si algo se bloquea; cambiarlo equivale a cambiar el agente.
+pub const EMBEDDED_MODEL: &[u8] = include_bytes!("../models/aegis-static-v1.onnx");

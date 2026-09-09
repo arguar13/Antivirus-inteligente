@@ -1,0 +1,16 @@
+[package]
+name = "aegis-ml"
+description = "Extraccion de atributos estaticos PE/ELF e inferencia local ONNX para AegisCore"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+goblin = "0.9"
+tract-onnx = "0.21"
