@@ -550,6 +550,26 @@ def escenario_rootkit():
         fallo(f"la ocultacion no se detecto: {r.stdout.strip()} {r.stderr.strip()}")
 
 
+# ---------------------------------------------------------------------------
+# 11. Bootkit: arranque medido delata al gestor de arranque manipulado (FASE 31)
+# ---------------------------------------------------------------------------
+
+
+def escenario_bootkit():
+    titulo(11, "un bootkit reescribe el gestor de arranque y el arranque medido lo delata")
+
+    binario = ejemplo("aegis-firmware", "bootkit_probe")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar la sonda de arranque medido")
+        return
+
+    r = run([binario])
+    if r.returncode == 0 and "DETECTADO" in r.stdout and "sin alarma" in r.stdout:
+        ok("el arranque intacto no da falsa alarma y el bootkit se detecta por el PCR")
+    else:
+        fallo(f"el mecanismo de arranque medido fallo: {r.stdout.strip()} {r.stderr.strip()}")
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -562,9 +582,10 @@ def main():
     escenario_antiforense()
     escenario_malla()
     escenario_rootkit()
+    escenario_bootkit()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({10} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({11} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1
