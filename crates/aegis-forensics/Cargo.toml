@@ -1,0 +1,16 @@
+[package]
+name = "aegis-forensics"
+description = "Introspeccion de memoria en vivo y deteccion de exploits de corrupcion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+libc = "0.2"
+aegis-scan = { path = "../aegis-scan" }
