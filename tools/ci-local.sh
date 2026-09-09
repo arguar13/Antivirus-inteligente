@@ -48,6 +48,22 @@ if [ -f drivers/linux/aegis-bpf/Makefile ]; then
 else
     printf '%s==>%s eBPF · %somitido (subproyecto aun no creado)%s\n' "$GRIS" "$FIN" "$GRIS" "$FIN"
 fi
+# El sandbox (FASE 26) depende de lo que el kernel de la maquina ofrezca.
+# Se informa SIEMPRE de que capas se pueden ejercer: la diferencia entre
+# "probado" y "no se pudo probar aqui" tiene que verse en la puerta de calidad,
+# no quedarse en un comentario del codigo.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "sandbox" ]; then
+    printf '%s==>%s Sandbox · capacidades de aislamiento del kernel\n' "$GRIS" "$FIN"
+    if cargo run -q -p aegis-sandbox --example sandbox_support > /tmp/aegis-sandbox.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-sandbox.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-sandbox.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 paso docs  "Docs · enlaces relativos"   ./tools/check-links.sh
 # El fichero de cadenas cifradas (FASE 13) tiene que estar al dia respecto al
 # manifiesto: si alguien cambia una cadena critica y no regenera, el binario
@@ -93,6 +109,7 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
         printf '%s==>%s Red Team · simulacion de ataques\n' "$GRIS" "$FIN"
         cargo build -q -p aegis-evasion --example scan_pid 2>/dev/null
         cargo build -q -p aegis-ransom --example honeypot_probe 2>/dev/null
+        cargo build -q -p aegis-sandbox --example escape_attempt 2>/dev/null
         make -C drivers/linux/aegis-bpf build sign >/dev/null 2>&1 || true
         if python3 tests/red_team_sim.py > /tmp/aegis-redteam.log 2>&1; then
             printf '    %sOK%s\n' "$VERDE" "$FIN"

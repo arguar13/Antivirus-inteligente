@@ -23,6 +23,7 @@ puede), la da el Watchdog volviendolo a arrancar; ese es el escenario 5.
 Devuelve codigo 0 si todos los escenarios pasan, 1 si alguno falla.
 """
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -335,6 +336,40 @@ def escenario_watchdog():
                 pass
 
 
+# ---------------------------------------------------------------------------
+# 6. Fuga de un proceso confinado (FASE 26)
+# ---------------------------------------------------------------------------
+
+
+def escenario_sandbox():
+    titulo(6, "un proceso confinado intenta salir del sandbox")
+
+    binario = ejemplo("aegis-sandbox", "escape_attempt")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar el intento de fuga")
+        return
+
+    # 1. Politica que devuelve EPERM: el proceso sobrevive y reporta que
+    #    ninguna de las siete fugas funciono.
+    r = run([binario, "--errno"])
+    if r.returncode == 0:
+        bloqueadas = r.stdout.count("bloqueada:")
+        ok(f"{bloqueadas} fugas bloqueadas por el filtro de llamadas")
+    else:
+        fallo(f"alguna fuga funciono: {r.stdout.strip()} {r.stderr.strip()}")
+
+    # 2. Politica que mata: el primer intento tiene que terminar el proceso con
+    #    SIGSYS. Que sobreviva significaria que el filtro no se aplico.
+    r = run([binario, "--kill"])
+    if r.returncode == -signal.SIGSYS:
+        ok("el binario no confiable murio con SIGSYS al primer intento")
+    else:
+        fallo(
+            "la politica de matar no mato: codigo "
+            f"{r.returncode}, salida {r.stdout.strip()}"
+        )
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -342,9 +377,10 @@ def main():
     escenario_senuelo()
     escenario_bytecode()
     escenario_watchdog()
+    escenario_sandbox()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({5} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({6} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1
