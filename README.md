@@ -167,13 +167,22 @@ docs/                         Blueprint arquitectónico
 | 4 | [Respuesta y aislamiento](docs/04-respuesta.md) — WFP, cuarentena, rollback |
 | 5 | [Nube y threat intelligence](docs/05-cloud.md) — k-anonimato, sandbox |
 | 6 | [Stack y hoja de ruta](docs/06-stack-y-roadmap.md) — lenguajes, fases, criterios de salida |
+| — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo
 
 ```bash
-cargo test                # pruebas del workspace
-./tools/abi-check.sh      # el layout de C y el de Rust deben coincidir
+make ci        # todas las comprobaciones (formato, clippy, tests, ABI, eBPF, docs)
+make test      # solo cargo test
+make bpf       # compila los programas eBPF
+make abi       # el layout de C y el de Rust deben coincidir
 ```
+
+> **GitHub Actions esta bloqueado a nivel de repositorio o cuenta en este
+> proyecto.** El workflow es correcto y esta verificado, pero no arranca. Ver
+> [docs/07-estado-ci.md](docs/07-estado-ci.md) para el diagnostico y los pasos
+> exactos que lo resuelven. Mientras tanto `make ci` es la puerta de calidad, y
+> corre el mismo conjunto de comprobaciones.
 
 `abi-check.sh` es obligatorio en CI. Las aserciones `const` de Rust fijan los
 offsets esperados, pero no pueden ver el header de C: sin la comparación
