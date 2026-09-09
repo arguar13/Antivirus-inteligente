@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/aegis-ipc", "crates/aegis-agent", "crates/aegis-vuln", "crates/aegis-net"]
+members = [
+    "crates/aegis-ipc",
+    "crates/aegis-agent",
+    "crates/aegis-vuln",
+    "crates/aegis-net",
+    "crates/aegis-resp",
+]
 
 [workspace.package]
 version = "0.1.0"

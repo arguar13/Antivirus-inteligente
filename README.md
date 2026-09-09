@@ -145,8 +145,8 @@ crates/
   aegis-agent/                Colector eBPF, grafo de linaje, triaje      [hecho]
   aegis-vuln/                 Escáner de postura y CVE del host           [hecho]
   aegis-net/                  IDS de red, filtro XDP, detección de barridos [hecho]
+  aegis-resp/                 Terminación, cuarentena AES-256-GCM, aislamiento [hecho]
   aegis-scan/                 YARA-X, inferencia ONNX, analizador PE/ELF
-  aegis-resp/                 WFP, cuarentena, rollback
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
