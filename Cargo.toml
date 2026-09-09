@@ -19,6 +19,7 @@ members = [
     "crates/aegis-forensics",
     "crates/aegis-sync",
     "crates/aegis-fim",
+    "crates/aegis-watchdog",
     "crates/aegis-e2e",
 ]
 

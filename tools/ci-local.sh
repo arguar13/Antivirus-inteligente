@@ -73,10 +73,10 @@ if [ -n "${SOLO:-}" ] && [ "$SOLO" != "budget" ]; then :; else
         if [ -z "$RSS" ]; then
             printf '    %somitido: el agente no arranco%s\n' "$GRIS" "$FIN"
             printf '    %s  causa: %s%s\n' "$GRIS" "$(tail -1 /tmp/aegis-budget.err 2>/dev/null | head -c 160)" "$FIN"
-        elif [ "$RSS" -lt 51200 ]; then
-            printf '    %sOK%s (%s KB de un presupuesto de 51200 KB)\n' "$VERDE" "$FIN" "$RSS"
+        elif [ "$RSS" -lt 46080 ]; then
+            printf '    %sOK%s (%s KB de un presupuesto de 46080 KB)\n' "$VERDE" "$FIN" "$RSS"
         else
-            printf '    %sFALLO%s: %s KB supera el presupuesto de 51200 KB\n' "$ROJO" "$FIN" "$RSS"
+            printf '    %sFALLO%s: %s KB supera el presupuesto de 46080 KB\n' "$ROJO" "$FIN" "$RSS"
             FALLOS=$((FALLOS + 1))
         fi
     else

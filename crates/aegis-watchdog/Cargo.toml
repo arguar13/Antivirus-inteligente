@@ -1,0 +1,19 @@
+[package]
+name = "aegis-watchdog"
+description = "Watchdog de alta disponibilidad del agente y el driver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+libc = "0.2"
+
+[[bin]]
+name = "aegis-watchdog"
+path = "src/bin/aegis-watchdog.rs"

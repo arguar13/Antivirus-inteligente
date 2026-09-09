@@ -45,14 +45,14 @@ kernel que está reservando memoria ejecutable en otro proceso.
 
 | Principio | Compromiso concreto | Cómo se verifica |
 |---|---|---|
-| **Eficiencia permanente** | < 50 MB RSS y < 0,5 % CPU en reposo | Presupuesto repartido por componente (abajo); prueba de carga en CI |
+| **Eficiencia permanente** | < 45 MB RSS y < 0,5 % CPU en reposo | Presupuesto repartido por componente (abajo); prueba de carga en CI |
 | **Cero bloatware** | Solo defensa, detección, aislamiento y respuesta | Cualquier funcionalidad que no reduzca el riesgo de compromiso se rechaza en revisión |
 | **Autodefensa** | Inmune a terminación no autorizada | PPL + ELAM + `ObRegisterCallbacks` (Windows), LSM + eBPF (Linux) |
 | **Resiliencia ante evasión** | Detección de syscalls directos e indirectos | Telemetría desde ETW-Ti / eBPF, no desde hooks de userland |
 
 ### Presupuesto de recursos
 
-El límite de 50 MB no es un objetivo vago: se reparte por componente y se mide.
+El límite de 45 MB no es un objetivo vago: se reparte por componente y se mide.
 Un componente que se pase de su cuota es un bug, no una molestia.
 
 | Componente | RSS en reposo | CPU en reposo | Notas |
@@ -174,6 +174,7 @@ crates/
   aegis-forensics/            Volcado de memoria en vivo + exploits          [hecho]
   aegis-sync/                 Sincronización diferencial (Merkle) de IoCs    [hecho]
   aegis-fim/                  Integridad de ficheros (inotify + BLAKE3)      [hecho]
+  aegis-watchdog/             Watchdog de alta disponibilidad                [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
@@ -204,6 +205,7 @@ docs/                         Blueprint arquitectónico
 | 13 | [Análisis forense en vivo](docs/13-forense.md) — volcado sin parar el proceso, vtable/pivote/shellcode |
 | 14 | [Sincronización diferencial](docs/14-sync.md) — árboles de Merkle, tráfico proporcional al cambio |
 | 15 | [Integridad de ficheros](docs/15-fim.md) — inotify, BLAKE3 concurrente, línea base |
+| 16 | [Watchdog de alta disponibilidad](docs/16-watchdog.md) — reinicio ante SIGKILL/cuelgue, presupuesto 45 MB |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo

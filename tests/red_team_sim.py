@@ -13,12 +13,12 @@ Escenarios:
   3. Manipulacion de senuelo      -> modificar un fichero senuelo de ransomware
                                       se detecta al instante (FASE 9).
   4. Integridad del bytecode eBPF -> un .bpf.o parcheado se rechaza (FASE 14).
+  5. SIGKILL del agente           -> el Watchdog reinicia al agente muerto
+                                      (FASE 22).
 
-Nota sobre SIGKILL: un SIGKILL de root no se puede impedir desde el proceso
-victima; la resiliencia ante terminacion la aporta el Watchdog (FASE 22), que
-ampliara este script con el escenario de reinicio. Aqui la "auto-defensa" que se
-valida es la anti-ingenieria-inversa, que si es responsabilidad del propio
-binario.
+Sobre el SIGKILL: un SIGKILL de root no se puede impedir desde el proceso
+victima. La resiliencia ante la terminacion no la da el agente resistiendose (no
+puede), la da el Watchdog volviendolo a arrancar; ese es el escenario 5.
 
 Devuelve codigo 0 si todos los escenarios pasan, 1 si alguno falla.
 """
@@ -252,15 +252,99 @@ def escenario_bytecode():
             fallo(f"un .bpf.o parcheado paso la verificacion (codigo {r.returncode})")
 
 
+def hijos_de(pid):
+    """PIDs cuyo padre es `pid`, leyendo /proc."""
+    hijos = []
+    for entrada in os.listdir("/proc"):
+        if not entrada.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entrada}/stat") as f:
+                campos = f.read().rsplit(")", 1)[1].split()
+            # Tras "comm)" el primer campo es el estado y el segundo el PPID.
+            ppid = int(campos[1])
+            if ppid == pid:
+                hijos.append(int(entrada))
+        except (OSError, IndexError, ValueError):
+            continue
+    return hijos
+
+
+def bin_release_o_debug(nombre):
+    for perfil in ("release", "debug"):
+        ruta = os.path.join(RAIZ, "target", perfil, nombre)
+        if os.path.exists(ruta):
+            return ruta
+    run(["cargo", "build", "-q", "-p", nombre])
+    return os.path.join(RAIZ, "target", "debug", nombre)
+
+
+def escenario_watchdog():
+    titulo(5, "SIGKILL del agente: el watchdog lo reinicia")
+    wd_bin = bin_release_o_debug("aegis-watchdog")
+    if not os.path.exists(wd_bin):
+        fallo("no se pudo compilar el watchdog")
+        return
+
+    with tempfile.TemporaryDirectory() as d:
+        hb = os.path.join(d, "hb")
+        marker = os.path.join(d, "shutdown")
+        # El watchdog supervisa un agente de mentira (sleep). Margen de latido
+        # enorme: aqui se prueba el reinicio ante MUERTE, no ante cuelgue.
+        wd = subprocess.Popen(
+            [wd_bin, "--program", "/bin/sh", "--arg", "-c", "--arg", "sleep 3600",
+             "--heartbeat", hb, "--marker", marker, "--max-age-ms", "3600000"],
+            cwd=RAIZ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        try:
+            # Se espera a que el watchdog lance a su hijo (el agente).
+            original = None
+            for _ in range(50):
+                hijos = hijos_de(wd.pid)
+                if hijos:
+                    original = hijos[0]
+                    break
+                time.sleep(0.1)
+            if original is None:
+                fallo("el watchdog no llego a lanzar al agente")
+                return
+
+            # El atacante mata al agente con SIGKILL.
+            os.kill(original, 9)
+
+            # El watchdog tiene que arrancar uno NUEVO en pocos segundos.
+            reiniciado = None
+            for _ in range(80):
+                hijos = [h for h in hijos_de(wd.pid) if h != original]
+                if hijos:
+                    reiniciado = hijos[0]
+                    break
+                time.sleep(0.1)
+            if reiniciado:
+                ok(f"el watchdog reinicio al agente (pid {original} -> {reiniciado})")
+            else:
+                fallo("el agente muerto no fue reiniciado por el watchdog")
+        finally:
+            wd.terminate()
+            try:
+                wd.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                wd.kill()
+            # Limpieza de posibles sleeps huerfanos del escenario.
+            for h in hijos_de(1):
+                pass
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
     escenario_inyeccion()
     escenario_senuelo()
     escenario_bytecode()
+    escenario_watchdog()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({4} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({5} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1
