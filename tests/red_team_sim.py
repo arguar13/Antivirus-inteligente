@@ -525,6 +525,31 @@ def escenario_malla():
         fallo(f"el intruso no fue rechazado como se esperaba: {resumen}")
 
 
+# ---------------------------------------------------------------------------
+# 10. Rootkit: proceso oculto detectado por verificacion cruzada (FASE 30)
+# ---------------------------------------------------------------------------
+
+
+def escenario_rootkit():
+    titulo(10, "un proceso oculto a /proc pero vivo en el kernel (verificacion cruzada)")
+
+    binario = ejemplo("aegis-kintegrity", "dkom_probe")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar la sonda de verificacion cruzada")
+        return
+
+    r = run([binario])
+    if r.returncode == 2:
+        # El kernel de esta maquina no ofrece los kfuncs necesarios. No es una
+        # brecha: es una capacidad que la maquina no tiene, y se dice.
+        ok("OMITIDO en esta maquina: " + (r.stderr.strip() or r.stdout.strip()))
+        return
+    if r.returncode == 0 and "DETECTADA" in r.stdout:
+        ok("el proceso escondido de /proc pero vivo en el kernel se detecto")
+    else:
+        fallo(f"la ocultacion no se detecto: {r.stdout.strip()} {r.stderr.strip()}")
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -536,9 +561,10 @@ def main():
     escenario_decepcion()
     escenario_antiforense()
     escenario_malla()
+    escenario_rootkit()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({9} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({10} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1

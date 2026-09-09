@@ -162,6 +162,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-kintegrity"
+version = "0.1.0"
+dependencies = [
+ "aegis-kguard",
+ "aegis-scal",
+ "libbpf-rs",
+ "libbpf-sys",
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-mesh"
 version = "0.1.0"
 dependencies = [

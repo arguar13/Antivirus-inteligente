@@ -37,6 +37,7 @@ struct task_struct {
     struct task_struct *real_parent;
     struct task_struct *group_leader;
     unsigned long long start_boottime;  /* ns desde el arranque, monotono    */
+    char comm[16];                      /* nombre corto, para el informe     */
 } __attribute__((preserve_access_index));
 
 /* Contexto comun de los tracepoints de syscall. */

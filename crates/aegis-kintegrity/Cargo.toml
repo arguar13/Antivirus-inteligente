@@ -1,0 +1,30 @@
+[package]
+name = "aegis-kintegrity"
+description = "Verificacion cruzada de la integridad del kernel: deteccion de rootkits DKOM y procesos ocultos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["bpf"]
+# Carga real de los programas eBPF de verificacion cruzada. Se desactiva para
+# compilar y probar la logica de comparacion en maquinas sin clang, sin BTF o
+# sin privilegios: esa logica es la que decide si un proceso es un rootkit y no
+# debe depender de poder cargar codigo en el kernel.
+bpf = ["dep:libbpf-rs", "dep:libbpf-sys"]
+
+[dependencies]
+aegis-scal = { path = "../aegis-scal" }
+aegis-kguard = { path = "../aegis-kguard" }
+thiserror = "2"
+libc = "0.2"
+libbpf-rs = { version = "0.24", optional = true }
+libbpf-sys = { version = "1", optional = true }
+
+[build-dependencies]
+aegis-kguard = { path = "../aegis-kguard" }
