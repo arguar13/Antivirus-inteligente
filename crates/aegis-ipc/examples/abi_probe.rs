@@ -112,6 +112,23 @@ fn main() {
     p_off!("aegis_syscall_anomaly_t", AegisSyscallAnomaly, "region_type", region_type);
     p_off!("aegis_syscall_anomaly_t", AegisSyscallAnomaly, "flags", flags);
 
+    p_size!("aegis_file_write_t", AegisFileWrite);
+    p_off!("aegis_file_write_t", AegisFileWrite, "bytes", bytes);
+    p_off!("aegis_file_write_t", AegisFileWrite, "file_id", file_id);
+    p_off!("aegis_file_write_t", AegisFileWrite, "pid", pid);
+    p_off!("aegis_file_write_t", AegisFileWrite, "fd", fd);
+    p_off!("aegis_file_write_t", AegisFileWrite, "entropy_q8_8", entropy_q8_8);
+    p_off!("aegis_file_write_t", AegisFileWrite, "distinct_bytes", distinct_bytes);
+    p_off!("aegis_file_write_t", AegisFileWrite, "sample_len", sample_len);
+    p_off!("aegis_file_write_t", AegisFileWrite, "flags", flags);
+    p_off!("aegis_file_write_t", AegisFileWrite, "sample", sample);
+
+    p_size!("aegis_fd_bind_t", AegisFdBind);
+    p_off!("aegis_fd_bind_t", AegisFdBind, "pid", pid);
+    p_off!("aegis_fd_bind_t", AegisFdBind, "fd", fd);
+    p_off!("aegis_fd_bind_t", AegisFdBind, "open_flags", open_flags);
+    p_off!("aegis_fd_bind_t", AegisFdBind, "path", path);
+
     p_size!("aegis_net_conn_t", AegisNetConn);
     p_off!("aegis_net_conn_t", AegisNetConn, "saddr", saddr);
     p_off!("aegis_net_conn_t", AegisNetConn, "daddr", daddr);
@@ -168,4 +185,9 @@ fn main() {
     println!("const AEGIS_NET_F_DROPPED {}", net_flags::DROPPED);
     println!("const AEGIS_NET_F_SCAN_SYN {}", net_flags::SCAN_SYN);
     println!("const AEGIS_NET_F_XDP {}", net_flags::XDP);
+    println!("const AEGIS_EVT_FILE_FD_BIND {}", evt::FILE_FD_BIND);
+    println!("const AEGIS_EVT_FILE_WRITE {}", evt::FILE_WRITE);
+    println!("const AEGIS_EVT_FILE_RENAME {}", evt::FILE_RENAME);
+    println!("const AEGIS_WRITE_F_SAMPLED {}", write_flags::SAMPLED);
+    println!("const AEGIS_WRITE_F_HIGH_ENT {}", write_flags::HIGH_ENTROPY);
 }

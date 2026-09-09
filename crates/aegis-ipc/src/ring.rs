@@ -211,6 +211,16 @@ unsafe impl Payload for crate::abi::AegisSyscallAnomaly {
     const EVENT_TYPES: &'static [u16] = &[evt::SYSCALL_ANOMALY];
 }
 
+// SAFETY: `#[repr(C)]` compuesta de enteros; todo patron de bits es valido.
+unsafe impl Payload for crate::abi::AegisFileWrite {
+    const EVENT_TYPES: &'static [u16] = &[evt::FILE_WRITE];
+}
+
+// SAFETY: `#[repr(C)]` compuesta de enteros; todo patron de bits es valido.
+unsafe impl Payload for crate::abi::AegisFdBind {
+    const EVENT_TYPES: &'static [u16] = &[evt::FILE_FD_BIND];
+}
+
 // SAFETY: `#[repr(C)]` compuesta de enteros sin signo y arrays de u8.
 unsafe impl Payload for crate::abi::AegisNetConn {
     const EVENT_TYPES: &'static [u16] = &[evt::NET_CONNECT, evt::NET_SCAN, evt::NET_BLOCKED];

@@ -23,6 +23,7 @@ name = "aegis-agent"
 version = "0.1.0"
 dependencies = [
  "aegis-ipc",
+ "aegis-ransom",
  "anyhow",
  "dashmap",
  "libbpf-rs",
@@ -61,6 +62,15 @@ dependencies = [
  "aegis-ipc",
  "libbpf-rs",
  "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-ransom"
+version = "0.1.0"
+dependencies = [
+ "aegis-ml",
+ "aegis-resp",
  "thiserror 2.0.20",
 ]
 

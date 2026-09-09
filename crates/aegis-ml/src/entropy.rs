@@ -50,6 +50,118 @@ pub fn shannon(datos: &[u8]) -> f64 {
     h
 }
 
+/// Longitud minima de muestra para la que la entropia normalizada es
+/// significativa.
+///
+/// Por debajo hay tan pocos simbolos que el valor esta dominado por el ruido
+/// del muestreo y no distingue nada.
+pub const MUESTRA_MINIMA: usize = 64;
+
+/// Entropia media que produce una muestra de `n` bytes de datos REALMENTE
+/// aleatorios.
+///
+/// # Por que esto es necesario y no un refinamiento
+///
+/// El maximo teorico de 8,0 bits/byte solo se alcanza con infinitas muestras.
+/// Con `n` bytes solo pueden aparecer `n` valores como mucho, y aunque la
+/// fuente sea perfectamente uniforme la entropia MEDIDA se queda corta. Medido
+/// sobre 400 extracciones de `/dev/urandom` por tamano:
+///
+/// ```text
+///     n      entropia media de datos aleatorios
+///    64      5,77
+///   512      7,59      <-- el tamano de muestra del sondeo de kernel
+///  4096      7,96
+/// 65536      8,00
+/// ```
+///
+/// Es decir: **datos cifrados muestreados a 512 bytes miden 7,59, no 7,9.** Un
+/// umbral absoluto de 7,9 sobre esa muestra no lo cruza nunca ningun dato real,
+/// por aleatorio que sea. Comparar contra esta curva en vez de contra 8,0
+/// convierte la medida en una fraccion de lo maximo alcanzable a ese tamano, y
+/// deja de depender del tamano de la muestra.
+pub fn entropia_maxima_esperada(n: usize) -> f64 {
+    if n <= 1 {
+        return 0.0;
+    }
+    // Tabla medida empiricamente, indexada por log2(n) desde 2^4. Se interpola
+    // linealmente en log2(n), que es donde la curva es suave.
+    const BASE_LOG2: usize = 4;
+    const TABLA: &[f64] = &[
+        3.9448, // 2^4
+        4.8857, // 2^5
+        5.7656, // 2^6
+        6.5516, // 2^7
+        7.1767, // 2^8
+        7.5932, // 2^9
+        7.8088, // 2^10
+        7.9081, // 2^11
+        7.9550, // 2^12
+        7.9774, // 2^13
+        7.9887, // 2^14
+        7.9944, // 2^15
+        7.9972, // 2^16
+    ];
+
+    let l = (n as f64).log2();
+    if l <= BASE_LOG2 as f64 {
+        // Muestras diminutas: el techo es log2(n), porque no puede haber mas
+        // simbolos distintos que bytes. Usarlo tal cual infravalora la
+        // fraccion, que es el lado seguro: se declara "cifrado" de menos.
+        return l;
+    }
+    let ultimo = BASE_LOG2 + TABLA.len() - 1;
+    if l >= ultimo as f64 {
+        return 8.0;
+    }
+    let i = l.floor() as usize - BASE_LOG2;
+    let frac = l - l.floor();
+    TABLA[i] + (TABLA[i + 1] - TABLA[i]) * frac
+}
+
+/// Entropia como fraccion de la maxima alcanzable al tamano de la muestra.
+///
+/// Devuelve un valor en `[0, 1]`, donde 1 es indistinguible de aleatorio. Es la
+/// forma correcta de comparar entropias de buffers de tamanos distintos, y la
+/// unica que funciona sobre las muestras de 512 bytes que entrega el kernel.
+///
+/// Devuelve `None` si la muestra es mas corta que [`MUESTRA_MINIMA`]: con menos
+/// datos el valor no distingue texto de ruido y devolver un numero seria
+/// fingir una medida que no se ha hecho.
+pub fn entropia_normalizada(datos: &[u8]) -> Option<f64> {
+    if datos.len() < MUESTRA_MINIMA {
+        return None;
+    }
+    let maximo = entropia_maxima_esperada(datos.len());
+    if maximo <= 0.0 {
+        return None;
+    }
+    Some((shannon(datos) / maximo).clamp(0.0, 1.0))
+}
+
+/// Fraccion por encima de la cual una muestra se considera cifrada o comprimida.
+///
+/// La peor extraccion aleatoria observada a 512 bytes se queda en 0,987 de la
+/// media, y a 64 bytes en 0,953; 0,95 queda por debajo de ambas. Texto plano a
+/// 512 bytes da 0,51, asi que el margen sobra por el otro lado.
+pub const FRACCION_CIFRADO: f64 = 0.95;
+
+/// Fraccion por encima de la cual una seccion de un binario se considera
+/// empaquetada o cifrada.
+///
+/// Mas laxa que [`FRACCION_CIFRADO`] porque aqui un falso positivo solo aporta
+/// una caracteristica mas al vector, no un veredicto. Equivale al viejo umbral
+/// absoluto de 7,5 bits/byte en una seccion de 4 KB, que es donde estaba
+/// calibrado, pero ahora tambien alcanzable en secciones pequenas.
+pub const FRACCION_EMPAQUETADA: f64 = 0.94;
+
+/// Fraccion por debajo de la cual una muestra se considera contenido
+/// estructurado.
+///
+/// A 512 bytes equivale a 6,45 bits/byte: por encima de texto plano (3,9) y de
+/// un ejecutable sin empaquetar (~6,0), y muy por debajo de datos cifrados.
+pub const FRACCION_ESTRUCTURADA: f64 = 0.85;
+
 /// Entropia en punto fijo Q8.8, la codificacion del ABI.
 ///
 /// `entropia * 256`, de modo que 8,0 bits/byte se codifica como 2048. Se usa

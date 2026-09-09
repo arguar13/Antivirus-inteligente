@@ -17,6 +17,7 @@
 pub mod decode;
 pub mod error;
 pub mod graph;
+pub mod ransom;
 pub mod triage;
 
 #[cfg(all(target_os = "linux", feature = "bpf"))]
@@ -24,6 +25,7 @@ pub mod bpf;
 
 pub use error::{GraphError, TelemetryError};
 pub use graph::{ExecEvent, GraphConfig, ImageClass, ProcKey, ProcessGraph, TaintSet};
+pub use ransom::{RansomAction, RansomStage, RansomStats};
 pub use triage::{
     DiscardReason, Escalation, EscalationReason, TelemetryEvent, Triage, TriageConfig, Verdict,
 };

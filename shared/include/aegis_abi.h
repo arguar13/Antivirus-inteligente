@@ -61,6 +61,7 @@ typedef uint16_t aegis_evt_type_t;
 #define AEGIS_EVT_FILE_WRITE       0x0011u
 #define AEGIS_EVT_FILE_RENAME      0x0012u
 #define AEGIS_EVT_FILE_DELETE      0x0013u
+#define AEGIS_EVT_FILE_FD_BIND     0x0014u /* descriptor -> ruta            */
 #define AEGIS_EVT_REGISTRY_SET     0x0020u
 #define AEGIS_EVT_REGISTRY_DELETE  0x0021u
 #define AEGIS_EVT_REMOTE_ALLOC     0x0030u /* VirtualAllocEx cross-process   */
@@ -230,6 +231,63 @@ typedef struct {
     uint32_t flags;           /* AEGIS_SYS_F_*                               */
 } aegis_syscall_anomaly_t;
 AEGIS_STATIC_ASSERT(sizeof(aegis_syscall_anomaly_t) == 48, "aegis_syscall_anomaly_t == 48");
+
+/* Flags de aegis_file_write_t. */
+#define AEGIS_WRITE_F_SAMPLED   0x0001u /* lleva muestra del buffer adjunta  */
+#define AEGIS_WRITE_F_HIGH_ENT  0x0002u /* el filtro de kernel la marco alta */
+#define AEGIS_WRITE_F_TRUNCATED 0x0004u /* la muestra es parcial             */
+
+/*
+ * Escritura de fichero.
+ *
+ * La entropia EXACTA no se calcula en el kernel: eBPF no dispone de logaritmos
+ * y aproximarlos daria un numero que no es entropia de Shannon y que nadie
+ * podria comparar con el de userland. Lo que si se calcula aqui es el numero de
+ * valores de byte DISTINTOS en una muestra, que es una cota barata y suficiente
+ * para filtrar: un buffer con 250 valores distintos de 512 bytes es casi con
+ * seguridad cifrado o comprimido, y uno con 30 es texto.
+ *
+ * El kernel filtra con esa cota y adjunta la muestra solo cuando merece la
+ * pena; Ring 3 calcula la entropia de Shannon real sobre ella. Es el mismo
+ * reparto que en el resto del producto: el kernel descarta barato, userland
+ * decide con precision.
+ */
+typedef struct {
+    uint64_t    bytes;           /* 0  bytes solicitados en la syscall       */
+    uint64_t    file_id;         /* 8  0 si el descriptor aun no se resolvio */
+    uint32_t    pid;             /* 16 */
+    int32_t     fd;              /* 20 */
+    uint16_t    entropy_q8_8;    /* 24 estimacion del kernel, 0 si no aplica */
+    uint16_t    distinct_bytes;  /* 26 valores distintos en la muestra       */
+    uint16_t    sample_len;      /* 28 bytes de muestra tomados              */
+    uint16_t    flags;           /* 30 AEGIS_WRITE_F_*                       */
+    aegis_str_t sample;          /* 32 referencia a la muestra adjunta       */
+    uint32_t    reserved0;       /* 36 */
+    uint64_t    reserved1;       /* 40 */
+    uint64_t    reserved2;       /* 48 */
+    uint64_t    reserved3;       /* 56 */
+} aegis_file_write_t;
+AEGIS_STATIC_ASSERT(sizeof(aegis_file_write_t) == 64, "aegis_file_write_t == 64");
+
+/*
+ * Asociacion entre un descriptor y la ruta que abrio.
+ *
+ * Se emite al SALIR de openat, que es cuando existe el descriptor. Sin esta
+ * asociacion, un evento de escritura solo lleva un numero de descriptor y no
+ * hay forma de saber que fichero se esta modificando: resolver la ruta dentro
+ * del kernel exigiria recorrer la tabla de descriptores y la cadena de dentries
+ * a mano, que es fragil entre versiones y multiplica el codigo privilegiado.
+ */
+typedef struct {
+    uint32_t    pid;             /* 0  */
+    int32_t     fd;              /* 4  */
+    uint32_t    open_flags;      /* 8  */
+    uint32_t    reserved0;       /* 12 */
+    aegis_str_t path;            /* 16 */
+    uint32_t    reserved1;       /* 20 */
+    uint64_t    reserved2;       /* 24 */
+} aegis_fd_bind_t;
+AEGIS_STATIC_ASSERT(sizeof(aegis_fd_bind_t) == 32, "aegis_fd_bind_t == 32");
 
 /*
  * Conexion de red. En Linux lo alimenta el tracepoint sock/inet_sock_set_state,

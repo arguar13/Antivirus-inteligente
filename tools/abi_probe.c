@@ -93,6 +93,23 @@ int main(void)
     P_OFF(aegis_syscall_anomaly_t, region_type);
     P_OFF(aegis_syscall_anomaly_t, flags);
 
+    P_SIZE(aegis_file_write_t);
+    P_OFF(aegis_file_write_t, bytes);
+    P_OFF(aegis_file_write_t, file_id);
+    P_OFF(aegis_file_write_t, pid);
+    P_OFF(aegis_file_write_t, fd);
+    P_OFF(aegis_file_write_t, entropy_q8_8);
+    P_OFF(aegis_file_write_t, distinct_bytes);
+    P_OFF(aegis_file_write_t, sample_len);
+    P_OFF(aegis_file_write_t, flags);
+    P_OFF(aegis_file_write_t, sample);
+
+    P_SIZE(aegis_fd_bind_t);
+    P_OFF(aegis_fd_bind_t, pid);
+    P_OFF(aegis_fd_bind_t, fd);
+    P_OFF(aegis_fd_bind_t, open_flags);
+    P_OFF(aegis_fd_bind_t, path);
+
     P_SIZE(aegis_net_conn_t);
     P_OFF(aegis_net_conn_t, saddr);
     P_OFF(aegis_net_conn_t, daddr);
@@ -150,5 +167,10 @@ int main(void)
     printf("const AEGIS_NET_F_DROPPED %u\n", AEGIS_NET_F_DROPPED);
     printf("const AEGIS_NET_F_SCAN_SYN %u\n", AEGIS_NET_F_SCAN_SYN);
     printf("const AEGIS_NET_F_XDP %u\n", AEGIS_NET_F_XDP);
+    printf("const AEGIS_EVT_FILE_FD_BIND %u\n", AEGIS_EVT_FILE_FD_BIND);
+    printf("const AEGIS_EVT_FILE_WRITE %u\n", AEGIS_EVT_FILE_WRITE);
+    printf("const AEGIS_EVT_FILE_RENAME %u\n", AEGIS_EVT_FILE_RENAME);
+    printf("const AEGIS_WRITE_F_SAMPLED %u\n", AEGIS_WRITE_F_SAMPLED);
+    printf("const AEGIS_WRITE_F_HIGH_ENT %u\n", AEGIS_WRITE_F_HIGH_ENT);
     return 0;
 }

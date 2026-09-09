@@ -6,7 +6,10 @@
 
 use std::sync::Arc;
 
-use aegis_ipc::abi::{AegisFileOp, AegisNetConn, AegisProcCreate, AegisRemoteMem, AegisStr};
+use aegis_ipc::abi::{
+    AegisFdBind, AegisFileOp, AegisFileWrite, AegisNetConn, AegisProcCreate, AegisRemoteMem,
+    AegisStr,
+};
 use aegis_ipc::{abi, EventView};
 
 use crate::error::TelemetryError;
@@ -60,7 +63,7 @@ pub fn decode(bytes: &[u8]) -> Result<Option<TelemetryEvent>, TelemetryError> {
             }
         }
 
-        abi::evt::FILE_PRE_CREATE | abi::evt::FILE_WRITE => {
+        abi::evt::FILE_PRE_CREATE => {
             let f: AegisFileOp = ev.payload().ok_or(TelemetryError::MalformedRecord(
                 "payload de fichero truncado",
             ))?;
@@ -69,6 +72,63 @@ pub fn decode(bytes: &[u8]) -> Result<Option<TelemetryEvent>, TelemetryError> {
                 pid: f.pid,
                 path: cadena(&ev, f.path),
                 flags: f.desired_access,
+                ts_ns,
+            }
+        }
+
+        // FILE_RENAME comparte el registro de FILE_PRE_CREATE porque un
+        // renombrado es una operacion de fichero con dos rutas, que es
+        // exactamente lo que `aegis_file_op_t` modela con `path` y `new_path`.
+        abi::evt::FILE_RENAME => {
+            let f: AegisFileOp = ev.payload().ok_or(TelemetryError::MalformedRecord(
+                "payload de renombrado truncado",
+            ))?;
+            TelemetryEvent::FileRename {
+                actor,
+                pid: f.pid,
+                from: cadena(&ev, f.path),
+                to: cadena(&ev, f.new_path),
+                ts_ns,
+            }
+        }
+
+        abi::evt::FILE_WRITE => {
+            let w: AegisFileWrite = ev.payload().ok_or(TelemetryError::MalformedRecord(
+                "payload de escritura truncado",
+            ))?;
+            // La muestra solo es valida si el kernel la marco como tomada. Sin
+            // esta comprobacion, una escritura no muestreada entregaria el
+            // contenido residual del registro como si fuese el buffer del
+            // proceso, y la entropia se calcularia sobre basura.
+            let sample: Arc<[u8]> = if w.flags & abi::write_flags::SAMPLED != 0 {
+                match ev.resolve(w.sample) {
+                    Some(b) => Arc::from(b),
+                    None => Arc::from(&[][..]),
+                }
+            } else {
+                Arc::from(&[][..])
+            };
+            TelemetryEvent::FileWriteSample {
+                actor,
+                pid: w.pid,
+                fd: w.fd,
+                bytes: w.bytes,
+                sample,
+                distinct_bytes: w.distinct_bytes,
+                ts_ns,
+            }
+        }
+
+        abi::evt::FILE_FD_BIND => {
+            let b: AegisFdBind = ev.payload().ok_or(TelemetryError::MalformedRecord(
+                "payload de asociacion de descriptor truncado",
+            ))?;
+            TelemetryEvent::FdBind {
+                actor,
+                pid: b.pid,
+                fd: b.fd,
+                path: cadena(&ev, b.path),
+                open_flags: b.open_flags,
                 ts_ns,
             }
         }

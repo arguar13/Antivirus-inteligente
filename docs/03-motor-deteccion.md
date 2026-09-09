@@ -328,3 +328,72 @@ Un motor conductual sin gestión de falsos positivos es un generador de ruido:
   comodín de directorio: `C:\temp\*` es la exclusión que el atacante busca.
 
 → Siguiente: [Módulo 4 — Respuesta y aislamiento](04-respuesta.md)
+
+---
+
+## Anexo: el umbral de entropía que no se podía cruzar
+
+`crates/aegis-ransom` nació comparando la entropía de la muestra de escritura
+contra **7,9 bits/byte absolutos**. Es el número que aparece en toda la
+literatura para "datos cifrados o comprimidos", y es correcto — sobre ficheros
+completos.
+
+La sonda de kernel no entrega ficheros completos. Entrega **512 bytes** del
+principio del búfer que el proceso acaba de pasar a `write`, porque copiar más
+en el camino caliente de cada escritura del sistema no es aceptable y porque
+`bpf_ringbuf_reserve` exige un tamaño constante.
+
+Y con 512 muestras sobre 256 símbolos, la entropía **medida** de datos
+perfectamente aleatorios no llega a 8,0. Ni se acerca:
+
+| Tamaño de muestra | Entropía media de `/dev/urandom` | Mínimo observado |
+|---|---|---|
+| 64 B | 5,77 | 5,50 |
+| 512 B | **7,59** | **7,47** |
+| 4 KB | 7,96 | 7,94 |
+| 64 KB | 8,00 | 8,00 |
+
+*(400 extracciones por tamaño.)*
+
+El umbral de 7,9 sobre una muestra de 512 bytes **no lo cruza ningún dato real,
+por aleatorio que sea**. Las dos señales que dependían de él —
+`HighEntropyBurst` y, sobre todo, `EntropyTransition` — estaban muertas: el
+motor habría corrido en producción reportando sólo velocidad y dispersión, que
+por sí solas no llegan al umbral de confirmación.
+
+Lo que hace especialmente incómodo el fallo es que **ninguna prueba que inyecte
+valores de entropía a mano lo detecta**. Un test que llama
+`on_write(actor, pid, ruta, 7.95, ...)` pasa perfectamente y no prueba nada: el
+7,95 es una ficción que el sistema real nunca produce.
+
+### La corrección
+
+`aegis_ml::entropy::entropia_maxima_esperada(n)` devuelve la entropía que de
+hecho producen datos aleatorios a ese tamaño de muestra, interpolando la tabla
+medida arriba. La comparación pasa a ser una **fracción**:
+
+```text
+fracción = H_medida / H_máxima_esperada(n)
+```
+
+- `FRACCION_CIFRADO = 0,95` — por debajo de la peor extracción aleatoria
+  observada a cualquier tamaño desde 64 B.
+- `FRACCION_ESTRUCTURADA = 0,85` — a 512 B equivale a 6,45 bits/byte, por
+  encima de un ejecutable sin empaquetar (~6,0) y muy por debajo de datos
+  cifrados.
+
+A 512 bytes, texto plano da 0,51 y datos cifrados 0,98–1,00. El margen es
+enorme, que es como tiene que ser un umbral: no algo que haya que ajustar con
+decimales, sino una separación que no dependa de la calibración fina.
+
+La misma corrección se aplicó al atributo de "sección empaquetada" de
+`aegis-ml`: una sección de menos de 1 KB no podía superar 7,5 bits/byte aunque
+fuese ruido puro, y por tanto se clasificaba como limpia por construcción.
+
+### Muestras que no se juzgan
+
+Una escritura por debajo del mínimo de muestreo llega **sin** muestra. Anotarla
+como entropía cero fabricaría una fase estructurada que nunca se observó, y con
+ella una transición falsa en cuanto el proceso escribiese algo comprimido. Por
+eso `WriteObservation::entropy_ratio` es `Option<f64>`: cuenta para velocidad y
+dispersión, y no toca el historial de entropía.

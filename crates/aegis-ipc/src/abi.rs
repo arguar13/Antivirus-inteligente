@@ -38,6 +38,8 @@ pub mod evt {
     pub const FILE_RENAME: u16 = 0x0012;
     /// Borrado de fichero.
     pub const FILE_DELETE: u16 = 0x0013;
+    /// Asociacion entre un descriptor y la ruta que abrio.
+    pub const FILE_FD_BIND: u16 = 0x0014;
     /// Escritura de valor de registro.
     pub const REGISTRY_SET: u16 = 0x0020;
     /// Borrado de clave/valor de registro.
@@ -294,6 +296,79 @@ pub struct AegisFileOp {
     pub reserved1: u64,
 }
 
+/// Flags de [`AegisFileWrite`].
+pub mod write_flags {
+    /// El registro lleva una muestra del buffer adjunta.
+    pub const SAMPLED: u16 = 0x0001;
+    /// El filtro del kernel la marco como de alta entropia.
+    pub const HIGH_ENTROPY: u16 = 0x0002;
+    /// La muestra es parcial.
+    pub const TRUNCATED: u16 = 0x0004;
+}
+
+/// Escritura de fichero.
+///
+/// La entropia exacta NO se calcula en el kernel: eBPF no tiene logaritmos, y
+/// aproximarlos daria un numero que no es entropia de Shannon y que nadie
+/// podria comparar con el de userland. El kernel cuenta valores de byte
+/// distintos, que es una cota barata y suficiente para filtrar, y adjunta una
+/// muestra; Ring 3 calcula la entropia real sobre ella.
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct AegisFileWrite {
+    /// Bytes solicitados en la syscall.
+    pub bytes: u64,
+    /// Identificador de fichero, 0 si el descriptor aun no se resolvio.
+    pub file_id: u64,
+    /// PID.
+    pub pid: u32,
+    /// Descriptor.
+    pub fd: i32,
+    /// Estimacion del kernel en Q8.8, 0 si no aplica.
+    pub entropy_q8_8: u16,
+    /// Valores de byte distintos en la muestra.
+    pub distinct_bytes: u16,
+    /// Bytes de muestra tomados.
+    pub sample_len: u16,
+    /// Combinacion de [`write_flags`].
+    pub flags: u16,
+    /// Referencia a la muestra adjunta.
+    pub sample: AegisStr,
+    /// Reservado.
+    pub reserved0: u32,
+    /// Reservado.
+    pub reserved1: u64,
+    /// Reservado.
+    pub reserved2: u64,
+    /// Reservado.
+    pub reserved3: u64,
+}
+
+/// Asociacion entre un descriptor y la ruta que abrio.
+///
+/// Se emite al salir de `openat`, que es cuando el descriptor existe. Sin ella,
+/// un evento de escritura solo lleva un numero y no hay forma de saber que
+/// fichero se modifica: resolver la ruta en el kernel exigiria recorrer la
+/// tabla de descriptores y la cadena de dentries a mano.
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct AegisFdBind {
+    /// PID.
+    pub pid: u32,
+    /// Descriptor devuelto.
+    pub fd: i32,
+    /// Banderas de apertura.
+    pub open_flags: u32,
+    /// Reservado.
+    pub reserved0: u32,
+    /// Ruta abierta.
+    pub path: AegisStr,
+    /// Reservado.
+    pub reserved1: u32,
+    /// Reservado.
+    pub reserved2: u64,
+}
+
 /// Payload de manipulacion de memoria en un proceso remoto.
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -461,6 +536,12 @@ const _: () = {
 
     assert!(size_of::<AegisRemoteMem>() == 48);
     assert!(size_of::<AegisSyscallAnomaly>() == 48);
+    assert!(size_of::<AegisFileWrite>() == 64);
+    assert!(offset_of!(AegisFileWrite, entropy_q8_8) == 24);
+    assert!(offset_of!(AegisFileWrite, sample) == 32);
+    assert!(size_of::<AegisFdBind>() == 32);
+    assert!(offset_of!(AegisFdBind, path) == 16);
+
     assert!(size_of::<AegisNetConn>() == 64);
     assert!(offset_of!(AegisNetConn, pid) == 32);
     assert!(offset_of!(AegisNetConn, flags) == 48);

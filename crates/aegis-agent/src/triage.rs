@@ -83,6 +83,56 @@ pub enum TelemetryEvent {
         /// Instante del evento.
         ts_ns: u64,
     },
+    /// Escritura con muestra del buffer, del sondeo de `sys_enter_write`.
+    ///
+    /// Llega con descriptor y sin ruta: el kernel no puede resolver un `fd` a
+    /// una ruta en el camino caliente sin recorrer estructuras que el
+    /// verificador no permite recorrer. La ruta la aporta el evento
+    /// [`TelemetryEvent::FdBind`] emitido al salir de `openat`.
+    FileWriteSample {
+        /// Actor.
+        actor: ProcKey,
+        /// PID.
+        pid: u32,
+        /// Descriptor sobre el que se escribio.
+        fd: i32,
+        /// Bytes que el proceso pidio escribir.
+        bytes: u64,
+        /// Muestra del principio del buffer, vacia si el kernel no muestreo.
+        sample: Arc<[u8]>,
+        /// Valores de byte distintos en la muestra, contados en el kernel.
+        distinct_bytes: u16,
+        /// Instante del evento.
+        ts_ns: u64,
+    },
+    /// Asociacion descriptor -> ruta, del sondeo de salida de `openat`.
+    FdBind {
+        /// Actor.
+        actor: ProcKey,
+        /// PID.
+        pid: u32,
+        /// Descriptor devuelto.
+        fd: i32,
+        /// Ruta abierta.
+        path: Arc<str>,
+        /// Banderas de apertura.
+        open_flags: u32,
+        /// Instante del evento.
+        ts_ns: u64,
+    },
+    /// Renombrado de un fichero.
+    FileRename {
+        /// Actor.
+        actor: ProcKey,
+        /// PID.
+        pid: u32,
+        /// Ruta de origen.
+        from: Arc<str>,
+        /// Ruta de destino.
+        to: Arc<str>,
+        /// Instante del evento.
+        ts_ns: u64,
+    },
     /// Establecimiento de conexion TCP.
     NetConnect {
         /// Actor.
@@ -110,6 +160,9 @@ impl TelemetryEvent {
         match self {
             TelemetryEvent::Exec { actor, .. }
             | TelemetryEvent::FileWrite { actor, .. }
+            | TelemetryEvent::FileWriteSample { actor, .. }
+            | TelemetryEvent::FdBind { actor, .. }
+            | TelemetryEvent::FileRename { actor, .. }
             | TelemetryEvent::Ptrace { actor, .. }
             | TelemetryEvent::Exit { actor, .. }
             | TelemetryEvent::NetConnect { actor, .. } => *actor,
@@ -121,6 +174,9 @@ impl TelemetryEvent {
         match self {
             TelemetryEvent::Exec { ts_ns, .. }
             | TelemetryEvent::FileWrite { ts_ns, .. }
+            | TelemetryEvent::FileWriteSample { ts_ns, .. }
+            | TelemetryEvent::FdBind { ts_ns, .. }
+            | TelemetryEvent::FileRename { ts_ns, .. }
             | TelemetryEvent::Ptrace { ts_ns, .. }
             | TelemetryEvent::Exit { ts_ns, .. }
             | TelemetryEvent::NetConnect { ts_ns, .. } => *ts_ns,
@@ -400,6 +456,17 @@ impl Triage {
             TelemetryEvent::FileWrite { .. } => self.classify_file(graph, ev),
             TelemetryEvent::Exec { .. } => self.classify_exec(graph, ev),
             TelemetryEvent::NetConnect { .. } => self.classify_net(graph, ev),
+            // El renombrado se clasifica por la ruta de destino: mover un
+            // binario a `/usr/bin` importa tanto como escribirlo ahi.
+            TelemetryEvent::FileRename { .. } => self.classify_file(graph, ev),
+            // Estos dos no pasan por el triaje conductual: van al motor
+            // anti-ransomware, que tiene sus propias senales y su propio
+            // presupuesto. Contarlos aqui ademas inflaria la puntuacion de
+            // cualquier proceso que escriba mucho, que es casi cualquier
+            // proceso.
+            TelemetryEvent::FileWriteSample { .. } | TelemetryEvent::FdBind { .. } => {
+                Verdict::Record
+            }
         }
     }
 
@@ -528,8 +595,14 @@ impl Triage {
     }
 
     fn classify_file(&self, graph: &ProcessGraph, ev: &TelemetryEvent) -> Verdict {
-        let TelemetryEvent::FileWrite { actor, path, .. } = ev else {
-            unreachable!("classify_file solo recibe eventos FileWrite")
+        // El renombrado se juzga por su DESTINO: mover un binario a
+        // `/usr/bin/` tiene el mismo efecto que escribirlo ahi, y un atacante
+        // que prepara el fichero en `/tmp` y lo mueve despues esquivaria un
+        // triaje que solo mirase el origen.
+        let (actor, path) = match ev {
+            TelemetryEvent::FileWrite { actor, path, .. } => (actor, path),
+            TelemetryEvent::FileRename { actor, to, .. } => (actor, to),
+            _ => unreachable!("classify_file solo recibe eventos de fichero"),
         };
 
         let taints = graph.taints(*actor);

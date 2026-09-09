@@ -162,6 +162,7 @@ crates/
   aegis-resp/                 Terminación, cuarentena AES-256-GCM, aislamiento [hecho]
   aegis-scan/                 YARA-X sobre ficheros y memoria de procesos    [hecho]
   aegis-ml/                   Atributos estáticos PE/ELF + inferencia ONNX   [hecho]
+  aegis-ransom/               Velocidad, transición de entropía, señuelos    [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)

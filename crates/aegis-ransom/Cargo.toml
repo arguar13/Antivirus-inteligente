@@ -1,0 +1,16 @@
+[package]
+name = "aegis-ransom"
+description = "Motor de deteccion y contencion de ransomware en tiempo real"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+aegis-resp = { path = "../aegis-resp" }
+aegis-ml = { path = "../aegis-ml" }

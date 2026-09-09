@@ -118,6 +118,20 @@ struct trace_event_raw_inet_sock_set_state {
 #define AEGIS_BPF_EVT_SMALL  128u
 #define AEGIS_BPF_EVT_TINY    64u   /* solo cabecera */
 
+/* Registro de escritura con muestra del buffer adjunta.
+ *
+ *     0..64    cabecera
+ *    64..128   aegis_file_write_t
+ *   128..640   muestra del buffer
+ *
+ * La muestra son 512 bytes y no menos porque la entropia de Shannon sobre n
+ * simbolos esta acotada por log2(n): con 128 bytes el maximo alcanzable seria
+ * 7,0 bits/byte y el umbral de 7,9 que define "cifrado" nunca se cruzaria.
+ * Con 512 el techo es 8,0 y el umbral es alcanzable. */
+#define AEGIS_BPF_EVT_WSAMPLE 640u
+#define AEGIS_BPF_WSAMPLE_OFF 128u
+#define AEGIS_BPF_WSAMPLE_MAX 512u
+
 #define AEGIS_BPF_PAYLOAD_OFF 64u
 #define AEGIS_BPF_STR1_OFF   128u
 #define AEGIS_BPF_STR1_MAX   256u
@@ -132,6 +146,8 @@ struct trace_event_raw_inet_sock_set_state {
 #define AEGIS_CFG_TRACE_FILES    0x00000002u
 #define AEGIS_CFG_TRACE_NET      0x00000004u
 #define AEGIS_CFG_TRACE_PTRACE   0x00000008u
+#define AEGIS_CFG_TRACE_WRITES   0x00000010u
+#define AEGIS_CFG_TRACE_RENAME   0x00000020u
 
 struct aegis_bpf_config {
     /* PID del agente. Sus propios eventos no se emiten: si el agente escribe
@@ -140,9 +156,18 @@ struct aegis_bpf_config {
     __u32 agent_pid;
     __u32 flags;
     /* Ruido de fondo: por debajo de este umbral de bytes no se emiten
-     * escrituras. 0 = emitir todas. */
+     * escrituras, salvo que la muestra parezca cifrada. 0 = emitir todas.
+     *
+     * Sin este filtro, cada linea que un proceso escribe en su registro genera
+     * un evento, y el ruido de un servidor normal ahoga el ring. */
     __u32 min_write_bytes;
-    __u32 reserved;
+    /* Valores de byte distintos, sobre la muestra, a partir de los cuales el
+     * buffer se considera candidato a cifrado.
+     *
+     * Sobre 512 bytes, texto plano da 60-90 valores distintos y datos cifrados
+     * 230-256. Un umbral de 200 separa ambos con holgura sin necesitar
+     * logaritmos, que en eBPF no existen. */
+    __u32 write_distinct_threshold;
 };
 
 enum aegis_stat {
@@ -166,6 +191,18 @@ enum aegis_stat {
 
 struct aegis_scratch {
     char buf[AEGIS_SCRATCH_LEN];
+};
+
+/* Buffer por CPU para muestrear escrituras.
+ *
+ * Separado del scratch de la linea de comandos a proposito: aunque dos
+ * tracepoints no se solapan en la misma CPU en la practica, compartir el buffer
+ * crearia una dependencia invisible entre dos sondas que no tienen nada que ver
+ * la una con la otra. */
+struct aegis_wsample {
+    char buf[AEGIS_BPF_WSAMPLE_MAX];
+    /* Mapa de bits de 256 posiciones: un bit por valor de byte visto. */
+    __u64 seen[4];
 };
 
 /* ------------------------------------------------------------------------

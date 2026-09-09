@@ -853,10 +853,17 @@ pub fn to_vector(f: &BinaryFeatures) -> Vec<f32> {
         v[s + 2] = (maximo / 8.0) as f32;
         v[s + 3] = (minimo / 8.0) as f32;
         v[s + 4] = (var.sqrt() / 4.0).min(1.0) as f32;
+        // Se compara contra la entropia maxima ALCANZABLE al tamano de cada
+        // seccion, no contra un absoluto. Una seccion empaquetada de 512 bytes
+        // mide como mucho ~7,59 aunque sea ruido puro, asi que un umbral
+        // absoluto de 7,5 la declara limpia por construccion.
         v[s + 5] = (f
             .sections
             .iter()
-            .filter(|x| x.entropy > entropy::HIGH_ENTROPY)
+            .filter(|x| {
+                let tam = x.raw_size.max(1) as usize;
+                x.entropy / entropy::entropia_maxima_esperada(tam) > entropy::FRACCION_EMPAQUETADA
+            })
             .count() as f64
             / n) as f32;
         v[s + 6] = (f.sections.iter().filter(|x| x.is_wx()).count() as f64 / n) as f32;

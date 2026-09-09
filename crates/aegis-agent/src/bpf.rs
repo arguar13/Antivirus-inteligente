@@ -33,10 +33,14 @@ const TRACEFS: &str = "/sys/kernel/tracing";
 /// La lista se comprueba ANTES de intentar el enganche. Sin esta comprobacion,
 /// un kernel sin `CONFIG_FTRACE_SYSCALLS` o un contenedor sin tracefs montado
 /// producen un `-ENOENT` de libbpf que no dice que falta ni como arreglarlo.
-const TRACEPOINTS_REQUERIDOS: [&str; 5] = [
+const TRACEPOINTS_REQUERIDOS: [&str; 9] = [
     "syscalls/sys_enter_execve",
     "syscalls/sys_enter_openat",
+    "syscalls/sys_exit_openat",
     "syscalls/sys_enter_ptrace",
+    "syscalls/sys_enter_write",
+    "syscalls/sys_enter_rename",
+    "syscalls/sys_enter_renameat2",
     "sched/sched_process_exit",
     "sock/inet_sock_set_state",
 ];
@@ -73,7 +77,7 @@ struct BpfConfigRaw {
     agent_pid: u32,
     flags: u32,
     min_write_bytes: u32,
-    reserved: u32,
+    write_distinct_threshold: u32,
 }
 
 /// Banderas de configuracion, espejo de `AEGIS_CFG_*`.
@@ -86,6 +90,10 @@ pub mod cfg_flags {
     pub const TRACE_NET: u32 = 0x0000_0004;
     /// Habilita la sonda de ptrace.
     pub const TRACE_PTRACE: u32 = 0x0000_0008;
+    /// Habilita la sonda de escrituras, base de la deteccion de ransomware.
+    pub const TRACE_WRITES: u32 = 0x0000_0010;
+    /// Habilita la sonda de renombrados.
+    pub const TRACE_RENAME: u32 = 0x0000_0020;
 }
 
 /// Indices del mapa de estadisticas, espejo de `enum aegis_stat`.
@@ -111,6 +119,18 @@ pub struct SourceConfig {
     pub flags: u32,
     /// Tiempo maximo de espera en cada sondeo del ring buffer.
     pub poll_timeout: Duration,
+    /// Tamano minimo de escritura que se emite, salvo alta entropia.
+    ///
+    /// Sin este filtro, cada linea que un proceso escribe en su registro genera
+    /// un evento y el ruido de un servidor normal ahoga el ring.
+    pub min_write_bytes: u32,
+    /// Valores de byte distintos, sobre la muestra de 512 bytes, a partir de
+    /// los cuales el kernel considera el buffer candidato a cifrado.
+    ///
+    /// Texto plano da 60-90 valores distintos; datos cifrados, 230-256. El
+    /// umbral separa ambos con holgura sin necesitar logaritmos, que en eBPF no
+    /// existen: la entropia exacta se calcula despues en Ring 3.
+    pub write_distinct_threshold: u32,
 }
 
 impl Default for SourceConfig {
@@ -120,11 +140,15 @@ impl Default for SourceConfig {
             flags: cfg_flags::ENABLED
                 | cfg_flags::TRACE_FILES
                 | cfg_flags::TRACE_NET
-                | cfg_flags::TRACE_PTRACE,
+                | cfg_flags::TRACE_PTRACE
+                | cfg_flags::TRACE_WRITES
+                | cfg_flags::TRACE_RENAME,
             // 200 ms acota lo que tarda el agente en atender un apagado o la
             // rotacion de reglas cuando no hay trafico, sin gastar CPU en
             // espera activa.
             poll_timeout: Duration::from_millis(200),
+            min_write_bytes: 4096,
+            write_distinct_threshold: 200,
         }
     }
 }
@@ -207,8 +231,8 @@ where
     let raw = BpfConfigRaw {
         agent_pid: config.agent_pid,
         flags: config.flags,
-        min_write_bytes: 0,
-        reserved: 0,
+        min_write_bytes: config.min_write_bytes,
+        write_distinct_threshold: config.write_distinct_threshold,
     };
     // SAFETY: `BpfConfigRaw` es `#[repr(C)]` y solo contiene enteros sin signo,
     // asi que su representacion en memoria es exactamente los bytes que espera

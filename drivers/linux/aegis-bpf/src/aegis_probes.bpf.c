@@ -74,6 +74,27 @@ struct {
     __type(value, struct aegis_scratch);
 } aegis_scratch_map SEC(".maps");
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct aegis_wsample);
+} aegis_wsample_map SEC(".maps");
+
+/* Puntero a la ruta que openat esta abriendo, por hilo.
+ *
+ * Se guarda al ENTRAR y se lee al SALIR, que es cuando existe el descriptor.
+ * Solo se almacena el PUNTERO (8 bytes), no la cadena: copiarla dos veces
+ * duplicaria el coste de cada openat del sistema, y en la salida seguimos en el
+ * mismo contexto de tarea, con el mismo espacio de direcciones, asi que la
+ * cadena sigue siendo legible. */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 10240);
+    __type(key, __u64);   /* pid_tgid */
+    __type(value, __u64); /* puntero de usuario al nombre */
+} aegis_open_pending SEC(".maps");
+
 /* ------------------------------------------------------------------------
  * Utilidades
  * ------------------------------------------------------------------------ */
@@ -229,6 +250,20 @@ static __always_inline int aegis_should_emit(__u32 trace_flag, __u32 *out_tgid)
     return 1;
 }
 
+/* Recuento de bits a uno por el metodo SWAR.
+ *
+ * eBPF no tiene instruccion de popcount ni la expone como helper, y un bucle
+ * bit a bit sobre 256 posiciones multiplicaria por cuatro el coste de cada
+ * escritura. Esta variante lo hace en doce operaciones aritmeticas por palabra.
+ */
+static __always_inline __u32 aegis_popcount64(__u64 x)
+{
+    x = x - ((x >> 1) & 0x5555555555555555ULL);
+    x = (x & 0x3333333333333333ULL) + ((x >> 2) & 0x3333333333333333ULL);
+    x = (x + (x >> 4)) & 0x0f0f0f0f0f0f0f0fULL;
+    return (__u32)((x * 0x0101010101010101ULL) >> 56);
+}
+
 /* ------------------------------------------------------------------------
  * Sonda: ejecucion de proceso
  *
@@ -355,6 +390,15 @@ int aegis_tp_openat(struct trace_event_raw_sys_enter *ctx)
         return 0;
 
     __u32 flags = (__u32)ctx->args[2];
+
+    /* El puntero al nombre se guarda SIEMPRE, tambien para aperturas de solo
+     * lectura: la asociacion descriptor-ruta hace falta para poder atribuir
+     * escrituras posteriores, y un fichero abierto para lectura puede
+     * reabrirse para escritura mas tarde con el mismo descriptor heredado. */
+    __u64 clave = bpf_get_current_pid_tgid();
+    __u64 nombre = (__u64)ctx->args[1];
+    bpf_map_update_elem(&aegis_open_pending, &clave, &nombre, BPF_ANY);
+
     if (!(flags & AEGIS_O_WRITE_INTENT)) {
         aegis_stat_inc(AEGIS_STAT_FILTERED);
         return 0;
@@ -566,6 +610,269 @@ int aegis_tp_sock_state(struct trace_event_raw_inet_sock_set_state *ctx)
                  (a == 172 && (b & 0xF0) == 16))
             n->flags |= AEGIS_NET_F_PRIVATE_DST;
     }
+
+    aegis_evt_commit(rec);
+    return 0;
+}
+
+/* ------------------------------------------------------------------------
+ * Sonda: salida de openat
+ *
+ * Emite la asociacion entre el descriptor devuelto y la ruta que se abrio. Sin
+ * ella, un evento de escritura solo lleva un numero de descriptor: resolver la
+ * ruta dentro del kernel exigiria recorrer la tabla de descriptores y la cadena
+ * de dentries a mano, que es fragil entre versiones del kernel y multiplica el
+ * codigo que corre con privilegios.
+ * ------------------------------------------------------------------------ */
+
+/* Contexto de los tracepoints de salida de syscall. */
+struct trace_event_raw_sys_exit {
+    unsigned long long unused;
+    long int id;
+    long int ret;
+} __attribute__((preserve_access_index));
+
+SEC("tracepoint/syscalls/sys_exit_openat")
+int aegis_tp_openat_exit(struct trace_event_raw_sys_exit *ctx)
+{
+    __u64 clave = bpf_get_current_pid_tgid();
+    __u64 *guardado = bpf_map_lookup_elem(&aegis_open_pending, &clave);
+    if (!guardado)
+        return 0;
+    __u64 ptr = *guardado;
+    bpf_map_delete_elem(&aegis_open_pending, &clave);
+
+    long ret = ctx->ret;
+    /* Una apertura fallida no crea descriptor: no hay nada que asociar. */
+    if (ret < 0)
+        return 0;
+
+    __u32 tgid = 0;
+    if (!aegis_should_emit(AEGIS_CFG_TRACE_FILES, &tgid))
+        return 0;
+
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u64 actor = aegis_task_key(task);
+
+    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_FD_BIND, AEGIS_BPF_EVT_LARGE,
+                                actor, 0, 0);
+    if (!rec)
+        return 0;
+
+    aegis_fd_bind_t *b = (aegis_fd_bind_t *)((char *)rec + AEGIS_BPF_PAYLOAD_OFF);
+    b->pid = tgid;
+    b->fd = (__s32)ret;
+    b->open_flags = 0;
+    b->reserved0 = 0;
+    b->reserved1 = 0;
+    b->reserved2 = 0;
+    b->path = aegis_put_str(rec, AEGIS_BPF_STR1_OFF, AEGIS_BPF_STR1_MAX,
+                            (const void *)ptr);
+
+    aegis_evt_commit(rec);
+    return 0;
+}
+
+/* ------------------------------------------------------------------------
+ * Sonda: escritura de fichero
+ *
+ * Es la sonda mas cara del conjunto y la que sostiene la deteccion de
+ * ransomware, asi que su filtrado importa mas que el de ninguna otra: un
+ * servidor normal hace decenas de miles de escrituras por segundo, casi todas
+ * lineas de registro de pocos bytes.
+ *
+ * El filtro tiene dos ramas:
+ *   - Escrituras grandes (>= min_write_bytes): interesan por volumen.
+ *   - Escrituras cuya muestra tiene muchos valores de byte distintos:
+ *     interesan aunque sean pequenas, porque parecen cifradas.
+ * Lo que no cae en ninguna de las dos no se emite.
+ * ------------------------------------------------------------------------ */
+SEC("tracepoint/syscalls/sys_enter_write")
+int aegis_tp_write(struct trace_event_raw_sys_enter *ctx)
+{
+    __u32 tgid = 0;
+    if (!aegis_should_emit(AEGIS_CFG_TRACE_WRITES, &tgid))
+        return 0;
+
+    const struct aegis_bpf_config *cfg = aegis_cfg();
+    if (!cfg)
+        return 0;
+
+    __s32 fd = (__s32)ctx->args[0];
+    const void *buf = (const void *)ctx->args[1];
+    __u64 count = (__u64)ctx->args[2];
+
+    if (count == 0)
+        return 0;
+
+    /* Las escrituras a los descriptores estandar son salida por consola y
+     * registro: volumen enorme y ningun valor para detectar cifrado. */
+    if (fd <= 2)
+        return 0;
+
+    __u32 zero = 0;
+    struct aegis_wsample *ws = bpf_map_lookup_elem(&aegis_wsample_map, &zero);
+    if (!ws)
+        return 0;
+
+    __u32 muestra = count < AEGIS_BPF_WSAMPLE_MAX ? (__u32)count : AEGIS_BPF_WSAMPLE_MAX;
+
+    /* La lectura se pide SIEMPRE del tamano maximo constante: el verificador
+     * necesita un tamano conocido, y leer de mas sobre un buffer de usuario mas
+     * corto simplemente falla, sin efectos. */
+    if (bpf_probe_read_user(ws->buf, AEGIS_BPF_WSAMPLE_MAX, buf) != 0) {
+        /* Buffer parcialmente ilegible: se reintenta con el tamano justo
+         * redondeado hacia abajo a una potencia de dos manejable. */
+        if (muestra < 64)
+            return 0;
+        if (bpf_probe_read_user(ws->buf, 64, buf) != 0)
+            return 0;
+        muestra = 64;
+    }
+
+    /* Valores de byte distintos, via mapa de bits de 256 posiciones. */
+    ws->seen[0] = 0;
+    ws->seen[1] = 0;
+    ws->seen[2] = 0;
+    ws->seen[3] = 0;
+
+    for (__u32 i = 0; i < AEGIS_BPF_WSAMPLE_MAX; i++) {
+        if (i >= muestra)
+            break;
+        __u8 b = (__u8)ws->buf[i];
+        ws->seen[b >> 6] |= (1ULL << (b & 63));
+    }
+
+    __u32 distintos = aegis_popcount64(ws->seen[0]) + aegis_popcount64(ws->seen[1])
+                    + aegis_popcount64(ws->seen[2]) + aegis_popcount64(ws->seen[3]);
+
+    __u32 umbral = cfg->write_distinct_threshold ? cfg->write_distinct_threshold : 200;
+    int alta_entropia = distintos >= umbral;
+
+    if (!alta_entropia && count < cfg->min_write_bytes) {
+        aegis_stat_inc(AEGIS_STAT_FILTERED);
+        return 0;
+    }
+
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u64 actor = aegis_task_key(task);
+
+    /*
+     * Las dos ramas se escriben COMPLETAS y por separado, con su propia
+     * reserva, relleno y publicacion.
+     *
+     * La version compacta con un operador ternario sobre `rec` no pasa el
+     * verificador: con un unico puntero, no puede probar de que tamano es la
+     * reserva en el punto de la copia y toma el menor de los dos, con lo que la
+     * escritura de la muestra queda fuera de rango. Duplicar la rama es el
+     * precio de que el tamano sea demostrable.
+     */
+    if (alta_entropia) {
+        void *rec = aegis_evt_begin(AEGIS_EVT_FILE_WRITE, AEGIS_BPF_EVT_WSAMPLE,
+                                    actor, 0, 0);
+        if (!rec)
+            return 0;
+
+        aegis_file_write_t *w = (aegis_file_write_t *)((char *)rec + AEGIS_BPF_PAYLOAD_OFF);
+        __builtin_memset(w, 0, sizeof(*w));
+        w->bytes = count;
+        w->pid = tgid;
+        w->fd = fd;
+        w->distinct_bytes = (__u16)distintos;
+        w->sample_len = (__u16)muestra;
+        w->flags = AEGIS_WRITE_F_HIGH_ENT | AEGIS_WRITE_F_SAMPLED;
+        if (count > muestra)
+            w->flags |= AEGIS_WRITE_F_TRUNCATED;
+
+        char *dst = (char *)rec + AEGIS_BPF_WSAMPLE_OFF;
+        /* Copia de tamano constante: el verificador la acepta sin analisis de
+         * rango y el coste del evento no depende del tamano real. */
+        __builtin_memcpy(dst, ws->buf, AEGIS_BPF_WSAMPLE_MAX);
+        w->sample.off = (__u16)AEGIS_BPF_WSAMPLE_OFF;
+        w->sample.len = (__u16)muestra;
+
+        aegis_evt_commit(rec);
+        return 0;
+    }
+
+    /* Sin muestra: el registro pequeno basta para la medida de velocidad y
+     * ahorra 512 bytes de ring por escritura. */
+    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_WRITE, AEGIS_BPF_EVT_SMALL,
+                                actor, 0, 0);
+    if (!rec)
+        return 0;
+
+    aegis_file_write_t *w = (aegis_file_write_t *)((char *)rec + AEGIS_BPF_PAYLOAD_OFF);
+    __builtin_memset(w, 0, sizeof(*w));
+    w->bytes = count;
+    w->pid = tgid;
+    w->fd = fd;
+    w->distinct_bytes = (__u16)distintos;
+    w->sample_len = (__u16)muestra;
+    w->flags = (count > muestra) ? AEGIS_WRITE_F_TRUNCATED : 0;
+
+    aegis_evt_commit(rec);
+    return 0;
+}
+
+/* ------------------------------------------------------------------------
+ * Sonda: renombrado
+ *
+ * Casi todas las familias de ransomware renombran los ficheros que cifran,
+ * anadiendo una extension propia. Un renombrado masivo a una extension que el
+ * sistema no habia visto nunca es una senal fuerte y muy barata de obtener.
+ * ------------------------------------------------------------------------ */
+SEC("tracepoint/syscalls/sys_enter_renameat2")
+int aegis_tp_renameat2(struct trace_event_raw_sys_enter *ctx)
+{
+    __u32 tgid = 0;
+    if (!aegis_should_emit(AEGIS_CFG_TRACE_RENAME, &tgid))
+        return 0;
+
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u64 actor = aegis_task_key(task);
+
+    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_RENAME, AEGIS_BPF_EVT_LARGE,
+                                actor, 0, 0);
+    if (!rec)
+        return 0;
+
+    aegis_file_op_t *f = (aegis_file_op_t *)((char *)rec + AEGIS_BPF_PAYLOAD_OFF);
+    __builtin_memset(f, 0, sizeof(*f));
+    f->pid = tgid;
+    /* args: olddfd, oldname, newdfd, newname, flags */
+    f->path = aegis_put_str(rec, AEGIS_BPF_STR1_OFF, AEGIS_BPF_STR1_MAX,
+                            (const void *)ctx->args[1]);
+    f->new_path = aegis_put_str(rec, AEGIS_BPF_STR2_OFF, AEGIS_BPF_STR2_MAX,
+                                (const void *)ctx->args[3]);
+
+    aegis_evt_commit(rec);
+    return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_rename")
+int aegis_tp_rename(struct trace_event_raw_sys_enter *ctx)
+{
+    __u32 tgid = 0;
+    if (!aegis_should_emit(AEGIS_CFG_TRACE_RENAME, &tgid))
+        return 0;
+
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u64 actor = aegis_task_key(task);
+
+    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_RENAME, AEGIS_BPF_EVT_LARGE,
+                                actor, 0, 0);
+    if (!rec)
+        return 0;
+
+    aegis_file_op_t *f = (aegis_file_op_t *)((char *)rec + AEGIS_BPF_PAYLOAD_OFF);
+    __builtin_memset(f, 0, sizeof(*f));
+    f->pid = tgid;
+    /* args: oldname, newname */
+    f->path = aegis_put_str(rec, AEGIS_BPF_STR1_OFF, AEGIS_BPF_STR1_MAX,
+                            (const void *)ctx->args[0]);
+    f->new_path = aegis_put_str(rec, AEGIS_BPF_STR2_OFF, AEGIS_BPF_STR2_MAX,
+                                (const void *)ctx->args[1]);
 
     aegis_evt_commit(rec);
     return 0;
