@@ -80,6 +80,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-forensics"
+version = "0.1.0"
+dependencies = [
+ "aegis-scan",
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-harden"
 version = "0.1.0"
 dependencies = [
@@ -161,6 +170,15 @@ dependencies = [
  "libc",
  "thiserror 2.0.20",
  "yara-x",
+]
+
+[[package]]
+name = "aegis-sync"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "sha2",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
