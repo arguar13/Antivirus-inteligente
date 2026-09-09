@@ -10,7 +10,10 @@
  * Reglas invariantes del ABI:
  *   1. NUNCA hay punteros en la memoria compartida. Las cadenas se referencian
  *      con (offset, len) relativos al inicio de la cabecera del evento.
- *   2. Todos los registros son multiplo de 8 bytes y estan 8-byte alineados.
+ *   2. Todo registro del ring empieza en una frontera de 64 bytes y su
+ *      total_len es multiplo de 64. Asi la cabecera nunca cruza dos lineas de
+ *      cache ni queda desalineada, y el consumidor puede leerla directamente
+ *      en vez de copiarla byte a byte.
  *   3. Los campos solo se ANIADEN en el espacio reservado. Cambiar o reordenar
  *      un campo existente obliga a incrementar AEGIS_ABI_VERSION.
  *   4. El consumidor SIEMPRE valida total_len contra el espacio disponible
@@ -96,7 +99,9 @@ typedef AEGIS_ALIGNED_STRUCT(64) {
     uint32_t magic;        /* AEGIS_EVT_MAGIC                                */
     uint16_t abi_version;  /* AEGIS_ABI_VERSION                              */
     uint16_t type;         /* aegis_evt_type_t                               */
-    uint32_t total_len;    /* cabecera + payload + cadenas, multiplo de 8    */
+    uint32_t total_len;    /* cabecera + payload + cadenas + relleno.        */
+                           /* Multiplo de 64: es el paso del registro en el   */
+                           /* ring, no solo el contenido util.                */
     uint32_t flags;        /* AEGIS_F_*                                      */
     uint64_t seq;          /* monotono por CPU: detecta perdida de eventos   */
     uint64_t ts_ns;        /* KeQueryPerformanceCounter / ktime_get_boot_ns  */
@@ -109,7 +114,9 @@ typedef AEGIS_ALIGNED_STRUCT(64) {
 AEGIS_STATIC_ASSERT(sizeof(aegis_evt_hdr_t) == 64, "la cabecera debe ser una linea de cache");
 
 /* --------------------------------------------------------------------------
- * Payloads. Todos empiezan justo despues de la cabecera (offset 64).
+ * Payloads. Todos empiezan justo despues de la cabecera (offset 64). Las
+ * cadenas de longitud variable van detras del payload y se referencian con
+ * aegis_str_t; el resto del registro hasta total_len es relleno a cero.
  * -------------------------------------------------------------------------- */
 
 /* Nivel de integridad (Windows) / contexto de credenciales (Linux) */
