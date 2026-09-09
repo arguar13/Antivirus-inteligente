@@ -1,0 +1,21 @@
+# Politica de cadena de suministro.
+#
+# Cada dependencia de terceros es superficie de ataque en un producto de
+# seguridad: si se compromete un crate que acaba dentro del agente, se ha
+# comprometido el propio EDR. La lista se mantiene deliberadamente corta.
+
+[advisories]
+yanked = "deny"
+
+[bans]
+# Dos versiones del mismo crate en el arbol suelen significar que una no se
+# actualiza. En un producto de seguridad eso es una vulnerabilidad latente.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[licenses]
+allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0"]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

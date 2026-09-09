@@ -26,6 +26,11 @@ macro_rules! p_off {
     };
 }
 
+// La sonda es deliberadamente una tabla alineada: una entrada de layout por
+// linea, para que un `diff` contra la salida de C senale exactamente el campo
+// que divergio. rustfmt la expandiria a seis lineas por entrada (su
+// fn_call_width por defecto es 60) y la haria ilegible como tabla.
+#[rustfmt::skip]
 fn main() {
     p_size!("aegis_str_t", AegisStr);
 

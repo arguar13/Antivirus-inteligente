@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: Rust (build, test, clippy, formato)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all
+
+  abi:
+    name: Layout del ABI (C == Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Las aserciones const de abi.rs fijan los offsets esperados en Rust,
+      # pero no pueden ver el header de C. Sin esta comprobacion cruzada, un
+      # cambio en shared/include/aegis_abi.h se manifestaria en produccion como
+      # campos desplazados: el agente leyendo un PID donde hay una direccion.
+      - run: ./tools/abi-check.sh
+
+  abi-gcc-clang:
+    name: Layout del ABI con dos compiladores de C
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        cc: [gcc, clang]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # El driver se compila con MSVC en Windows y con clang en Linux. Si el
+      # layout dependiera del compilador, el ABI no seria un contrato.
+      - run: CC=${{ matrix.cc }} ./tools/abi-check.sh
+
+  supply-chain:
+    name: Cadena de suministro
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-deny
+      - run: cargo deny check
+
+  docs:
+    name: Enlaces de la documentacion
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./tools/check-links.sh

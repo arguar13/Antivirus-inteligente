@@ -32,8 +32,7 @@
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::abi::{
-    evt, AegisEvtHdr, AegisRingCtrl, AegisStr, AEGIS_ABI_VERSION, AEGIS_EVT_MAGIC,
-    AEGIS_RING_MAGIC,
+    evt, AegisEvtHdr, AegisRingCtrl, AegisStr, AEGIS_ABI_VERSION, AEGIS_EVT_MAGIC, AEGIS_RING_MAGIC,
 };
 
 /// Alineacion y paso minimo de todo registro del ring.
@@ -150,12 +149,20 @@ unsafe impl Payload for crate::abi::AegisImageLoad {
     const EVENT_TYPES: &'static [u16] = &[evt::IMAGE_LOAD];
 }
 unsafe impl Payload for crate::abi::AegisFileOp {
-    const EVENT_TYPES: &'static [u16] =
-        &[evt::FILE_PRE_CREATE, evt::FILE_WRITE, evt::FILE_RENAME, evt::FILE_DELETE];
+    const EVENT_TYPES: &'static [u16] = &[
+        evt::FILE_PRE_CREATE,
+        evt::FILE_WRITE,
+        evt::FILE_RENAME,
+        evt::FILE_DELETE,
+    ];
 }
 unsafe impl Payload for crate::abi::AegisRemoteMem {
-    const EVENT_TYPES: &'static [u16] =
-        &[evt::REMOTE_ALLOC, evt::REMOTE_WRITE, evt::REMOTE_PROTECT, evt::REMOTE_THREAD];
+    const EVENT_TYPES: &'static [u16] = &[
+        evt::REMOTE_ALLOC,
+        evt::REMOTE_WRITE,
+        evt::REMOTE_PROTECT,
+        evt::REMOTE_THREAD,
+    ];
 }
 unsafe impl Payload for crate::abi::AegisSyscallAnomaly {
     const EVENT_TYPES: &'static [u16] = &[evt::SYSCALL_ANOMALY];
@@ -199,14 +206,18 @@ impl RingConsumer {
             return Err(RingError::BadMagic);
         }
         if ctrl.abi_version != u32::from(AEGIS_ABI_VERSION) {
-            return Err(RingError::AbiMismatch { found: ctrl.abi_version });
+            return Err(RingError::AbiMismatch {
+                found: ctrl.abi_version,
+            });
         }
         let capacity = ctrl.capacity;
         if capacity == 0 || !capacity.is_power_of_two() || capacity < u64::from(RECORD_ALIGN) {
             return Err(RingError::BadCapacity);
         }
         let data_offset = ctrl.data_offset;
-        let end = data_offset.checked_add(capacity).ok_or(RingError::DataOutOfBounds)?;
+        let end = data_offset
+            .checked_add(capacity)
+            .ok_or(RingError::DataOutOfBounds)?;
         if data_offset < core::mem::size_of::<AegisRingCtrl>() as u64
             || data_offset % u64::from(RECORD_ALIGN) != 0
             || end > len as u64
@@ -218,7 +229,13 @@ impl RingConsumer {
         let data = unsafe { base.add(data_offset as usize) };
         let tail = Self::atomic_u64(base, offset_consumer_tail()).load(Ordering::Relaxed);
 
-        Ok(Self { base, data, capacity, mask: capacity - 1, tail })
+        Ok(Self {
+            base,
+            data,
+            capacity,
+            mask: capacity - 1,
+            tail,
+        })
     }
 
     #[inline]
@@ -304,8 +321,9 @@ impl RingConsumer {
             if hdr.ty != evt::PADDING {
                 // SAFETY: `offset + total_len <= capacity`, comprobado arriba,
                 // asi que el registro completo esta dentro de la zona de datos.
-                let bytes =
-                    unsafe { core::slice::from_raw_parts(self.data.add(offset), total_len as usize) };
+                let bytes = unsafe {
+                    core::slice::from_raw_parts(self.data.add(offset), total_len as usize)
+                };
                 f(EventView { hdr, bytes });
                 delivered += 1;
             }
@@ -371,7 +389,13 @@ mod tests {
             ctrl.capacity = capacity;
             ctrl.data_offset = DATA_OFFSET;
 
-            Self { base, layout, capacity, data_offset: DATA_OFFSET, head: 0 }
+            Self {
+                base,
+                layout,
+                capacity,
+                data_offset: DATA_OFFSET,
+                head: 0,
+            }
         }
 
         fn consumer(&self) -> RingConsumer {
@@ -401,8 +425,8 @@ mod tests {
             // si no hay hueco, incrementa dropped_events y sigue. Modelarlo
             // aqui impide que una prueba construya un ring imposible y luego
             // culpe al consumidor de rechazarlo.
-            let tail = RingConsumer::atomic_u64(self.base, offset_consumer_tail())
-                .load(Ordering::Acquire);
+            let tail =
+                RingConsumer::atomic_u64(self.base, offset_consumer_tail()).load(Ordering::Acquire);
             assert!(
                 self.head + u64::from(total_len) - tail <= self.capacity,
                 "el ring de prueba se desbordaria: hay que drenar antes de seguir escribiendo"
@@ -517,8 +541,14 @@ mod tests {
             token_flags: 0,
             integrity_level: crate::abi::integrity::MEDIUM,
             signature_level: 0,
-            image_path: AegisStr { off: img_off as u16, len: image.len() as u16 },
-            cmdline: AegisStr { off: cmd_off as u16, len: cmdline.len() as u16 },
+            image_path: AegisStr {
+                off: img_off as u16,
+                len: image.len() as u16,
+            },
+            cmdline: AegisStr {
+                off: cmd_off as u16,
+                len: cmdline.len() as u16,
+            },
             user_sid: AegisStr::default(),
         };
         // SAFETY: `AegisProcCreate` es POD `#[repr(C)]`; se serializa tal cual.
@@ -625,7 +655,10 @@ mod tests {
         consumer
             .drain(1, |ev| {
                 // Un driver con un bug podria emitir un offset disparatado.
-                let mala = AegisStr { off: 60_000, len: 128 };
+                let mala = AegisStr {
+                    off: 60_000,
+                    len: 128,
+                };
                 assert!(ev.resolve(mala).is_none());
                 let solapa_cabecera = AegisStr { off: 8, len: 4 };
                 assert!(ev.resolve(solapa_cabecera).is_none());
