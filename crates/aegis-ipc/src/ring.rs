@@ -396,19 +396,19 @@ impl RingConsumer {
 
 // Offsets del bloque de control, derivados del propio tipo para que no puedan
 // desincronizarse de la definicion.
-const fn offset_producer_head() -> usize {
+pub(crate) const fn offset_producer_head() -> usize {
     core::mem::offset_of!(AegisRingCtrl, producer_head)
 }
-const fn offset_dropped_events() -> usize {
+pub(crate) const fn offset_dropped_events() -> usize {
     core::mem::offset_of!(AegisRingCtrl, dropped_events)
 }
-const fn offset_dropped_bytes() -> usize {
+pub(crate) const fn offset_dropped_bytes() -> usize {
     core::mem::offset_of!(AegisRingCtrl, dropped_bytes)
 }
-const fn offset_consumer_tail() -> usize {
+pub(crate) const fn offset_consumer_tail() -> usize {
     core::mem::offset_of!(AegisRingCtrl, consumer_tail)
 }
-const fn offset_consumer_alive() -> usize {
+pub(crate) const fn offset_consumer_alive() -> usize {
     core::mem::offset_of!(AegisRingCtrl, consumer_alive)
 }
 
