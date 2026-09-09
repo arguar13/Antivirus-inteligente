@@ -1,0 +1,69 @@
+# Crate de fuzzing continuo de AegisCore (FASE 35).
+#
+# Es un workspace APARTE del principal a proposito: los objetivos se compilan con
+# libFuzzer y el sanitizador de direcciones, que exigen toolchain nightly y
+# banderas que no deben contaminar el build normal del producto. Por eso el
+# workspace del proyecto lo excluye y este declara el suyo.
+[package]
+name = "aegis-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+aegis-fleet = { path = "../crates/aegis-fleet" }
+aegis-firmware = { path = "../crates/aegis-firmware" }
+aegis-scal = { path = "../crates/aegis-scal" }
+
+# Cada objetivo comprueba una invariante: el parser NUNCA entra en panico ante
+# entrada arbitraria. Un panico ante un mensaje de red malformado es una via de
+# denegacion de servicio; el fuzzing lo encuentra antes que el atacante.
+
+[[bin]]
+name = "fleet_proto"
+path = "fuzz_targets/fleet_proto.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fleet_x509"
+path = "fuzz_targets/fleet_x509.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fleet_frame"
+path = "fuzz_targets/fleet_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "firmware_eventlog"
+path = "fuzz_targets/firmware_eventlog.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "firmware_uefi"
+path = "fuzz_targets/firmware_uefi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scal_maps"
+path = "fuzz_targets/scal_maps.rs"
+test = false
+doc = false
+bench = false
+
+# Workspace propio: desacopla este crate del workspace del producto.
+[workspace]

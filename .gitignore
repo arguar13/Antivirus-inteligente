@@ -32,3 +32,10 @@ reports/
 drivers/linux/aegis-bpf/out/
 crates/aegis-unpacker/tests/fixtures/packer_stub
 crates/aegis-syscallguard/tests/fixtures/syscall_stub
+
+# Fuzzing (FASE 35): objetivos y Cargo.toml se versionan; lo generado no.
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+/fuzz/coverage/
+/fuzz/Cargo.lock

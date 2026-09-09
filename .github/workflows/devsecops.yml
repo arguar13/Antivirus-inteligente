@@ -1,0 +1,78 @@
+name: DevSecOps
+
+# El pipeline continuo de seguridad de la construccion (FASE 35). Mas pesado que
+# el CI por commit: fuzzing, sanitizadores y auditoria de dependencias. Corre
+# programado cada noche y bajo demanda, no en cada push, porque el fuzzing y la
+# instrumentacion cuestan tiempo.
+on:
+  schedule:
+    # Cada dia a las 03:17 UTC (una hora poco concurrida; el minuto primo evita
+    # coincidir con la avalancha de crons a en punto).
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  # Tambien al tocar dependencias o los propios objetivos de fuzzing.
+  push:
+    branches: [main]
+    paths:
+      - 'Cargo.lock'
+      - 'fuzz/**'
+      - '.cargo/audit.toml'
+      - 'tools/fuzz.sh'
+      - 'tools/sanitize.sh'
+      - 'tools/audit.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit:
+    name: Auditoria de dependencias (RustSec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-audit
+      # La politica y los avisos transitivos aceptados viven en .cargo/audit.toml.
+      # Un aviso NUEVO que no este alli rompe el job.
+      - run: ./tools/audit.sh
+
+  sanitize:
+    name: Sanitizacion de memoria (AddressSanitizer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # El sanitizador exige nightly y el componente rust-src para instrumentar.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+      # Las rutas unsafe (ptrace, process_vm_readv, perf, ABI) no las comprueba
+      # el compilador; ASan las ejercita en ejecucion.
+      - run: ./tools/sanitize.sh
+
+  fuzz:
+    name: Fuzzing continuo (libFuzzer)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+      # 60 s por objetivo en CI; un despliegue con corpus persistente correria
+      # mucho mas. Cada parser de entrada no confiable debe sobrevivir a entrada
+      # arbitraria sin panicar.
+      - run: ./tools/fuzz.sh 60
+      # Si un objetivo encuentra un reproductor, se conserva como artefacto.
+      - name: Guardar reproductores de fuzzing
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
