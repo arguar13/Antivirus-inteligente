@@ -46,8 +46,13 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         // Respuesta de un clic
         .route("/api/agentes/{cn}/aislar", post(aislar))
         .route("/api/agentes/{cn}/liberar", post(liberar))
-        // Politica global
+        // Politica global y motor de reglas
         .route("/api/politicas", post(publicar_politica))
+        .route("/api/reglas", get(listar_reglas).post(crear_regla))
+        .route("/api/reglas/{id}", axum::routing::delete(borrar_regla))
+        .route("/api/reglas/{id}/activa", post(fijar_regla_activa))
+        // Inteligencia
+        .route("/api/stix/objetos", get(listar_objetos_stix))
         // Reputacion k-anonima
         .route("/api/reputacion/{prefijo}", get(consultar_reputacion))
         .route("/api/reputacion", post(registrar_reputacion))
@@ -417,6 +422,207 @@ async fn publicar_politica(
             Json(serde_json::json!({"version": version})),
         )
             .into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Regla nueva tal y como la escribe el operador.
+#[derive(Deserialize)]
+struct NuevaRegla {
+    /// Nombre legible, unico.
+    nombre: String,
+    /// Tipo de regla.
+    tipo: String,
+    /// Parametros, que se validan segun el tipo.
+    parametros: serde_json::Value,
+    /// Severidad 0..4.
+    severidad: Option<i16>,
+}
+
+/// Da de alta una regla global y la empuja a la flota.
+///
+/// La validacion ocurre AQUI, en la cara del operador. Una regla mal formada que
+/// el agente ignorase en silencio es lo peor de los dos mundos: el operador cree
+/// que la flota esta protegida y no lo esta.
+async fn crear_regla(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Json(r): Json<NuevaRegla>,
+) -> axum::response::Response {
+    let usuario = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+
+    let Some(tipo) = crate::reglas::TipoRegla::de_str(&r.tipo) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": format!("tipo de regla desconocido: {}", r.tipo),
+                "tipos_validos": ["bloquear_puerto", "bloquear_hash", "bloquear_proceso",
+                                  "bloquear_red", "aislar_por_puntuacion"]
+            })),
+        )
+            .into_response();
+    };
+
+    let parametros = match crate::reglas::validar(tipo, &r.parametros) {
+        Ok(p) => p,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("{e}")})),
+            )
+                .into_response()
+        }
+    };
+
+    if r.nombre.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "el nombre no puede estar vacio"})),
+        )
+            .into_response();
+    }
+
+    let almacen = estado.servicio.almacen();
+    let severidad = r.severidad.unwrap_or(2).clamp(0, 4);
+    let id = match almacen
+        .crear_regla(&r.nombre, tipo.como_str(), &parametros, severidad, &usuario)
+        .await
+    {
+        Ok(id) => id,
+        Err(crate::error::ErrorServidor::BaseDatos(sqlx::Error::Database(e)))
+            if e.is_unique_violation() =>
+        {
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({"error": "ya existe una regla con ese nombre"})),
+            )
+                .into_response()
+        }
+        Err(e) => return error_500(e).into_response(),
+    };
+
+    // Dar de alta la regla y NO publicar dejaria la flota sin ella: las dos
+    // cosas son una sola operacion desde el punto de vista del operador.
+    match almacen.recompilar_y_publicar(&r.nombre).await {
+        Ok(version) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "regla": id, "version_politica": version, "creada_por": usuario
+            })),
+        )
+            .into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Lista las reglas definidas.
+async fn listar_reglas(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    match estado.servicio.almacen().listar_reglas().await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Cambio de estado de una regla.
+#[derive(Deserialize)]
+struct CambioActiva {
+    /// Nuevo estado.
+    activa: bool,
+}
+
+/// Activa o desactiva una regla y vuelve a publicar la politica.
+async fn fijar_regla_activa(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+    Json(c): Json<CambioActiva>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let Ok(uuid) = id.parse::<uuid::Uuid>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "identificador de regla invalido"})),
+        )
+            .into_response();
+    };
+    let almacen = estado.servicio.almacen();
+    match almacen.fijar_regla_activa(uuid, c.activa).await {
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "la regla no existe"})),
+        )
+            .into_response(),
+        Ok(true) => match almacen.recompilar_y_publicar("cambio-de-estado").await {
+            Ok(v) => (
+                StatusCode::OK,
+                Json(serde_json::json!({"version_politica": v})),
+            )
+                .into_response(),
+            Err(e) => error_500(e).into_response(),
+        },
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Borra una regla y vuelve a publicar la politica sin ella.
+async fn borrar_regla(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let Ok(uuid) = id.parse::<uuid::Uuid>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "identificador de regla invalido"})),
+        )
+            .into_response();
+    };
+    let almacen = estado.servicio.almacen();
+    match almacen.borrar_regla(uuid).await {
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "la regla no existe"})),
+        )
+            .into_response(),
+        // Borrar la regla y no republicar dejaria la flota aplicandola todavia.
+        Ok(true) => match almacen.recompilar_y_publicar("regla-retirada").await {
+            Ok(v) => (
+                StatusCode::OK,
+                Json(serde_json::json!({"version_politica": v})),
+            )
+                .into_response(),
+            Err(e) => error_500(e).into_response(),
+        },
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Lista los objetos STIX ingeridos, los mas avistados primero.
+async fn listar_objetos_stix(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Query(q): Query<Limite>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let limite = q.limite.unwrap_or(100).clamp(1, 5_000);
+    match estado.servicio.almacen().listar_objetos_stix(limite).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => error_500(e).into_response(),
     }
 }

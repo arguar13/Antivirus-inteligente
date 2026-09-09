@@ -53,6 +53,16 @@ pub enum Metodo {
     Latir,
     /// Reportar un evento de seguridad.
     ReportarEvento,
+    /// Entregar un bundle STIX 2.1 de inteligencia.
+    ReportarStix,
+    /// Entregar el subgrafo de linaje que rodea a una deteccion.
+    ReportarGrafo,
+    /// Abrir el canal por el que el servidor EMPUJA politica.
+    ///
+    /// Es el unico metodo que no sigue el patron peticion/respuesta: la
+    /// conexion queda abierta y el servidor escribe por ella cuando hay algo
+    /// que entregar.
+    SuscribirPolitica,
 }
 
 impl Metodo {
@@ -62,6 +72,9 @@ impl Metodo {
             Metodo::Enrolar => 1,
             Metodo::Latir => 2,
             Metodo::ReportarEvento => 3,
+            Metodo::ReportarStix => 4,
+            Metodo::ReportarGrafo => 5,
+            Metodo::SuscribirPolitica => 6,
         }
     }
 
@@ -71,6 +84,9 @@ impl Metodo {
             1 => Some(Metodo::Enrolar),
             2 => Some(Metodo::Latir),
             3 => Some(Metodo::ReportarEvento),
+            4 => Some(Metodo::ReportarStix),
+            5 => Some(Metodo::ReportarGrafo),
+            6 => Some(Metodo::SuscribirPolitica),
             _ => None,
         }
     }

@@ -16,9 +16,11 @@
 //! worker seria un error grave que tokio detecta y castiga con un panico—.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use aegis_fleet::proto::{
-    AckEvento, AckLatido, Latido, ReporteEvento, RespuestaEnrolamiento, SolicitudEnrolamiento,
+    AckEvento, AckGrafo, AckLatido, AckStix, EmpujePolitica, Latido, ReporteEvento, ReporteGrafo,
+    ReporteStix, RespuestaEnrolamiento, SolicitudEnrolamiento,
 };
 use aegis_fleet::servidor::ManejadorFlota;
 use tokio::runtime::Handle;
@@ -29,12 +31,27 @@ use crate::dominio::ServicioFlota;
 pub struct ManejadorPersistente {
     servicio: Arc<ServicioFlota>,
     handle: Handle,
+    /// Receptor de avisos de politica; `None` desactiva el empuje.
+    avisos: Option<tokio::sync::watch::Receiver<i64>>,
 }
 
 impl ManejadorPersistente {
     /// Crea el manejador con el runtime sobre el que ejecutar la persistencia.
+    ///
+    /// Sin notificador NO hay empuje: el canal de suscripcion se cerrara de
+    /// forma ordenada en vez de dejar al agente esperando algo que no llegaria.
     pub fn nuevo(servicio: Arc<ServicioFlota>, handle: Handle) -> ManejadorPersistente {
-        ManejadorPersistente { servicio, handle }
+        ManejadorPersistente {
+            servicio,
+            handle,
+            avisos: None,
+        }
+    }
+
+    /// Habilita el empuje de politica con el notificador dado.
+    pub fn con_avisos(mut self, avisos: tokio::sync::watch::Receiver<i64>) -> ManejadorPersistente {
+        self.avisos = Some(avisos);
+        self
     }
 }
 
@@ -117,6 +134,107 @@ impl ManejadorFlota for ManejadorPersistente {
         }
     }
 
+    fn stix(&self, cn: &str, req: &ReporteStix) -> AckStix {
+        let servicio = self.servicio.clone();
+        let cn_owned = cn.to_string();
+        let bundle = req.bundle_json.clone();
+        let momento = req.momento_unix;
+
+        let resultado = self
+            .handle
+            .block_on(async move { servicio.ingerir_stix(&cn_owned, &bundle, momento).await });
+
+        match resultado {
+            Ok(ingesta) => AckStix {
+                recibido: true,
+                objetos_ingeridos: ingesta.objetos,
+                motivo: String::new(),
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "bundle STIX rechazado");
+                AckStix {
+                    recibido: false,
+                    objetos_ingeridos: 0,
+                    // El motivo viaja al agente: un endpoint que sabe POR QUE se
+                    // le rechaza puede corregir; uno que solo recibe un no,
+                    // reintenta lo mismo para siempre.
+                    motivo: format!("{e}"),
+                }
+            }
+        }
+    }
+
+    fn grafo(&self, cn: &str, req: &ReporteGrafo) -> AckGrafo {
+        let servicio = self.servicio.clone();
+        let cn_owned = cn.to_string();
+        let raiz = req.raiz;
+        let momento = req.momento_unix;
+        let nodos = req.nodos.clone();
+
+        let resultado = self.handle.block_on(async move {
+            servicio
+                .ingerir_grafo(&cn_owned, raiz, momento, &nodos)
+                .await
+        });
+
+        match resultado {
+            Ok((id, n)) => AckGrafo {
+                recibido: true,
+                id_grafo: id.to_string(),
+                nodos_ingeridos: n,
+            },
+            Err(e) => {
+                tracing::error!(error = %e, "LINAJE DE PROCESOS NO PERSISTIDO");
+                AckGrafo::default()
+            }
+        }
+    }
+
+    fn esperar_empuje(
+        &self,
+        cn: &str,
+        version_conocida: u64,
+        plazo: Duration,
+    ) -> Option<EmpujePolitica> {
+        // Sin notificador no hay empuje: se cierra el canal en vez de dejar al
+        // agente esperando indefinidamente algo que no va a llegar.
+        let mut rx = self.avisos.as_ref()?.clone();
+        let cn = cn.to_string();
+
+        self.handle.block_on(async move {
+            let version_anunciada = *rx.borrow();
+
+            // Un agente que reconecta atrasado se pone al dia sin esperar al
+            // siguiente cambio.
+            if version_anunciada > version_conocida as i64 {
+                return Some(self.componer_empuje(&cn, version_anunciada).await);
+            }
+
+            // Tambien puede haber comandos suyos esperando aunque la politica no
+            // haya cambiado.
+            let empuje = self.componer_empuje(&cn, version_anunciada).await;
+            if !empuje.comandos_json.is_empty() {
+                return Some(empuje);
+            }
+
+            match tokio::time::timeout(plazo, rx.changed()).await {
+                Ok(Ok(())) => {
+                    let v = *rx.borrow();
+                    Some(self.componer_empuje(&cn, v).await)
+                }
+                // El emisor desaparecio: el servicio esta cerrando.
+                Ok(Err(_)) => None,
+                // Vencio el plazo: latido de canal. Sin el, un canal sano y uno
+                // muerto son indistinguibles para los dos extremos.
+                Err(_) => Some(EmpujePolitica {
+                    version: version_anunciada.max(0) as u64,
+                    es_keepalive: true,
+                    ..Default::default()
+                }),
+            }
+        })
+    }
+
     fn evento(&self, cn: &str, req: &ReporteEvento) -> AckEvento {
         let servicio = self.servicio.clone();
         let cn_owned = cn.to_string();
@@ -148,6 +266,45 @@ impl ManejadorFlota for ManejadorPersistente {
                     id_incidente: String::new(),
                 }
             }
+        }
+    }
+}
+
+impl ManejadorPersistente {
+    /// Construye el empuje con la politica vigente y los comandos del agente.
+    async fn componer_empuje(&self, cn: &str, version: i64) -> EmpujePolitica {
+        let almacen = self.servicio.almacen();
+        let (v, politica) = almacen
+            .politica_activa()
+            .await
+            .unwrap_or((version, serde_json::Value::Null));
+
+        // Los comandos se toman AQUI y se marcan entregados: `FOR UPDATE SKIP
+        // LOCKED` garantiza que, con varias instancias atendiendo la misma
+        // flota, ninguno se entrega dos veces.
+        let mut comandos = Vec::new();
+        while comandos.len() < 32 {
+            match almacen.tomar_comando_pendiente(cn).await {
+                Ok(Some(c)) => comandos.push(serde_json::json!({
+                    "id": c.id, "accion": c.accion, "parametros": c.parametros
+                })),
+                _ => break,
+            }
+        }
+
+        EmpujePolitica {
+            version: v.max(0) as u64,
+            politica_json: if politica.is_null() {
+                String::new()
+            } else {
+                politica.to_string()
+            },
+            comandos_json: if comandos.is_empty() {
+                String::new()
+            } else {
+                serde_json::Value::Array(comandos).to_string()
+            },
+            es_keepalive: false,
         }
     }
 }

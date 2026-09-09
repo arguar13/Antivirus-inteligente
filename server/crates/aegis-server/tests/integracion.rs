@@ -510,3 +510,488 @@ async fn la_superficie_grpc_estandar_atiende_a_una_integracion_de_terceros() {
 
     servidor.abort();
 }
+
+// ---------------------------------------------------------------------------
+// FASE 38: inteligencia STIX, linaje de procesos y empuje de reglas
+// ---------------------------------------------------------------------------
+
+use aegis_fleet::proto::{NodoProceso, ReporteGrafo, ReporteStix};
+use aegis_server::notificador::Notificador;
+use aegis_server::reglas::{compilar_politica, validar, Regla, TipoRegla};
+
+/// Bundle STIX 2.1 con dos objetos, parametrizado para poder repetir el MISMO
+/// objeto desde dos agentes distintos y comprobar la deduplicacion.
+fn bundle_con(id_indicador: &str) -> String {
+    format!(
+        r#"{{"type":"bundle","id":"bundle--{}","objects":[
+            {{"type":"indicator","spec_version":"2.1","id":"{id_indicador}",
+             "pattern":"[file:hashes.'SHA-256' = 'deadbeef']","pattern_type":"stix",
+             "valid_from":"2026-01-01T00:00:00Z"}},
+            {{"type":"process","id":"process--{}","command_line":"sh -c curl evil"}}
+        ]}}"#,
+        uuid::Uuid::new_v4(),
+        uuid::Uuid::new_v4()
+    )
+}
+
+#[tokio::test]
+async fn un_bundle_stix_se_ingiere_y_sus_objetos_quedan_consultables() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn = cn_unico("stix");
+    servicio
+        .enrolar(&cn, "id", "host", "1.0", b"h")
+        .await
+        .unwrap();
+
+    let indicador = format!("indicator--{}", uuid::Uuid::new_v4());
+    let ingesta = servicio
+        .ingerir_stix(&cn, &bundle_con(&indicador), 0)
+        .await
+        .expect("la ingesta debe funcionar");
+
+    assert_eq!(ingesta.objetos, 2, "el bundle trae dos objetos");
+    assert_eq!(ingesta.reavistados, 0, "es la primera vez que se ven");
+
+    let objetos = almacen.listar_objetos_stix(500).await.unwrap();
+    let mio = objetos
+        .iter()
+        .find(|o| o.id == indicador)
+        .expect("el indicador");
+    assert_eq!(mio.tipo, "indicator");
+    assert_eq!(mio.avistamientos, 1);
+}
+
+#[tokio::test]
+async fn el_mismo_indicador_visto_por_dos_endpoints_suma_avistamientos_en_vez_de_duplicarse() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn_a = cn_unico("stix-a");
+    let cn_b = cn_unico("stix-b");
+    servicio
+        .enrolar(&cn_a, "a", "host-a", "1.0", b"h")
+        .await
+        .unwrap();
+    servicio
+        .enrolar(&cn_b, "b", "host-b", "1.0", b"h")
+        .await
+        .unwrap();
+
+    // STIX define los identificadores para que dos herramientas que observen el
+    // MISMO artefacto produzcan el MISMO id. Aprovecharlo es lo que convierte
+    // "cien endpoints vieron esto" en una campana y no en cien anecdotas.
+    let indicador = format!("indicator--{}", uuid::Uuid::new_v4());
+
+    servicio
+        .ingerir_stix(&cn_a, &bundle_con(&indicador), 0)
+        .await
+        .unwrap();
+    let segunda = servicio
+        .ingerir_stix(&cn_b, &bundle_con(&indicador), 0)
+        .await
+        .unwrap();
+
+    assert_eq!(segunda.reavistados, 1, "el indicador repetido se reconoce");
+
+    let objetos = almacen.listar_objetos_stix(500).await.unwrap();
+    let coincidencias: Vec<_> = objetos.iter().filter(|o| o.id == indicador).collect();
+    assert_eq!(coincidencias.len(), 1, "un solo objeto, no dos");
+    assert_eq!(coincidencias[0].avistamientos, 2, "con dos avistamientos");
+}
+
+#[tokio::test]
+async fn un_documento_que_no_es_un_bundle_se_rechaza() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn = cn_unico("stix-malo");
+    servicio.enrolar(&cn, "id", "h", "1.0", b"h").await.unwrap();
+
+    assert!(servicio.ingerir_stix(&cn, "no soy json", 0).await.is_err());
+    assert!(servicio
+        .ingerir_stix(&cn, r#"{"type":"otra-cosa","objects":[]}"#, 0)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn el_linaje_de_procesos_se_guarda_entero_con_sus_aristas() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn = cn_unico("grafo");
+    servicio.enrolar(&cn, "id", "h", "1.0", b"h").await.unwrap();
+
+    // libreoffice -> sh -> python: el linaje que convierte una rutina en un
+    // incidente.
+    let nodos = vec![
+        NodoProceso {
+            clave: 100,
+            pid: 10,
+            padre: 0,
+            creador: 0,
+            profundidad: 0,
+            imagen: "/usr/lib/libreoffice/soffice.bin".into(),
+            cmdline: "soffice --headless doc.odt".into(),
+            ..Default::default()
+        },
+        NodoProceso {
+            clave: 200,
+            pid: 20,
+            padre: 100,
+            creador: 100,
+            profundidad: 1,
+            imagen: "/bin/sh".into(),
+            cmdline: "sh -c ...".into(),
+            ..Default::default()
+        },
+        NodoProceso {
+            clave: 300,
+            pid: 30,
+            padre: 200,
+            creador: 200,
+            profundidad: 2,
+            imagen: "/usr/bin/python3".into(),
+            cmdline: "python3 -c socket".into(),
+            taints: 0b111,
+            puntuacion: 90,
+            ..Default::default()
+        },
+    ];
+
+    let (id, n) = servicio.ingerir_grafo(&cn, 300, 0, &nodos).await.unwrap();
+    assert_eq!(n, 3);
+
+    // Las aristas tienen que sobrevivir: sin ellas el grafo es una lista.
+    let filas: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT clave, padre, imagen FROM grafo_nodos WHERE id_grafo = $1 ORDER BY profundidad",
+    )
+    .bind(id)
+    .fetch_all(almacen.pool())
+    .await
+    .unwrap();
+
+    assert_eq!(filas.len(), 3);
+    assert_eq!(filas[0].1, 0, "la raiz del linaje no tiene padre");
+    assert_eq!(filas[1].1, 100, "sh cuelga de libreoffice");
+    assert_eq!(filas[2].1, 200, "python cuelga de sh");
+    assert!(filas[2].2.contains("python"));
+}
+
+#[tokio::test]
+async fn un_texto_desmesurado_del_endpoint_se_recorta_antes_de_tocar_la_base_de_datos() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn = cn_unico("grafo-largo");
+    servicio.enrolar(&cn, "id", "h", "1.0", b"h").await.unwrap();
+
+    // Un agente comprometido controla estos textos: no puede escribir un campo
+    // de tamano arbitrario en la base de datos.
+    let nodo = NodoProceso {
+        clave: 1,
+        imagen: "/".to_string() + &"a".repeat(100_000),
+        cmdline: "x".repeat(100_000),
+        ..Default::default()
+    };
+    let (id, _) = servicio.ingerir_grafo(&cn, 1, 0, &[nodo]).await.unwrap();
+
+    let (imagen, cmdline): (String, String) =
+        sqlx::query_as("SELECT imagen, cmdline FROM grafo_nodos WHERE id_grafo = $1")
+            .bind(id)
+            .fetch_one(almacen.pool())
+            .await
+            .unwrap();
+    assert!(
+        imagen.len() <= 4096,
+        "la imagen se recorto: {}",
+        imagen.len()
+    );
+    assert!(
+        cmdline.len() <= 8192,
+        "la cmdline se recorto: {}",
+        cmdline.len()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// El motor de reglas y el EMPUJE de extremo a extremo
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn el_motor_compila_las_reglas_activas_en_la_politica_publicada() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+
+    let nombre = format!("bloqueo-smb-{}", uuid::Uuid::new_v4().simple());
+    let parametros = validar(
+        TipoRegla::BloquearPuerto,
+        &serde_json::json!({"puerto": 445}),
+    )
+    .expect("la regla es valida");
+    let id = almacen
+        .crear_regla(
+            &nombre,
+            "bloquear_puerto",
+            &parametros,
+            3,
+            "operador@empresa",
+        )
+        .await
+        .unwrap();
+
+    let version = almacen.recompilar_y_publicar(&nombre).await.unwrap();
+    let (v_activa, contenido) = almacen.politica_activa().await.unwrap();
+    assert_eq!(v_activa, version);
+    assert_eq!(contenido["version"], version);
+
+    let reglas = contenido["reglas"].as_array().unwrap();
+    let mia = reglas
+        .iter()
+        .find(|r| r["nombre"] == serde_json::json!(nombre))
+        .expect("la regla debe estar en la politica publicada");
+    assert_eq!(mia["parametros"]["puerto"], 445);
+
+    // Al desactivarla, la politica nueva ya no la lleva: la flota deja de
+    // aplicarla sin que nadie toque endpoint alguno.
+    almacen.fijar_regla_activa(id, false).await.unwrap();
+    almacen
+        .recompilar_y_publicar("desactivacion")
+        .await
+        .unwrap();
+    let (_, contenido2) = almacen.politica_activa().await.unwrap();
+    let sigue = contenido2["reglas"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["nombre"] == serde_json::json!(nombre));
+    assert!(
+        !sigue,
+        "una regla desactivada no puede seguir bajando a la flota"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn una_regla_global_llega_al_agente_real_por_empuje_sin_esperar_su_latido() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+
+    // El puente de avisos: es lo que hace que una regla publicada contra otra
+    // instancia despierte a los agentes suscritos a esta.
+    let (version_inicial, _) = almacen.politica_activa().await.unwrap();
+    let notificador = Notificador::iniciar(&url_pg(), version_inicial)
+        .await
+        .expect("la escucha de avisos debe arrancar");
+
+    let ca = Arc::new(AutoridadCertificadora::nueva("CA de pruebas").unwrap());
+    let id_srv = ca.emitir("control-plane", 3600).unwrap();
+    let manejador = Arc::new(
+        ManejadorPersistente::nuevo(servicio.clone(), tokio::runtime::Handle::current())
+            .con_avisos(notificador.suscriptor()),
+    );
+    let servidor = ServidorFlota::nuevo(&id_srv, &ca.cert_der(), manejador)
+        .unwrap()
+        .escuchar("127.0.0.1:0")
+        .unwrap();
+    let dir = servidor.direccion();
+
+    let cn = cn_unico("suscrito");
+    let ca_cliente = ca.clone();
+    let cn_hilo = cn.clone();
+
+    // El agente REAL se enrola y abre su canal de politica.
+    let canal = tokio::task::spawn_blocking(move || {
+        let agente = agente_real(dir, &ca_cliente, ca_cliente.clone(), &cn_hilo).unwrap();
+        let mut s = agente.abrir_sesion().unwrap();
+        s.enrolar(&agente.solicitud_enrolamiento().unwrap())
+            .unwrap();
+        let sesion = agente.abrir_sesion().unwrap();
+        sesion
+            .suscribir_politica(version_inicial.max(0) as u64)
+            .unwrap()
+    })
+    .await
+    .expect("el agente debe suscribirse");
+
+    // El operador crea la regla desde el panel, un instante despues.
+    let alm = almacen.clone();
+    let nombre = format!("bloqueo-smb-{}", uuid::Uuid::new_v4().simple());
+    let nombre_hilo = nombre.clone();
+    let operador = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let p = validar(
+            TipoRegla::BloquearPuerto,
+            &serde_json::json!({"puerto": 445}),
+        )
+        .unwrap();
+        alm.crear_regla(&nombre_hilo, "bloquear_puerto", &p, 3, "operador@empresa")
+            .await
+            .unwrap();
+        alm.recompilar_y_publicar(&nombre_hilo).await.unwrap()
+    });
+
+    // El agente espera en su canal.
+    let inicio = std::time::Instant::now();
+    let empuje = tokio::task::spawn_blocking(move || {
+        let mut canal = canal;
+        canal.siguiente()
+    })
+    .await
+    .expect("hilo del canal")
+    .expect("el canal debe entregar politica");
+    let transcurrido = inicio.elapsed();
+
+    let version_publicada = operador.await.unwrap();
+
+    assert!(
+        !empuje.es_keepalive,
+        "debe llegar politica, no un latido de canal"
+    );
+    assert_eq!(empuje.version, version_publicada.max(0) as u64);
+    assert!(
+        empuje.politica_json.contains("445"),
+        "la regla compilada debe viajar en el empuje: {}",
+        empuje.politica_json
+    );
+    // Esto es lo que distingue un EMPUJE de un sondeo: la orden global llega al
+    // publicarse, no en el siguiente latido del agente (que serian 30 s).
+    assert!(
+        transcurrido < std::time::Duration::from_secs(10),
+        "la regla tardo {transcurrido:?} en llegar"
+    );
+
+    servidor.parar();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn el_agente_entrega_stix_y_linaje_por_el_canal_mtls_y_queda_en_postgres() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+
+    let ca = Arc::new(AutoridadCertificadora::nueva("CA de pruebas").unwrap());
+    let id_srv = ca.emitir("control-plane", 3600).unwrap();
+    let manejador = Arc::new(ManejadorPersistente::nuevo(
+        servicio,
+        tokio::runtime::Handle::current(),
+    ));
+    let servidor = ServidorFlota::nuevo(&id_srv, &ca.cert_der(), manejador)
+        .unwrap()
+        .escuchar("127.0.0.1:0")
+        .unwrap();
+    let dir = servidor.direccion();
+
+    let cn = cn_unico("intel");
+    let indicador = format!("indicator--{}", uuid::Uuid::new_v4());
+    let bundle = bundle_con(&indicador);
+    let ca_cliente = ca.clone();
+    let cn_hilo = cn.clone();
+
+    let (objetos, nodos) = tokio::task::spawn_blocking(move || {
+        let agente = agente_real(dir, &ca_cliente, ca_cliente.clone(), &cn_hilo).unwrap();
+        let mut s = agente.abrir_sesion().unwrap();
+        s.enrolar(&agente.solicitud_enrolamiento().unwrap())
+            .unwrap();
+
+        let mut s2 = agente.abrir_sesion().unwrap();
+        let ack_stix = s2
+            .reportar_stix(&ReporteStix {
+                id_agente: cn_hilo.clone(),
+                bundle_json: bundle,
+                momento_unix: 0,
+            })
+            .unwrap();
+
+        let mut s3 = agente.abrir_sesion().unwrap();
+        let ack_grafo = s3
+            .reportar_grafo(&ReporteGrafo {
+                id_agente: cn_hilo.clone(),
+                raiz: 300,
+                momento_unix: 0,
+                nodos: vec![
+                    NodoProceso {
+                        clave: 200,
+                        imagen: "/bin/sh".into(),
+                        ..Default::default()
+                    },
+                    NodoProceso {
+                        clave: 300,
+                        padre: 200,
+                        imagen: "/usr/bin/python3".into(),
+                        puntuacion: 88,
+                        ..Default::default()
+                    },
+                ],
+            })
+            .unwrap();
+
+        (ack_stix.objetos_ingeridos, ack_grafo.nodos_ingeridos)
+    })
+    .await
+    .expect("hilo del agente");
+
+    assert_eq!(objetos, 2, "los dos objetos del bundle");
+    assert_eq!(nodos, 2, "los dos nodos del linaje");
+
+    // Y todo ello aterrizo en PostgreSQL, por el transporte real del agente.
+    let stix = almacen.listar_objetos_stix(500).await.unwrap();
+    assert!(
+        stix.iter().any(|o| o.id == indicador),
+        "el indicador debe estar"
+    );
+
+    let grafos: i64 = sqlx::query_scalar("SELECT count(*) FROM grafos WHERE cn_agente = $1")
+        .bind(&cn)
+        .fetch_one(almacen.pool())
+        .await
+        .unwrap();
+    assert_eq!(grafos, 1);
+
+    servidor.parar();
+}
+
+#[tokio::test]
+async fn la_politica_compilada_es_la_que_el_agente_puede_aplicar() {
+    // Comprobacion de forma: el documento que baja a la flota tiene que llevar
+    // su version dentro y las reglas con sus parametros ya normalizados, porque
+    // el agente lo guarda en disco y lo aplica sin volver a preguntar.
+    let regla = Regla {
+        id: uuid::Uuid::new_v4(),
+        nombre: "smb".into(),
+        tipo: "bloquear_puerto".into(),
+        parametros: validar(
+            TipoRegla::BloquearPuerto,
+            &serde_json::json!({"puerto": 445}),
+        )
+        .unwrap(),
+        activa: true,
+        severidad: 3,
+        creada_por: "operador".into(),
+    };
+    let pol = compilar_politica(9, &[regla]);
+    assert_eq!(pol["version"], 9);
+    assert!(pol["generada_en"].is_string());
+    let r = &pol["reglas"][0];
+    assert_eq!(r["tipo"], "bloquear_puerto");
+    assert_eq!(r["parametros"]["puerto"], 445);
+    assert_eq!(r["parametros"]["direccion"], "ambas", "sin huecos");
+}

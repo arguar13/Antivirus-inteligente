@@ -33,6 +33,7 @@ use aegis_server::cache::Cache;
 use aegis_server::config::Config;
 use aegis_server::dominio::ServicioFlota;
 use aegis_server::error::ErrorServidor;
+use aegis_server::notificador::Notificador;
 use aegis_server::{api, ca, flota, grpc, pb};
 
 /// Validez del certificado del propio plano de control.
@@ -61,6 +62,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cfg.intervalo_latido.as_secs(),
     ));
 
+    // Puente de avisos entre instancias: sin el, una regla publicada contra otra
+    // instancia no despertaria a los agentes suscritos a esta.
+    let (version_actual, _) = almacen
+        .politica_activa()
+        .await
+        .unwrap_or((0, serde_json::Value::Null));
+    let notificador = Notificador::iniciar(&cfg.pg_url, version_actual).await?;
+    tracing::info!(
+        version_politica = version_actual,
+        "escucha de avisos de politica activa"
+    );
+
     // --- Transporte nativo de la flota (mTLS) ------------------------------
     // Se arranca ANTES que las superficies de administracion: si la flota no
     // puede reportar, el panel no tiene nada que mostrar.
@@ -83,10 +96,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let ca = Arc::new(ca_flota.autoridad);
     let id_servidor = ca.emitir("control-plane", VALIDEZ_CERT_SERVIDOR_SEG)?;
-    let manejador = Arc::new(flota::ManejadorPersistente::nuevo(
-        servicio.clone(),
-        tokio::runtime::Handle::current(),
-    ));
+    let manejador = Arc::new(
+        flota::ManejadorPersistente::nuevo(servicio.clone(), tokio::runtime::Handle::current())
+            .con_avisos(notificador.suscriptor()),
+    );
     let servidor_flota = ServidorFlota::nuevo(&id_servidor, &ca.cert_der(), manejador)?;
     let flota_en_ejecucion = servidor_flota.escuchar(&cfg.flota_addr)?;
     tracing::info!(direccion = %flota_en_ejecucion.direccion(), "transporte nativo de flota escuchando (mTLS)");

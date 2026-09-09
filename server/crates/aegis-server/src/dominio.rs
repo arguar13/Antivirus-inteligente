@@ -12,7 +12,7 @@
 
 use chrono::{DateTime, TimeZone, Utc};
 
-use crate::almacen::{Almacen, EstadoLatido, NuevaAlerta};
+use crate::almacen::{Almacen, EstadoLatido, IngestaStix, NodoGrafo, NuevaAlerta};
 use crate::error::Resultado;
 
 /// Servicio de flota: la logica que ven todos los transportes.
@@ -206,6 +206,81 @@ impl ServicioFlota {
         };
         self.almacen.registrar_alerta(cn, &alerta).await
     }
+}
+
+impl ServicioFlota {
+    /// Ingiere un bundle de inteligencia STIX 2.1 entregado por un agente.
+    pub async fn ingerir_stix(
+        &self,
+        cn: &str,
+        bundle_json: &str,
+        momento_unix: u64,
+    ) -> Resultado<IngestaStix> {
+        // Un bundle desmesurado no debe poder convertirse en una carga de
+        // escritura arbitraria: el transporte ya acota la trama, y aqui se acota
+        // ademas lo que se acepta analizar.
+        const MAX_BUNDLE: usize = 2 * 1024 * 1024;
+        if bundle_json.len() > MAX_BUNDLE {
+            return Err(crate::error::ErrorServidor::Config(format!(
+                "el bundle ocupa {} bytes y el maximo es {MAX_BUNDLE}",
+                bundle_json.len()
+            )));
+        }
+        self.almacen
+            .ingerir_stix(cn, bundle_json, Some(momento_o_ahora(momento_unix)))
+            .await
+    }
+
+    /// Ingiere el subgrafo de linaje que rodea a una deteccion.
+    pub async fn ingerir_grafo(
+        &self,
+        cn: &str,
+        raiz: u64,
+        momento_unix: u64,
+        nodos: &[aegis_fleet::proto::NodoProceso],
+    ) -> Resultado<(uuid::Uuid, u64)> {
+        let convertidos: Vec<NodoGrafo> = nodos
+            .iter()
+            .map(|n| NodoGrafo {
+                clave: n.clave as i64,
+                pid: n.pid as i64,
+                padre: n.padre as i64,
+                creador: n.creador as i64,
+                profundidad: n.profundidad.min(i32::MAX as u32) as i32,
+                // La ruta y la linea de comandos las controla el endpoint: se
+                // acotan para que un agente comprometido no pueda escribir un
+                // texto de tamano arbitrario en la base de datos.
+                imagen: recortar(&n.imagen, 4096),
+                cmdline: recortar(&n.cmdline, 8192),
+                clase: n.clase.min(i32::MAX as u32) as i32,
+                iniciado_ns: n.iniciado_ns as i64,
+                terminado_ns: if n.terminado_ns == 0 {
+                    None
+                } else {
+                    Some(n.terminado_ns as i64)
+                },
+                taints: n.taints as i64,
+                puntuacion: n.puntuacion.min(i32::MAX as u32) as i32,
+            })
+            .collect();
+
+        self.almacen
+            .ingerir_grafo(cn, raiz as i64, momento_o_ahora(momento_unix), &convertidos)
+            .await
+    }
+}
+
+/// Recorta un texto controlado por el par a un maximo de bytes, sin partir un
+/// caracter UTF-8 por la mitad.
+fn recortar(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let mut fin = max;
+    while fin > 0 && !s.is_char_boundary(fin) {
+        fin -= 1;
+    }
+    s[..fin].to_string()
 }
 
 #[cfg(test)]

@@ -50,7 +50,7 @@ pub mod servidor;
 pub mod tls;
 pub mod x509;
 
-pub use cliente::{ClienteFlota, SesionFlota};
+pub use cliente::{CanalPolitica, ClienteFlota, SesionFlota};
 pub use csr::PeticionFirmaLocal;
 pub use emisor::EmisorLocal;
 pub use error::{FleetError, Resultado};

@@ -282,6 +282,21 @@ fn el_conteo_por_bloques_distingue_disperso_de_masivo() {
 /// el producto seria inutilizable el primer dia.
 #[test]
 fn los_procesos_reales_del_sistema_no_dan_falsos_positivos() {
+    // Este barrido EXCLUYE el proceso de pruebas, y no es una comodidad: es una
+    // correccion necesaria.
+    //
+    // Otros tests de este mismo fichero simulan ataques en la memoria del propio
+    // binario de pruebas —`sobrescribir()` mapea una biblioteca real como
+    // privada+ejecutable y la machaca para comprobar que el detector la caza—.
+    // Como Rust ejecuta los tests de un binario en hilos PARALELOS, ese mapeo
+    // corrupto puede estar vivo justo mientras este barrido recorre el sistema.
+    //
+    // Incluirse a si mismo hacia que la prueba fallara de forma intermitente, y
+    // por el peor motivo posible: el detector estaba ACERTANDO. Encontraba
+    // exactamente la condicion que su propio suite acababa de crear. Lo que esta
+    // prueba afirma es que no se marcan procesos LEGITIMOS del sistema, y un
+    // binario que simula ataques en su propia memoria no es uno de ellos.
+    let yo = std::process::id() as i32;
     let mut comparados = 0usize;
     let mut bytes = 0usize;
     let mut sospechosos = Vec::new();
@@ -294,7 +309,7 @@ fn los_procesos_reales_del_sistema_no_dan_falsos_positivos() {
             continue;
         };
         let Ok(pid) = s.parse::<i32>() else { continue };
-        if memory::is_kernel_thread(pid) {
+        if pid == yo || memory::is_kernel_thread(pid) {
             continue;
         }
         let Ok(regs) = memory::regions_of(pid) else {
@@ -442,6 +457,10 @@ fn la_arena_rwx_de_un_jit_enlazado_estaticamente_no_es_una_inyeccion() {
 /// prueba que dice si los umbrales sirven en un sistema real.
 #[test]
 fn el_analisis_completo_no_marca_como_graves_los_procesos_del_sistema() {
+    // Se excluye el propio proceso por el mismo motivo que en
+    // `los_procesos_reales_del_sistema_no_dan_falsos_positivos`: otros tests de
+    // este binario simulan ataques en su memoria, y en paralelo.
+    let yo = std::process::id() as i32;
     let mut analizados = 0usize;
     let mut simbolos = 0usize;
     let mut graves = Vec::new();
@@ -454,7 +473,7 @@ fn el_analisis_completo_no_marca_como_graves_los_procesos_del_sistema() {
             continue;
         };
         let Ok(pid) = s.parse::<i32>() else { continue };
-        if memory::is_kernel_thread(pid) {
+        if pid == yo || memory::is_kernel_thread(pid) {
             continue;
         }
         let Ok(inf) = aegis_evasion::analyze_process(pid) else {

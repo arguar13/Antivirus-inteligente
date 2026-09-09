@@ -428,6 +428,20 @@ impl Almacen {
         .bind(ordenado_por)
         .execute(&self.pool)
         .await?;
+
+        // Avisar por el canal: sin esto, el comando esperaria al latido del
+        // canal de suscripcion (hasta 30 s) o al siguiente latido del agente.
+        // Aislar un endpoint comprometido es justo lo que no puede esperar.
+        let (version, _) = self
+            .politica_activa()
+            .await
+            .unwrap_or((0, serde_json::Value::Null));
+        let _ = sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(CANAL_POLITICA)
+            .bind(version.to_string())
+            .execute(&self.pool)
+            .await;
+
         Ok(id)
     }
 
@@ -541,4 +555,386 @@ fn fila_a_alerta(f: &PgRow) -> VistaAlerta {
         recibido_en: f.get("recibido_en"),
         resuelta: f.get("resuelta"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// FASE 38: inteligencia STIX, grafos de linaje y motor de reglas
+// ---------------------------------------------------------------------------
+
+/// Canal de PostgreSQL por el que se avisa de que hay politica nueva.
+///
+/// Se usa `NOTIFY` y no un aviso en memoria porque el plano de control se
+/// despliega con VARIAS instancias detras de un balanceador: un agente puede
+/// tener su canal de suscripcion abierto contra la instancia A mientras el
+/// operador publica la regla contra la instancia B. Sin este aviso cruzado, ese
+/// endpoint no se enteraria hasta reconectar.
+pub const CANAL_POLITICA: &str = "aegis_politica";
+
+/// Resultado de ingerir un bundle STIX.
+#[derive(Debug, Clone, Default)]
+pub struct IngestaStix {
+    /// Identificador del bundle almacenado.
+    pub id_bundle: String,
+    /// Objetos dados de alta o actualizados.
+    pub objetos: u64,
+    /// Objetos que ya se conocian y han sumado un avistamiento.
+    pub reavistados: u64,
+}
+
+impl Almacen {
+    /// Ingiere un bundle STIX 2.1 completo.
+    ///
+    /// La deduplicacion es la razon de ser de esta funcion: STIX define los
+    /// identificadores para que dos herramientas que observen el MISMO artefacto
+    /// produzcan el MISMO id. Aprovecharlo convierte "cien endpoints han visto
+    /// este fichero" en un objeto con cien avistamientos en vez de cien objetos
+    /// sueltos, que es la diferencia entre ver una campana y ver ruido.
+    pub async fn ingerir_stix(
+        &self,
+        cn: &str,
+        bundle_json: &str,
+        generado_en: Option<DateTime<Utc>>,
+    ) -> Resultado<IngestaStix> {
+        let raiz: serde_json::Value = serde_json::from_str(bundle_json).map_err(|e| {
+            crate::error::ErrorServidor::Config(format!("bundle STIX ilegible: {e}"))
+        })?;
+
+        if raiz.get("type").and_then(|v| v.as_str()) != Some("bundle") {
+            return Err(crate::error::ErrorServidor::Config(
+                "el documento no declara type=bundle".into(),
+            ));
+        }
+
+        let id_bundle = raiz
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("bundle--{}", Uuid::new_v4()));
+
+        let objetos = raiz
+            .get("objects")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"INSERT INTO stix_bundles (id, cn_agente, objetos, generado_en)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT (id) DO UPDATE SET recibido_en = now()"#,
+        )
+        .bind(&id_bundle)
+        .bind(cn)
+        .bind(objetos.len() as i32)
+        .bind(generado_en)
+        .execute(&mut *tx)
+        .await?;
+
+        let mut nuevos = 0u64;
+        let mut reavistados = 0u64;
+        for obj in &objetos {
+            let (Some(id), Some(tipo)) = (
+                obj.get("id").and_then(|v| v.as_str()),
+                obj.get("type").and_then(|v| v.as_str()),
+            ) else {
+                // Un objeto sin id o sin tipo no cumple la especificacion: se
+                // descarta ese objeto, no el bundle entero, para no perder los
+                // que si son validos.
+                continue;
+            };
+
+            let fila = sqlx::query(
+                r#"
+                INSERT INTO stix_objetos (id, tipo, id_bundle, cn_agente, contenido)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (id) DO UPDATE SET
+                    avistamientos = stix_objetos.avistamientos + 1,
+                    ultima_vez    = now(),
+                    contenido     = EXCLUDED.contenido
+                RETURNING avistamientos
+                "#,
+            )
+            .bind(id)
+            .bind(tipo)
+            .bind(&id_bundle)
+            .bind(cn)
+            .bind(obj)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            let avistamientos: i32 = fila.get("avistamientos");
+            if avistamientos > 1 {
+                reavistados += 1;
+            } else {
+                nuevos += 1;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(IngestaStix {
+            id_bundle,
+            objetos: nuevos + reavistados,
+            reavistados,
+        })
+    }
+
+    /// Guarda el subgrafo de linaje que rodea a una deteccion.
+    pub async fn ingerir_grafo(
+        &self,
+        cn: &str,
+        raiz: i64,
+        capturado_en: DateTime<Utc>,
+        nodos: &[NodoGrafo],
+    ) -> Resultado<(Uuid, u64)> {
+        let id = Uuid::new_v4();
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"INSERT INTO grafos (id, cn_agente, raiz, nodos, capturado_en)
+               VALUES ($1, $2, $3, $4, $5)"#,
+        )
+        .bind(id)
+        .bind(cn)
+        .bind(raiz)
+        .bind(nodos.len() as i32)
+        .bind(capturado_en)
+        .execute(&mut *tx)
+        .await?;
+
+        for n in nodos {
+            // Un grafo puede traer la misma clave dos veces si el agente la
+            // incluyo por dos caminos del linaje: se ignora el duplicado en vez
+            // de abortar la ingesta entera por un detalle del emisor.
+            sqlx::query(
+                r#"INSERT INTO grafo_nodos
+                     (id_grafo, clave, pid, padre, creador, profundidad, imagen,
+                      cmdline, clase, iniciado_ns, terminado_ns, taints, puntuacion)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                   ON CONFLICT (id_grafo, clave) DO NOTHING"#,
+            )
+            .bind(id)
+            .bind(n.clave)
+            .bind(n.pid)
+            .bind(n.padre)
+            .bind(n.creador)
+            .bind(n.profundidad)
+            .bind(&n.imagen)
+            .bind(&n.cmdline)
+            .bind(n.clase)
+            .bind(n.iniciado_ns)
+            .bind(n.terminado_ns)
+            .bind(n.taints)
+            .bind(n.puntuacion)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok((id, nodos.len() as u64))
+    }
+
+    // -----------------------------------------------------------------------
+    // Reglas globales
+    // -----------------------------------------------------------------------
+
+    /// Da de alta una regla ya validada.
+    pub async fn crear_regla(
+        &self,
+        nombre: &str,
+        tipo: &str,
+        parametros: &serde_json::Value,
+        severidad: i16,
+        creada_por: &str,
+    ) -> Resultado<Uuid> {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO reglas (id, nombre, tipo, parametros, severidad, creada_por)
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(id)
+        .bind(nombre)
+        .bind(tipo)
+        .bind(parametros)
+        .bind(severidad)
+        .bind(creada_por)
+        .execute(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    /// Lista las reglas, activas y no activas.
+    pub async fn listar_reglas(&self) -> Resultado<Vec<crate::reglas::Regla>> {
+        let filas = sqlx::query(
+            r#"SELECT id, nombre, tipo, parametros, activa, severidad, creada_por
+                 FROM reglas ORDER BY creada_en"#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(filas
+            .iter()
+            .map(|f| crate::reglas::Regla {
+                id: f.get("id"),
+                nombre: f.get("nombre"),
+                tipo: f.get("tipo"),
+                parametros: f.get("parametros"),
+                activa: f.get("activa"),
+                severidad: f.get("severidad"),
+                creada_por: f.get("creada_por"),
+            })
+            .collect())
+    }
+
+    /// Activa o desactiva una regla.
+    pub async fn fijar_regla_activa(&self, id: Uuid, activa: bool) -> Resultado<bool> {
+        let r = sqlx::query("UPDATE reglas SET activa = $2 WHERE id = $1")
+            .bind(id)
+            .bind(activa)
+            .execute(&self.pool)
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    /// Borra una regla.
+    pub async fn borrar_regla(&self, id: Uuid) -> Resultado<bool> {
+        let r = sqlx::query("DELETE FROM reglas WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    /// Recompila las reglas activas, publica la politica y AVISA a la flota.
+    ///
+    /// Las tres cosas van juntas a proposito: publicar sin avisar dejaria a los
+    /// endpoints con politica vieja hasta su siguiente reconexion, y avisar sin
+    /// publicar les haria pedir una version que no existe.
+    pub async fn recompilar_y_publicar(&self, nombre: &str) -> Resultado<i64> {
+        let reglas = self.listar_reglas().await?;
+
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE politicas SET activa = FALSE WHERE activa")
+            .execute(&mut *tx)
+            .await?;
+        let fila = sqlx::query(
+            r#"INSERT INTO politicas (version, nombre, contenido, activa)
+               VALUES ((SELECT COALESCE(max(version), 0) + 1 FROM politicas), $1, $2, TRUE)
+               RETURNING version"#,
+        )
+        .bind(nombre)
+        .bind(serde_json::Value::Null) // se sustituye abajo con la version ya conocida
+        .fetch_one(&mut *tx)
+        .await?;
+        let version: i64 = fila.get("version");
+
+        // La politica lleva su propia version dentro, asi que se compila una vez
+        // conocida y se actualiza la fila en la misma transaccion.
+        let contenido = crate::reglas::compilar_politica(version, &reglas);
+        sqlx::query("UPDATE politicas SET contenido = $2 WHERE version = $1")
+            .bind(version)
+            .bind(&contenido)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+
+        // El aviso va DESPUES del commit: si fuera dentro y la transaccion se
+        // deshiciera, los suscriptores irian a buscar una politica inexistente.
+        sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(CANAL_POLITICA)
+            .bind(version.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        Ok(version)
+    }
+
+    /// Lista los objetos STIX ingeridos, los mas avistados primero.
+    ///
+    /// El orden no es capricho: un indicador visto una vez es una anecdota; uno
+    /// visto en cincuenta endpoints es una campana en curso, y es lo que el
+    /// analista tiene que mirar antes.
+    pub async fn listar_objetos_stix(&self, limite: i64) -> Resultado<Vec<VistaObjetoStix>> {
+        let filas = sqlx::query(
+            r#"SELECT id, tipo, cn_agente, contenido, avistamientos, primera_vez, ultima_vez
+                 FROM stix_objetos
+                ORDER BY avistamientos DESC, ultima_vez DESC
+                LIMIT $1"#,
+        )
+        .bind(limite)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(filas
+            .iter()
+            .map(|f| VistaObjetoStix {
+                id: f.get("id"),
+                tipo: f.get("tipo"),
+                cn_agente: f.try_get("cn_agente").ok().flatten(),
+                contenido: f.get("contenido"),
+                avistamientos: f.get("avistamientos"),
+                primera_vez: f.get("primera_vez"),
+                ultima_vez: f.get("ultima_vez"),
+            })
+            .collect())
+    }
+
+    /// Devuelve la politica activa: su version y su contenido.
+    pub async fn politica_activa(&self) -> Resultado<(i64, serde_json::Value)> {
+        let fila = sqlx::query("SELECT version, contenido FROM politicas WHERE activa LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(match fila {
+            Some(f) => (f.get("version"), f.get("contenido")),
+            None => (0, serde_json::Value::Null),
+        })
+    }
+}
+
+/// Vista de un objeto STIX para el panel.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VistaObjetoStix {
+    /// Identificador STIX.
+    pub id: String,
+    /// Tipo de objeto (indicator, process, file...).
+    pub tipo: String,
+    /// Agente que lo reporto por ultima vez.
+    pub cn_agente: Option<String>,
+    /// Objeto completo tal y como llego.
+    pub contenido: serde_json::Value,
+    /// Cuantas veces se ha visto en la flota.
+    pub avistamientos: i32,
+    /// Primer avistamiento.
+    pub primera_vez: DateTime<Utc>,
+    /// Ultimo avistamiento.
+    pub ultima_vez: DateTime<Utc>,
+}
+
+/// Un nodo de linaje listo para persistir.
+#[derive(Debug, Clone, Default)]
+pub struct NodoGrafo {
+    /// Identidad estable del proceso.
+    pub clave: i64,
+    /// PID observado.
+    pub pid: i64,
+    /// Clave del padre.
+    pub padre: i64,
+    /// Clave del creador.
+    pub creador: i64,
+    /// Profundidad en el linaje.
+    pub profundidad: i32,
+    /// Ruta de la imagen.
+    pub imagen: String,
+    /// Linea de comandos.
+    pub cmdline: String,
+    /// Clase de imagen.
+    pub clase: i32,
+    /// Arranque en nanosegundos.
+    pub iniciado_ns: i64,
+    /// Salida en nanosegundos, si termino.
+    pub terminado_ns: Option<i64>,
+    /// Marcas de contaminacion.
+    pub taints: i64,
+    /// Puntuacion de comportamiento.
+    pub puntuacion: i32,
 }

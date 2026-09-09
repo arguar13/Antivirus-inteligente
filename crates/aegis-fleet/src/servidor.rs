@@ -10,14 +10,16 @@
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 use rustls::ServerConnection;
 
 use crate::error::{FleetError, Resultado};
 use crate::pki::{ahora_unix, Identidad};
 use crate::proto::{
-    AckEvento, AckLatido, Latido, ReporteEvento, RespuestaEnrolamiento, SolicitudEnrolamiento,
+    AckEvento, AckGrafo, AckLatido, AckStix, EmpujePolitica, Latido, ReporteEvento, ReporteGrafo,
+    ReporteStix, RespuestaEnrolamiento, SolicitudEnrolamiento, SuscripcionPolitica,
 };
 use crate::rpc::{
     escribir_marco, leer_marco, Metodo, ESTADO_INTERNO, ESTADO_METODO_DESCONOCIDO, ESTADO_OK,
@@ -36,6 +38,47 @@ pub trait ManejadorFlota: Send + Sync {
     fn latido(&self, cn: &str, req: &Latido) -> AckLatido;
     /// Registra un evento de seguridad.
     fn evento(&self, cn: &str, req: &ReporteEvento) -> AckEvento;
+
+    /// Ingiere un bundle de inteligencia STIX 2.1.
+    ///
+    /// El defecto RECHAZA explicitamente en vez de fingir que ingirio: un
+    /// manejador que no implemente esto debe decirlo, porque aceptar en
+    /// silencio un bundle que se tira es perder inteligencia sin que nadie se
+    /// entere.
+    fn stix(&self, _cn: &str, _req: &ReporteStix) -> AckStix {
+        AckStix {
+            recibido: false,
+            objetos_ingeridos: 0,
+            motivo: "este plano de control no ingiere STIX".to_string(),
+        }
+    }
+
+    /// Ingiere el subgrafo de linaje que rodea a una deteccion.
+    fn grafo(&self, _cn: &str, _req: &ReporteGrafo) -> AckGrafo {
+        AckGrafo {
+            recibido: false,
+            id_grafo: String::new(),
+            nodos_ingeridos: 0,
+        }
+    }
+
+    /// Espera a que haya politica o comandos que EMPUJAR a este agente.
+    ///
+    /// Bloquea hasta que haya novedad o venza `plazo`. Devuelve:
+    ///
+    /// - `Some(empuje)` con contenido nuevo, o con `es_keepalive` si solo vencio
+    ///   el plazo y el canal sigue sano.
+    /// - `None` para cerrar el canal de forma ordenada. Es lo que hace el
+    ///   defecto: un manejador sin soporte de empuje cierra en vez de dejar al
+    ///   agente esperando algo que no va a llegar nunca.
+    fn esperar_empuje(
+        &self,
+        _cn: &str,
+        _version_conocida: u64,
+        _plazo: Duration,
+    ) -> Option<EmpujePolitica> {
+        None
+    }
 }
 
 /// Registro de un agente enrolado.
@@ -59,6 +102,18 @@ pub struct PlanoDeControl {
     agentes: Mutex<HashMap<String, RegistroAgente>>,
     version_politica: AtomicU64,
     incidentes: AtomicU64,
+    /// Bundles STIX ingeridos.
+    stix_recibidos: AtomicU64,
+    /// Subgrafos de linaje ingeridos.
+    grafos_recibidos: AtomicU64,
+    /// Contenido de la politica vigente.
+    politica: Mutex<String>,
+    /// Version publicada y aviso a los suscriptores.
+    ///
+    /// La variable de condicion es lo que convierte la entrega en un EMPUJE: los
+    /// hilos de las suscripciones duermen aqui y despiertan en cuanto el
+    /// operador publica, no en el siguiente latido.
+    cambio: (Mutex<u64>, Condvar),
 }
 
 impl PlanoDeControl {
@@ -68,7 +123,21 @@ impl PlanoDeControl {
             agentes: Mutex::new(HashMap::new()),
             version_politica: AtomicU64::new(1),
             incidentes: AtomicU64::new(0),
+            stix_recibidos: AtomicU64::new(0),
+            grafos_recibidos: AtomicU64::new(0),
+            politica: Mutex::new(String::new()),
+            cambio: (Mutex::new(1), Condvar::new()),
         }
+    }
+
+    /// Numero de bundles STIX ingeridos.
+    pub fn num_stix(&self) -> u64 {
+        self.stix_recibidos.load(Ordering::SeqCst)
+    }
+
+    /// Numero de subgrafos ingeridos.
+    pub fn num_grafos(&self) -> u64 {
+        self.grafos_recibidos.load(Ordering::SeqCst)
     }
 
     /// Numero de agentes enrolados.
@@ -84,6 +153,21 @@ impl PlanoDeControl {
     /// Publica una version de politica nueva (para probar el aviso en el ack).
     pub fn publicar_politica(&self, version: u64) {
         self.version_politica.store(version, Ordering::SeqCst);
+        let (lock, cv) = &self.cambio;
+        if let Ok(mut v) = lock.lock() {
+            *v = version;
+        }
+        // Despertar a TODOS los suscriptores: la politica es global, asi que la
+        // novedad le interesa a cada agente conectado.
+        cv.notify_all();
+    }
+
+    /// Publica una politica con su contenido y despierta a los suscriptores.
+    pub fn publicar_politica_con(&self, version: u64, politica_json: &str) {
+        if let Ok(mut p) = self.politica.lock() {
+            *p = politica_json.to_string();
+        }
+        self.publicar_politica(version);
     }
 }
 
@@ -153,6 +237,99 @@ impl ManejadorFlota for PlanoDeControl {
             } else {
                 String::new()
             },
+        }
+    }
+
+    fn stix(&self, cn: &str, req: &ReporteStix) -> AckStix {
+        // Un bundle vacio o que no sea JSON no se cuenta como ingerido: aceptar
+        // basura contaminaria la inteligencia de la que despues se tiran hilos.
+        let parece_bundle =
+            req.bundle_json.trim_start().starts_with('{') && req.bundle_json.contains("\"type\"");
+        if !parece_bundle {
+            return AckStix {
+                recibido: false,
+                objetos_ingeridos: 0,
+                motivo: "el cuerpo no parece un bundle STIX 2.1".to_string(),
+            };
+        }
+        let conocido = self
+            .agentes
+            .lock()
+            .map(|m| m.contains_key(cn))
+            .unwrap_or(false);
+        if !conocido {
+            return AckStix {
+                recibido: false,
+                objetos_ingeridos: 0,
+                motivo: "el agente no esta enrolado".to_string(),
+            };
+        }
+        self.stix_recibidos.fetch_add(1, Ordering::SeqCst);
+        // Recuento aproximado de objetos: el plano de referencia no analiza el
+        // bundle entero, solo cuenta cuantos objetos declara.
+        let objetos = req.bundle_json.matches("\"type\"").count() as u64;
+        AckStix {
+            recibido: true,
+            objetos_ingeridos: objetos,
+            motivo: String::new(),
+        }
+    }
+
+    fn grafo(&self, cn: &str, req: &ReporteGrafo) -> AckGrafo {
+        let conocido = self
+            .agentes
+            .lock()
+            .map(|m| m.contains_key(cn))
+            .unwrap_or(false);
+        if !conocido || req.nodos.is_empty() {
+            return AckGrafo::default();
+        }
+        let n = self.grafos_recibidos.fetch_add(1, Ordering::SeqCst) + 1;
+        AckGrafo {
+            recibido: true,
+            id_grafo: format!("GRF-{n:06}"),
+            nodos_ingeridos: req.nodos.len() as u64,
+        }
+    }
+
+    fn esperar_empuje(
+        &self,
+        _cn: &str,
+        version_conocida: u64,
+        plazo: Duration,
+    ) -> Option<EmpujePolitica> {
+        let (lock, cv) = &self.cambio;
+        let guarda = lock.lock().ok()?;
+
+        // Si el agente ya viene atrasado, se le entrega sin esperar: acaba de
+        // reconectar y no tiene por que aguardar al siguiente cambio.
+        if *guarda > version_conocida {
+            return Some(self.empuje(*guarda));
+        }
+
+        let (guarda, _tiempo) = cv.wait_timeout(guarda, plazo).ok()?;
+        if *guarda > version_conocida {
+            Some(self.empuje(*guarda))
+        } else {
+            // Venció el plazo sin novedad: un latido del canal. Sin el, un canal
+            // sano y uno muerto son indistinguibles.
+            Some(EmpujePolitica {
+                version: *guarda,
+                es_keepalive: true,
+                ..Default::default()
+            })
+        }
+    }
+}
+
+impl PlanoDeControl {
+    /// Construye el empuje con la politica vigente.
+    fn empuje(&self, version: u64) -> EmpujePolitica {
+        EmpujePolitica {
+            version,
+            politica_json: self.politica.lock().map(|p| p.clone()).unwrap_or_default(),
+            comandos_json: String::new(),
+            es_keepalive: false,
         }
     }
 }
@@ -285,8 +462,58 @@ fn atender_conexion(
             return Ok(());
         };
 
+        // La suscripcion rompe el patron peticion/respuesta: en vez de contestar
+        // y volver a leer, la conexion se convierte en un canal por el que el
+        // servidor escribe cuando hay novedad. Se detecta ANTES de despachar.
+        if Metodo::de_codigo(enrutado) == Some(Metodo::SuscribirPolitica) {
+            let req = match SuscripcionPolitica::decodificar(&cuerpo) {
+                Ok(r) => r,
+                Err(_) => {
+                    let _ = escribir_marco(&mut tls, ESTADO_INTERNO, b"suscripcion invalida");
+                    return Ok(());
+                }
+            };
+            return atender_suscripcion(&manejador, &identidad, &req, &mut tls);
+        }
+
         let (estado, respuesta) = despachar(&manejador, &identidad, enrutado, &cuerpo);
         escribir_marco(&mut tls, estado, &respuesta)?;
+    }
+}
+
+/// Plazo tras el cual, sin novedad, se envia un latido por el canal de empuje.
+///
+/// Un canal que solo habla cuando hay novedades es indistinguible de uno muerto:
+/// ni el agente sabe si sigue suscrito ni el servidor si el agente sigue ahi.
+/// Treinta segundos detectan la caida pronto sin convertir el canal en trafico.
+const PLAZO_KEEPALIVE: Duration = Duration::from_secs(30);
+
+/// Atiende un canal de suscripcion: escribe empujes hasta que se cierre.
+///
+/// El hilo de esta conexion se queda dormido dentro de `esperar_empuje` y
+/// despierta en cuanto el operador publica politica. Ese es el mecanismo que
+/// hace que "bloquear el puerto 445 en toda la flota" llegue a los endpoints en
+/// milisegundos y no en el siguiente latido.
+fn atender_suscripcion(
+    manejador: &Arc<dyn ManejadorFlota>,
+    cn: &str,
+    req: &SuscripcionPolitica,
+    tls: &mut rustls::StreamOwned<ServerConnection, TcpStream>,
+) -> Resultado<()> {
+    let mut version_entregada = req.version_conocida;
+    loop {
+        let Some(empuje) = manejador.esperar_empuje(cn, version_entregada, PLAZO_KEEPALIVE) else {
+            // El manejador cierra el canal de forma ordenada.
+            return Ok(());
+        };
+        if !empuje.es_keepalive {
+            version_entregada = empuje.version;
+        }
+        // Un fallo de escritura significa que el agente se fue: se termina sin
+        // ruido, que es lo normal cuando un endpoint se apaga.
+        if escribir_marco(tls, ESTADO_OK, &empuje.codificar()).is_err() {
+            return Ok(());
+        }
     }
 }
 
@@ -326,5 +553,26 @@ fn despachar(
             Ok(req) => (ESTADO_OK, manejador.evento(cn, &req).codificar()),
             Err(_) => (ESTADO_INTERNO, b"reporte invalido".to_vec()),
         },
+        Metodo::ReportarStix => match ReporteStix::decodificar(cuerpo) {
+            Ok(req) => {
+                let ack = manejador.stix(cn, &req);
+                if ack.recibido {
+                    (ESTADO_OK, ack.codificar())
+                } else {
+                    (ESTADO_RECHAZADO, ack.motivo.clone().into_bytes())
+                }
+            }
+            Err(_) => (ESTADO_INTERNO, b"bundle STIX invalido".to_vec()),
+        },
+        Metodo::ReportarGrafo => match ReporteGrafo::decodificar(cuerpo) {
+            Ok(req) => (ESTADO_OK, manejador.grafo(cn, &req).codificar()),
+            Err(_) => (ESTADO_INTERNO, b"grafo invalido".to_vec()),
+        },
+        // La suscripcion no pasa por aqui: no es peticion/respuesta, sino un
+        // canal que queda abierto. La atiende `atender_conexion`.
+        Metodo::SuscribirPolitica => (
+            ESTADO_INTERNO,
+            b"la suscripcion no se despacha como llamada unaria".to_vec(),
+        ),
     }
 }

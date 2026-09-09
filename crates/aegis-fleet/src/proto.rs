@@ -394,3 +394,354 @@ impl AckEvento {
         Ok(m)
     }
 }
+
+// ---------------------------------------------------------------------------
+// FASE 38: telemetria de inteligencia y empuje de politica
+// ---------------------------------------------------------------------------
+
+/// Numero maximo de nodos que se aceptan en un grafo.
+///
+/// El tamano de trama ya acota la memoria, pero un limite explicito sobre el
+/// NUMERO de nodos protege ademas el coste de insertarlos en la base de datos:
+/// un agente comprometido no debe poder convertir un reporte en una carga de
+/// escritura arbitraria sobre el plano de control.
+pub const MAX_NODOS_GRAFO: usize = 4096;
+
+/// `StixReport`: el agente entrega un bundle STIX 2.1 completo.
+///
+/// El bundle viaja como JSON porque STIX 2.1 ES JSON: reempaquetarlo en campos
+/// protobuf obligaria a mantener aqui un esquema paralelo al estandar y a
+/// reconstruirlo en el servidor, con la garantia de divergir en cuanto el
+/// estandar evolucione. Se transporta tal cual lo genera `aegis-forensics`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReporteStix {
+    /// Identidad del agente que lo envia.
+    pub id_agente: String,
+    /// Bundle STIX 2.1 serializado en JSON.
+    pub bundle_json: String,
+    /// Momento de generacion en el endpoint.
+    pub momento_unix: u64,
+}
+
+impl ReporteStix {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_str(&mut b, 1, &self.id_agente);
+        escribir_str(&mut b, 2, &self.bundle_json);
+        escribir_u64(&mut b, 3, self.momento_unix);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Bytes(1, v) => m.id_agente = como_str(v)?,
+                Campo::Bytes(2, v) => m.bundle_json = como_str(v)?,
+                Campo::Entero(3, v) => m.momento_unix = v,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// `StixAck`: acuse de la ingesta del bundle.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AckStix {
+    /// Si el bundle se ingirio.
+    pub recibido: bool,
+    /// Cuantos objetos STIX se dieron de alta.
+    pub objetos_ingeridos: u64,
+    /// Motivo del rechazo, si lo hubo.
+    pub motivo: String,
+}
+
+impl AckStix {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_bool(&mut b, 1, self.recibido);
+        escribir_u64(&mut b, 2, self.objetos_ingeridos);
+        escribir_str(&mut b, 3, &self.motivo);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Entero(1, v) => m.recibido = v != 0,
+                Campo::Entero(2, v) => m.objetos_ingeridos = v,
+                Campo::Bytes(3, v) => m.motivo = como_str(v)?,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// Un nodo del grafo de linaje de procesos.
+///
+/// Refleja el `ProcessNode` del agente. La clave NO es un PID: los PID se
+/// reciclan, y un ataque que espere al reciclado consigue que la telemetria
+/// atribuya sus acciones a un proceso inocente ya terminado. La clave deriva de
+/// `(pid, start_boottime)`, cuyo par no se repite en la vida del sistema.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NodoProceso {
+    /// Identidad estable del proceso.
+    pub clave: u64,
+    /// PID observado (informativo).
+    pub pid: u32,
+    /// Clave del padre.
+    pub padre: u64,
+    /// Clave del creador real (puede diferir del padre tras un reparento).
+    pub creador: u64,
+    /// Profundidad en el linaje.
+    pub profundidad: u32,
+    /// Ruta de la imagen ejecutada.
+    pub imagen: String,
+    /// Linea de comandos.
+    pub cmdline: String,
+    /// Clase de imagen segun la clasificacion del agente.
+    pub clase: u32,
+    /// Instante de arranque en nanosegundos de monotonico.
+    pub iniciado_ns: u64,
+    /// Instante de salida, 0 si sigue vivo.
+    pub terminado_ns: u64,
+    /// Marcas de contaminacion propagadas.
+    pub taints: u32,
+    /// Puntuacion de comportamiento acumulada.
+    pub puntuacion: u32,
+}
+
+impl NodoProceso {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_u64(&mut b, 1, self.clave);
+        escribir_u64(&mut b, 2, self.pid as u64);
+        escribir_u64(&mut b, 3, self.padre);
+        escribir_u64(&mut b, 4, self.creador);
+        escribir_u64(&mut b, 5, self.profundidad as u64);
+        escribir_str(&mut b, 6, &self.imagen);
+        escribir_str(&mut b, 7, &self.cmdline);
+        escribir_u64(&mut b, 8, self.clase as u64);
+        escribir_u64(&mut b, 9, self.iniciado_ns);
+        escribir_u64(&mut b, 10, self.terminado_ns);
+        escribir_u64(&mut b, 11, self.taints as u64);
+        escribir_u64(&mut b, 12, self.puntuacion as u64);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Entero(1, v) => m.clave = v,
+                Campo::Entero(2, v) => m.pid = v as u32,
+                Campo::Entero(3, v) => m.padre = v,
+                Campo::Entero(4, v) => m.creador = v,
+                Campo::Entero(5, v) => m.profundidad = v as u32,
+                Campo::Bytes(6, v) => m.imagen = como_str(v)?,
+                Campo::Bytes(7, v) => m.cmdline = como_str(v)?,
+                Campo::Entero(8, v) => m.clase = v as u32,
+                Campo::Entero(9, v) => m.iniciado_ns = v,
+                Campo::Entero(10, v) => m.terminado_ns = v,
+                Campo::Entero(11, v) => m.taints = v as u32,
+                Campo::Entero(12, v) => m.puntuacion = v as u32,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// `GraphReport`: el subgrafo de linaje que rodea a una deteccion.
+///
+/// Una deteccion aislada casi nunca concluye nada: `python` abriendo un socket
+/// es rutina; `libreoffice -> sh -> python` abriendo un socket es un incidente.
+/// Por eso el agente no envia el proceso culpable, sino su linaje.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReporteGrafo {
+    /// Identidad del agente.
+    pub id_agente: String,
+    /// Clave del nodo que disparo el reporte.
+    pub raiz: u64,
+    /// Momento de captura en el endpoint.
+    pub momento_unix: u64,
+    /// Nodos del subgrafo.
+    pub nodos: Vec<NodoProceso>,
+}
+
+impl ReporteGrafo {
+    /// Serializa al formato de cable.
+    ///
+    /// Los nodos van como campo repetido delimitado por longitud, que es
+    /// exactamente como protobuf codifica un `repeated message`.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_str(&mut b, 1, &self.id_agente);
+        escribir_u64(&mut b, 2, self.raiz);
+        escribir_u64(&mut b, 3, self.momento_unix);
+        for nodo in &self.nodos {
+            escribir_bytes(&mut b, 4, &nodo.codificar());
+        }
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    ///
+    /// Rechaza un grafo con mas nodos de los permitidos ANTES de haberlos
+    /// materializado todos: el limite no sirve de nada si para comprobarlo hay
+    /// que reservar primero la memoria que se queria acotar.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Bytes(1, v) => m.id_agente = como_str(v)?,
+                Campo::Entero(2, v) => m.raiz = v,
+                Campo::Entero(3, v) => m.momento_unix = v,
+                Campo::Bytes(4, v) => {
+                    if m.nodos.len() >= MAX_NODOS_GRAFO {
+                        return Err(FleetError::Protocolo(format!(
+                            "el grafo excede los {MAX_NODOS_GRAFO} nodos permitidos"
+                        )));
+                    }
+                    m.nodos.push(NodoProceso::decodificar(v)?);
+                }
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// `GraphAck`: acuse del subgrafo.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AckGrafo {
+    /// Si el grafo se ingirio.
+    pub recibido: bool,
+    /// Identificador asignado al grafo.
+    pub id_grafo: String,
+    /// Numero de nodos dados de alta.
+    pub nodos_ingeridos: u64,
+}
+
+impl AckGrafo {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_bool(&mut b, 1, self.recibido);
+        escribir_str(&mut b, 2, &self.id_grafo);
+        escribir_u64(&mut b, 3, self.nodos_ingeridos);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Entero(1, v) => m.recibido = v != 0,
+                Campo::Bytes(2, v) => m.id_grafo = como_str(v)?,
+                Campo::Entero(3, v) => m.nodos_ingeridos = v,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// `PolicySubscribe`: el agente abre un canal para RECIBIR politica.
+///
+/// A diferencia de las demas llamadas, esta no se responde y se cierra: la
+/// conexion queda abierta y el servidor escribe por ella cuando hay algo que
+/// entregar. Es lo que convierte la entrega de politica en un EMPUJE real —el
+/// endpoint se entera en milisegundos de que el operador bloqueo un puerto— en
+/// vez de esperar al siguiente latido.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SuscripcionPolitica {
+    /// Identidad del agente.
+    pub id_agente: String,
+    /// Version de politica que el agente ya tiene aplicada.
+    pub version_conocida: u64,
+}
+
+impl SuscripcionPolitica {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_str(&mut b, 1, &self.id_agente);
+        escribir_u64(&mut b, 2, self.version_conocida);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Bytes(1, v) => m.id_agente = como_str(v)?,
+                Campo::Entero(2, v) => m.version_conocida = v,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// `PolicyPush`: lo que el servidor escribe por el canal de suscripcion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EmpujePolitica {
+    /// Version de la politica que se entrega.
+    pub version: u64,
+    /// Politica en JSON (reglas globales).
+    pub politica_json: String,
+    /// Comandos dirigidos a ESTE agente, en JSON.
+    pub comandos_json: String,
+    /// Si el marco es solo una senal de vida sin contenido nuevo.
+    ///
+    /// Un canal que solo habla cuando hay novedades es indistinguible de un
+    /// canal muerto. El latido del canal permite a los dos extremos detectar la
+    /// caida sin esperar al plazo del sistema operativo.
+    pub es_keepalive: bool,
+}
+
+impl EmpujePolitica {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_u64(&mut b, 1, self.version);
+        escribir_str(&mut b, 2, &self.politica_json);
+        escribir_str(&mut b, 3, &self.comandos_json);
+        escribir_bool(&mut b, 4, self.es_keepalive);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Entero(1, v) => m.version = v,
+                Campo::Bytes(2, v) => m.politica_json = como_str(v)?,
+                Campo::Bytes(3, v) => m.comandos_json = como_str(v)?,
+                Campo::Entero(4, v) => m.es_keepalive = v != 0,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}

@@ -16,8 +16,11 @@ use crate::error::{FleetError, Resultado};
 use crate::proto::{
     AckEvento, AckLatido, Latido, ReporteEvento, RespuestaEnrolamiento, SolicitudEnrolamiento,
 };
+use crate::proto::{
+    AckGrafo, AckStix, EmpujePolitica, ReporteGrafo, ReporteStix, SuscripcionPolitica,
+};
 use crate::rotacion::RotadorCertificados;
-use crate::rpc::{llamada_unaria, Metodo};
+use crate::rpc::{escribir_marco, leer_marco, llamada_unaria, Metodo, ESTADO_OK};
 use crate::tls::{cn_del_par, config_cliente};
 
 /// Nombre de servidor que presenta el agente en el SNI.
@@ -59,11 +62,73 @@ impl SesionFlota {
         AckEvento::decodificar(&cuerpo)
     }
 
+    /// Entrega un bundle de inteligencia STIX 2.1.
+    pub fn reportar_stix(&mut self, req: &ReporteStix) -> Resultado<AckStix> {
+        let cuerpo = llamada_unaria(&mut self.tls, Metodo::ReportarStix, &req.codificar())?;
+        AckStix::decodificar(&cuerpo)
+    }
+
+    /// Entrega el subgrafo de linaje que rodea a una deteccion.
+    pub fn reportar_grafo(&mut self, req: &ReporteGrafo) -> Resultado<AckGrafo> {
+        let cuerpo = llamada_unaria(&mut self.tls, Metodo::ReportarGrafo, &req.codificar())?;
+        AckGrafo::decodificar(&cuerpo)
+    }
+
+    /// Convierte esta sesion en un canal de politica y devuelve el canal.
+    ///
+    /// A partir de aqui la sesion deja de servir para llamadas unarias: la
+    /// conexion pertenece al canal, que solo lee lo que el servidor empuje. Por
+    /// eso consume `self` —el sistema de tipos impide usarla mal despues—.
+    pub fn suscribir_politica(mut self, version_conocida: u64) -> Resultado<CanalPolitica> {
+        let req = SuscripcionPolitica {
+            id_agente: String::new(),
+            version_conocida,
+        };
+        escribir_marco(
+            &mut self.tls,
+            Metodo::SuscribirPolitica.codigo(),
+            &req.codificar(),
+        )?;
+        Ok(CanalPolitica { sesion: self })
+    }
+
     /// Tras el primer intercambio, el certificado del servidor ya esta a mano.
     fn actualizar_servidor(&mut self) {
         if self.cn_servidor.is_none() {
             self.cn_servidor = cn_del_par(self.tls.conn.peer_certificates());
         }
+    }
+}
+
+/// Canal por el que el agente RECIBE politica empujada por el servidor.
+///
+/// Cada llamada a [`CanalPolitica::siguiente`] bloquea hasta que el plano de
+/// control escribe algo: politica nueva, comandos para este endpoint, o un
+/// latido del canal. Es lo que hace que una orden global —"bloquear el puerto
+/// 445 en toda la flota"— llegue en milisegundos en vez de esperar al siguiente
+/// latido del agente.
+pub struct CanalPolitica {
+    sesion: SesionFlota,
+}
+
+impl CanalPolitica {
+    /// Espera el siguiente empuje del servidor.
+    ///
+    /// Bloquea. El servidor envia un latido de canal periodicamente, asi que un
+    /// silencio mas largo que ese periodo significa que la conexion murio.
+    pub fn siguiente(&mut self) -> Resultado<EmpujePolitica> {
+        let (estado, cuerpo) = leer_marco(&mut self.sesion.tls)?;
+        if estado != ESTADO_OK {
+            return Err(FleetError::Protocolo(format!(
+                "el plano de control cerro el canal de politica con estado {estado}"
+            )));
+        }
+        EmpujePolitica::decodificar(&cuerpo)
+    }
+
+    /// CN del servidor autenticado.
+    pub fn servidor_autenticado(&self) -> Option<&str> {
+        self.sesion.servidor_autenticado()
     }
 }
 
