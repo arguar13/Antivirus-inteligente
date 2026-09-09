@@ -14,6 +14,11 @@ workspace = true
 thiserror = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
 rcgen = { version = "0.13", default-features = false, features = ["ring", "pem", "x509-parser"] }
+# Ya viene en el arbol a traves de rcgen (que lleva su feature `pem` activada):
+# declararlo explicitamente no anade ni un crate nuevo a la cadena de suministro,
+# y evita escribir a mano un decodificador PEM —mas codigo y mas fallos— solo
+# para conservar el DER original del certificado de la CA.
+pem = "3"
 rustls-pki-types = "1"
 zeroize = "1"
 sha2 = "0.10"

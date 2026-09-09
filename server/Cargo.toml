@@ -1,0 +1,28 @@
+# Workspace del plano de control de AegisCore (FASE 37).
+#
+# Es un workspace SEPARADO del agente a proposito. El agente es sincrono, sin
+# runtime asincrono, con un presupuesto de memoria estricto (<45 MB) y
+# `panic = "abort"`; el servidor es justo lo contrario: asincrono, con tokio,
+# axum, tonic y pools de conexiones. Mezclarlos contaminaria el arbol de
+# dependencias del agente —que en un EDR ES superficie de ataque— con cientos de
+# crates que solo necesita el servidor. Separandolos, la auditoria de la cadena
+# de suministro del endpoint sigue siendo corta y revisable.
+[workspace]
+resolver = "2"
+members = ["crates/aegis-server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+repository = "https://github.com/arguar13/Antivirus-inteligente"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

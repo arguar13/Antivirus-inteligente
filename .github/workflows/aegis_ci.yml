@@ -159,7 +159,47 @@ jobs:
       - run: ./tools/check-links.sh
 
   # ---------------------------------------------------------------------------
-  # 8. Artefactos de lanzamiento: binarios ESTATICOS (musl), con sumas SHA-256 y
+  # 8. Plano de control (workspace server/). Sus pruebas de integracion hablan
+  #    con PostgreSQL y Redis de VERDAD: levantarlos como servicios cuesta
+  #    segundos y es la diferencia entre probar el sistema y probar una imitacion.
+  # ---------------------------------------------------------------------------
+  servidor:
+    name: Plano de control (backend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: aegis_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    env:
+      AEGIS_TEST_PG_URL: postgres://postgres@127.0.0.1:5432/aegis_test
+      AEGIS_TEST_REDIS_URL: redis://127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      # tonic compila el .proto en tiempo de construccion.
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler postgresql-client redis-tools
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - run: ./tools/ci/servidor.sh
+
+  # ---------------------------------------------------------------------------
+  # 9. Artefactos de lanzamiento: binarios ESTATICOS (musl), con sumas SHA-256 y
   #    manifiesto de procedencia. Solo se construyen si lint y pruebas pasan:
   #    publicar un artefacto de codigo que no compila limpio es peor que no
   #    publicar nada.
@@ -194,7 +234,7 @@ jobs:
           retention-days: 90
 
   # ---------------------------------------------------------------------------
-  # 9. Puerta unica. Es el UNICO check que hay que exigir en la proteccion de
+  # 10. Puerta unica. Es el UNICO check que hay que exigir en la proteccion de
   #    rama: agrega el resultado de todos los demas, asi que anadir un job nuevo
   #    no obliga a reconfigurar GitHub. Falla si cualquier dependencia fallo o
   #    fue cancelada.
@@ -202,7 +242,7 @@ jobs:
   gate:
     name: Puerta de calidad
     if: always()
-    needs: [lint, test, ebpf, sanitizers, fuzz-smoke, supply-chain, docs, artifacts]
+    needs: [lint, test, ebpf, sanitizers, fuzz-smoke, supply-chain, docs, servidor, artifacts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

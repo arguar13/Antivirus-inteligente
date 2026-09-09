@@ -136,6 +136,65 @@ impl AutoridadCertificadora {
         })
     }
 
+    /// Recupera una CA ya existente a partir de su certificado y su clave en PEM.
+    ///
+    /// # Por que hace falta
+    ///
+    /// El plano de control ES la autoridad certificadora de la flota: la que
+    /// firma los certificados con los que los agentes se autentican. Si esa CA
+    /// se regenerase en cada arranque, TODOS los certificados emitidos dejarian
+    /// de validar y la flota entera quedaria fuera al primer reinicio del
+    /// servidor. Una CA de plano de control tiene que sobrevivir al proceso.
+    ///
+    /// # Sobre el certificado que se conserva
+    ///
+    /// `rcgen` no reabre un certificado: reconstruye uno equivalente a partir de
+    /// sus parametros. Ese certificado reconstruido sirve para FIRMAR (mismo
+    /// nombre distinguido y misma clave, luego las hojas encadenan igual), pero
+    /// sus bytes no tienen por que coincidir con los originales. Por eso se
+    /// conserva el DER ORIGINAL tal cual llego: es el que se distribuye a los
+    /// endpoints como ancla de confianza, y tiene que ser byte a byte el mismo
+    /// que ya tengan provisionado.
+    pub fn desde_pem(cert_pem: &str, clave_pem: &str) -> Resultado<AutoridadCertificadora> {
+        let clave = rcgen::KeyPair::from_pem(clave_pem)
+            .map_err(|e| FleetError::Cripto(format!("clave de CA ilegible: {e}")))?;
+        let params = rcgen::CertificateParams::from_ca_cert_pem(cert_pem)
+            .map_err(|e| FleetError::Cripto(format!("certificado de CA ilegible: {e}")))?;
+
+        // El DER autentico, el que ya conocen los agentes.
+        let pem_analizado = pem::parse(cert_pem)
+            .map_err(|e| FleetError::Cripto(format!("PEM de CA invalido: {e}")))?;
+        let cert_der = CertificateDer::from(pem_analizado.contents().to_vec());
+
+        let cert = params
+            .self_signed(&clave)
+            .map_err(|e| FleetError::Cripto(format!("reconstruccion de la CA: {e}")))?;
+
+        Ok(AutoridadCertificadora {
+            cert,
+            clave,
+            cert_der,
+        })
+    }
+
+    /// Exporta el certificado de la CA en PEM.
+    pub fn cert_pem(&self) -> String {
+        self.cert.pem()
+    }
+
+    /// Exporta la clave privada de la CA en PEM.
+    ///
+    /// # Aviso
+    ///
+    /// Esto es el material mas sensible de todo el sistema: quien tenga esta
+    /// clave puede emitir un certificado valido para CUALQUIER identidad de la
+    /// flota y hacerse pasar por el plano de control. Solo debe escribirse en un
+    /// fichero con permisos 0600 y, en un despliegue serio, vivir en un HSM o un
+    /// gestor de claves.
+    pub fn clave_pem(&self) -> String {
+        self.clave.serialize_pem()
+    }
+
     /// Certificado de la CA en DER, para los almacenes de confianza.
     pub fn cert_der(&self) -> CertificateDer<'static> {
         self.cert_der.clone()

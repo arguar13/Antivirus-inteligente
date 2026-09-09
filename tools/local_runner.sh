@@ -46,6 +46,7 @@ declare -a JOBS=(
     "fuzz-smoke"
     "supply-chain"
     "docs"
+    "servidor"
     "artifacts"
 )
 
@@ -58,6 +59,7 @@ comando_de_job() {
         fuzz-smoke)   echo "./tools/fuzz.sh 20" ;;
         supply-chain) echo "./tools/ci/supply_chain.sh" ;;
         docs)         echo "./tools/check-links.sh" ;;
+        servidor)     echo "./tools/ci/servidor.sh" ;;
         artifacts)    echo "./tools/ci/artifacts.sh" ;;
         *)            echo "" ;;
     esac

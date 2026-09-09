@@ -1,0 +1,56 @@
+[package]
+name = "aegis-server"
+description = "Plano de control de AegisCore: ingesta de flota gRPC/mTLS y API de administracion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# --- Transporte nativo de la flota -----------------------------------------
+# El agente (aegis-fleet, FASE 34) habla protobuf con el enmarcado de gRPC sobre
+# mTLS crudo, NO sobre HTTP/2. Depender del propio crate del agente garantiza que
+# el servidor decodifica exactamente lo que el agente codifica: la compatibilidad
+# de cable no es una promesa, es el mismo codigo.
+aegis-fleet = { path = "../../../crates/aegis-fleet" }
+
+# --- Runtime asincrono ------------------------------------------------------
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }
+
+# --- API REST del panel -----------------------------------------------------
+axum = { version = "0.8", features = ["json", "macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "limit"] }
+
+# --- Superficie gRPC estandar (para integraciones de terceros y SIEM) -------
+tonic = { version = "0.13", features = ["tls-ring"] }
+prost = "0.13"
+
+# --- Persistencia -----------------------------------------------------------
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls", "postgres", "macros", "migrate", "json", "chrono", "uuid",
+] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# --- Utilidades -------------------------------------------------------------
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+
+[build-dependencies]
+tonic-build = "0.13"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+# Las pruebas de integracion hablan con PostgreSQL, Redis y mTLS reales.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
+tokio-stream = { version = "0.1", features = ["net"] }

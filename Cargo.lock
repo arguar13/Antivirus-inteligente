@@ -129,6 +129,7 @@ dependencies = [
 name = "aegis-fleet"
 version = "0.1.0"
 dependencies = [
+ "pem",
  "rcgen",
  "rustls",
  "rustls-pki-types",

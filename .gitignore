@@ -42,3 +42,6 @@ crates/aegis-syscallguard/tests/fixtures/syscall_stub
 
 # Artefactos de lanzamiento generados por tools/ci/artifacts.sh (FASE 36).
 /dist/
+
+# Artefactos de compilacion del plano de control (FASE 37).
+/server/target/

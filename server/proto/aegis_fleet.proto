@@ -1,0 +1,66 @@
+// Servicio de flota de AegisCore.
+//
+// IMPORTANTE: los numeros de campo de estos mensajes son EXACTAMENTE los que
+// usa el codec escrito a mano de `aegis-fleet` (crates/aegis-fleet/src/proto.rs).
+// Por eso la superficie gRPC estandar de este servidor y el listener nativo de
+// la flota intercambian los MISMOS bytes de mensaje: lo unico que cambia entre
+// los dos es el transporte (HTTP/2 frente al enmarcado sobre mTLS crudo). Si se
+// toca un numero de campo aqui, hay que tocarlo alli, y al reves.
+syntax = "proto3";
+
+package aegis.fleet.v1;
+
+// Peticion de enrolamiento de un agente en la flota.
+message SolicitudEnrolamiento {
+  string id_agente      = 1;
+  string hostname       = 2;
+  string version_agente = 3;
+  bytes  huella_cert    = 4;
+}
+
+// Veredicto del plano de control sobre el enrolamiento.
+message RespuestaEnrolamiento {
+  bool   aceptado             = 1;
+  string id_flota             = 2;
+  uint64 intervalo_latido_seg = 3;
+  string motivo               = 4;
+}
+
+// Latido periodico: prueba de vida y telemetria minima del agente.
+message Latido {
+  string id_agente        = 1;
+  uint64 momento_unix     = 2;
+  uint64 rss_kb           = 3;
+  uint64 amenazas_activas = 4;
+  uint64 version_politica = 5;
+}
+
+// Respuesta al latido; puede avisar de politica nueva o de un comando pendiente.
+message AckLatido {
+  bool   recibido                   = 1;
+  uint64 version_politica_disponible = 2;
+  bool   hay_comando                = 3;
+}
+
+// Evento de seguridad detectado en el endpoint.
+message ReporteEvento {
+  string id_agente    = 1;
+  uint64 severidad    = 2;
+  string categoria    = 3;
+  string descripcion  = 4;
+  uint64 momento_unix = 5;
+}
+
+// Acuse del evento, con el identificador de incidente asignado.
+message AckEvento {
+  bool   recibido     = 1;
+  string id_incidente = 2;
+}
+
+// Servicio de flota. Las tres llamadas son unarias, igual que en el transporte
+// nativo del agente.
+service AegisFleet {
+  rpc Enrolar(SolicitudEnrolamiento) returns (RespuestaEnrolamiento);
+  rpc Latir(Latido) returns (AckLatido);
+  rpc ReportarEvento(ReporteEvento) returns (AckEvento);
+}
