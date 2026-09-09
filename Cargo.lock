@@ -113,8 +113,11 @@ dependencies = [
 name = "aegis-forensics"
 version = "0.1.0"
 dependencies = [
+ "aegis-audit",
+ "aegis-scal",
  "aegis-scan",
  "libc",
+ "sha2",
  "thiserror 2.0.20",
 ]
 

@@ -434,6 +434,41 @@ def escenario_decepcion():
         fallo(f"la barandilla no rechazo el bloqueo de la propia maquina: {rechazos}")
 
 
+# ---------------------------------------------------------------------------
+# 8. Antiforense: el binario se borra a si mismo (FASE 28)
+# ---------------------------------------------------------------------------
+
+
+def escenario_antiforense():
+    titulo(8, "el proceso borra su binario para que no quede que analizar")
+
+    binario = ejemplo("aegis-forensics", "incident_capture")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar la recogida de incidentes")
+        return
+
+    r = run([binario])
+    salida = dict()
+    for linea in r.stdout.splitlines():
+        partes = linea.split(None, 1)
+        if len(partes) == 2:
+            salida[partes[0]] = partes[1]
+
+    if r.returncode != 0:
+        fallo(f"la recogida fallo: {r.stdout.strip()} {r.stderr.strip()}")
+        return
+
+    if salida.get("CAPTURADO") == "true":
+        ok("el incidente se capturo aunque el binario ya no estaba en disco")
+    else:
+        fallo("el proceso sin binario no se llego a retratar")
+
+    if salida.get("HUECO_REGISTRADO") == "true":
+        ok("el informe deja constancia de que la evidencia se destruyo")
+    else:
+        fallo("la destruccion de la evidencia no quedo registrada")
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -443,9 +478,10 @@ def main():
     escenario_watchdog()
     escenario_sandbox()
     escenario_decepcion()
+    escenario_antiforense()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({7} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({8} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1

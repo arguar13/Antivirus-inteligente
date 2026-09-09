@@ -14,3 +14,9 @@ workspace = true
 thiserror = "2"
 libc = "0.2"
 aegis-scan = { path = "../aegis-scan" }
+aegis-scal = { path = "../aegis-scal" }
+aegis-audit = { path = "../aegis-audit" }
+sha2 = "0.10"
+
+[dev-dependencies]
+aegis-audit = { path = "../aegis-audit" }
