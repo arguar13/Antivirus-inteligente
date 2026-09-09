@@ -64,9 +64,20 @@ PID_REDTEAM=$!
 ) &
 PID_STRESS=$!
 
-echo "  compilacion (pid $PID_BUILD), clippy (pid $PID_CLIPPY), red team (pid $PID_REDTEAM), estres (pid $PID_STRESS)"
+# 5. Ingenieria del caos (FASE 29): corrupcion del buffer de IPC, caidas de red,
+#    saturacion de memoria y cuelgues de hilos. Es la comprobacion de que el
+#    producto no hace nada catastrofico cuando el entorno se rompe, que es lo que
+#    ninguna prueba funcional cubre.
+(
+    cargo test -p aegis-e2e --test chaos_harness -- --nocapture \
+        >"$TMP/chaos.log" 2>&1
+    echo $? > "$TMP/chaos.rc"
+) &
+PID_CHAOS=$!
+
+echo "  compilacion (pid $PID_BUILD), clippy (pid $PID_CLIPPY), red team (pid $PID_REDTEAM), estres (pid $PID_STRESS), caos (pid $PID_CHAOS)"
 echo "  esperando..."
-wait "$PID_BUILD" "$PID_CLIPPY" "$PID_REDTEAM" "$PID_STRESS"
+wait "$PID_BUILD" "$PID_CLIPPY" "$PID_REDTEAM" "$PID_STRESS" "$PID_CHAOS"
 
 # --- Verificacion de recursos (secuencial: necesita el binario de release) ----
 titulo "Verificacion de recursos del agente (<= 45 MB)"
@@ -105,12 +116,16 @@ else
 fi
 
 resultado "Clippy (-D warnings)" "$(cat "$TMP/clippy.rc" 2>/dev/null || echo 1)" ""
-resultado "Red Team (5 escenarios)" "$(cat "$TMP/redteam.rc" 2>/dev/null || echo 1)" \
+resultado "Red Team (9 escenarios)" "$(cat "$TMP/redteam.rc" 2>/dev/null || echo 1)" \
     "$(tail -1 "$TMP/redteam.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g')"
 
 STRESS_RC=$(cat "$TMP/stress.rc" 2>/dev/null || echo 1)
 STRESS_INFO=$(grep -E "ritmo del ring" "$TMP/stress.log" 2>/dev/null | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
 resultado "Estres del ring (1M eventos)" "$STRESS_RC" "$STRESS_INFO"
+
+CHAOS_RC=$(cat "$TMP/chaos.rc" 2>/dev/null || echo 1)
+CHAOS_INFO=$(grep -E "^test result" "$TMP/chaos.log" 2>/dev/null | tail -1)
+resultado "Caos (4 familias de fallo)" "$CHAOS_RC" "$CHAOS_INFO"
 
 if [ -n "$RSS_KB" ]; then
     if [ "$RSS_KB" -le "$PRESUPUESTO_KB" ]; then

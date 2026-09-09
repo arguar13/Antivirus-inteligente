@@ -17,7 +17,11 @@ pub enum IocKind {
 
 impl IocKind {
     /// Byte discriminante para el identificador.
-    fn tag(self) -> u8 {
+    ///
+    /// Es publico porque tambien es el discriminante del formato de red de la
+    /// malla: si los dos numeros se separaran, dos agentes de la misma version
+    /// interpretarian el mismo indicador como de tipos distintos.
+    pub fn tag(self) -> u8 {
         match self {
             IocKind::FileSha256 => 1,
             IocKind::Domain => 2,
@@ -44,6 +48,19 @@ pub struct Ioc {
     pub kind: IocKind,
     /// Valor (hash, dominio, IP, nombre de regla).
     pub value: String,
+}
+
+impl IocKind {
+    /// Recupera el tipo a partir de su discriminante.
+    pub fn from_tag(t: u8) -> Option<IocKind> {
+        match t {
+            1 => Some(IocKind::FileSha256),
+            2 => Some(IocKind::Domain),
+            3 => Some(IocKind::Ip),
+            4 => Some(IocKind::YaraRule),
+            _ => None,
+        }
+    }
 }
 
 impl Ioc {

@@ -80,13 +80,20 @@ name = "aegis-e2e"
 version = "0.1.0"
 dependencies = [
  "aegis-agent",
+ "aegis-behavior",
+ "aegis-deception",
  "aegis-ipc",
+ "aegis-mesh",
  "aegis-ml",
  "aegis-net",
  "aegis-ransom",
  "aegis-resp",
+ "aegis-scal",
  "aegis-scan",
+ "aegis-sync",
  "aegis-vuln",
+ "aegis-watchdog",
+ "libc",
 ]
 
 [[package]]
@@ -149,6 +156,17 @@ name = "aegis-kguard"
 version = "0.1.0"
 dependencies = [
  "hmac",
+ "libc",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-mesh"
+version = "0.1.0"
+dependencies = [
+ "aegis-sync",
+ "aes-gcm",
  "libc",
  "sha2",
  "thiserror 2.0.20",

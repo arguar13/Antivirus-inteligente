@@ -469,6 +469,62 @@ def escenario_antiforense():
         fallo("la destruccion de la evidencia no quedo registrada")
 
 
+# ---------------------------------------------------------------------------
+# 9. Malla: propagacion de la vacuna e intruso sin la clave (FASE 29)
+# ---------------------------------------------------------------------------
+
+
+def escenario_malla():
+    titulo(9, "un intruso de la red local intenta inyectar una vacuna falsa")
+
+    binario = ejemplo("aegis-mesh", "mesh_node")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar el nodo de la malla")
+        return
+
+    oyente = subprocess.Popen(
+        [binario, "--listen", "--seconds", "5"],
+        cwd=RAIZ,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        cabecera = oyente.stdout.readline().strip()
+        if not cabecera.startswith("PUERTO "):
+            fallo(f"el nodo oyente no arranco: {cabecera!r}")
+            return
+        destino = "127.0.0.1:" + cabecera.split()[1]
+
+        # 1. Un agente legitimo propaga la vacuna.
+        r = run([binario, "--send", destino])
+        if r.returncode != 0:
+            fallo(f"el agente legitimo no pudo emitir: {r.stderr.strip()}")
+
+        # 2. Un intruso de la misma red, sin la clave de la malla.
+        run([binario, "--send", destino, "--wrong-key"])
+
+        salida, _ = oyente.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        oyente.kill()
+        fallo("el nodo oyente no termino a tiempo")
+        return
+
+    lineas = salida.splitlines()
+    recibidas = [l for l in lineas if l.startswith("RECIBIDA")]
+    resumen = next((l for l in lineas if l.startswith("RESUMEN")), "")
+
+    if len(recibidas) == 1:
+        ok("la vacuna del agente legitimo se propago por la red local")
+    else:
+        fallo(f"la propagacion legitima fallo: {recibidas}")
+
+    if "no_autenticos=1" in resumen:
+        ok("la vacuna del intruso sin la clave se rechazo")
+    else:
+        fallo(f"el intruso no fue rechazado como se esperaba: {resumen}")
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -479,9 +535,10 @@ def main():
     escenario_sandbox()
     escenario_decepcion()
     escenario_antiforense()
+    escenario_malla()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({8} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({9} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1

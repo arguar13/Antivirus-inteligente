@@ -20,3 +20,10 @@ aegis-ipc = { path = "../aegis-ipc" }
 aegis-scan = { path = "../aegis-scan" }
 aegis-ml = { path = "../aegis-ml" }
 aegis-ransom = { path = "../aegis-ransom" }
+aegis-scal = { path = "../aegis-scal" }
+aegis-behavior = { path = "../aegis-behavior" }
+aegis-deception = { path = "../aegis-deception" }
+aegis-mesh = { path = "../aegis-mesh" }
+aegis-sync = { path = "../aegis-sync" }
+aegis-watchdog = { path = "../aegis-watchdog" }
+libc = "0.2"
