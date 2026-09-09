@@ -13,12 +13,16 @@
 //! - [`abi`]: espejo `#[repr(C)]` de `shared/include/aegis_abi.h`, con el layout
 //!   verificado en tiempo de compilacion.
 //! - [`ring`]: consumidor SPSC sin copias del ring compartido.
+//! - [`producer`]: lado productor del mismo protocolo, para bancos de carga
+//!   y fuentes de telemetria de espacio de usuario.
 
 #![cfg_attr(not(test), no_std)]
 #![deny(missing_docs)]
 
 pub mod abi;
+pub mod producer;
 pub mod ring;
 
 pub use abi::{AEGIS_ABI_VERSION, AEGIS_EVT_MAGIC, AEGIS_RING_MAGIC};
+pub use producer::{PushOutcome, RingProducer};
 pub use ring::{EventView, Payload, RingConsumer, RingError};

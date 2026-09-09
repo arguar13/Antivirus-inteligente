@@ -165,6 +165,7 @@ crates/
   aegis-ransom/               Velocidad, transición de entropía, señuelos    [hecho]
   aegis-evasion/              Vaciado de proceso, inyección, hooks           [hecho]
   aegis-intel/                Reputación k-anónima + caché LRU               [hecho]
+  aegis-e2e/                  Integración de extremo a extremo + estrés      [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)

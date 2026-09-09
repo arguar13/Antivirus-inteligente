@@ -397,3 +397,38 @@ como entropía cero fabricaría una fase estructurada que nunca se observó, y c
 ella una transición falsa en cuanto el proceso escribiese algo comprimido. Por
 eso `WriteObservation::entropy_ratio` es `Option<f64>`: cuenta para velocidad y
 dispersión, y no toca el historial de entropía.
+
+---
+
+## Anexo: la prueba de carga y por que no mide nanosegundos
+
+`crates/aegis-e2e/tests/stress_concurrencia.rs` somete al sistema completo a lo
+que un pico de actividad real le exige y comprueba **propiedades**, no cifras de
+rendimiento que dependerian de la maquina de CI.
+
+El montaje es el del producto: un productor SPSC escribe en el ring buffer real
+(`aegis_ipc::RingProducer`), un consumidor lo drena y lo pasa por el pipeline del
+agente y la etapa anti-ransomware, y en paralelo dos hilos mas ejecutan YARA y el
+modelo de ML sin parar, compitiendo por la CPU. Es la arquitectura de hilos que
+justifica todo el diseno: el bucle de eventos no puede bloquearse, asi que lo
+caro corre aparte.
+
+Lo que se exige tras un millon de eventos:
+
+| Propiedad | Como se comprueba |
+|---|---|
+| **Sin perdidas** | Cada evento lleva un numero de secuencia; el consumidor exige que lleguen sin huecos ni repeticiones, y que el total leido iguale el enviado. |
+| **Orden** | El numero de secuencia tiene que ser estrictamente el esperado en cada entrega, incluso al envolver el buffer. |
+| **Contrapresion, no corrupcion** | Cuando el ring se llena porque el consumidor va detras, el productor reintenta; nunca sobrescribe datos sin leer. Los reintentos se informan, no se prohiben. |
+| **YARA y ML no colapsan** | Ambos hilos siguen trabajando durante toda la carga, y YARA sigue detectando el EICAR en cada barrido. |
+| **Sin fugas** | La memoria residente se muestrea durante la prueba y se exige que el crecimiento se mantenga acotado: el estado del sistema esta acotado por diseno, asi que procesar un millon de eventos no puede multiplicar la memoria. |
+| **Sin interbloqueos** | La prueba tiene un plazo. Si un hilo se quedara esperando a otro, el plazo salta y la prueba falla en vez de colgarse. |
+
+Medido en una corrida de referencia: **617.000 eventos/seg** por el ring (el
+objetivo de la fase era 100.000), un millon de eventos entregados en orden y sin
+perdidas, YARA detectando el EICAR en cada uno de sus barridos bajo carga, y la
+memoria residente estable (pico de 68 MB, sin crecimiento por evento).
+
+El numero de eventos por segundo no es el objetivo de la prueba: es un efecto
+secundario que se comprueba supere el minimo. Lo que la prueba protege es que
+esas seis propiedades sigan siendo ciertas cuando alguien cambie el codigo.

@@ -37,8 +37,11 @@ version = "0.1.0"
 dependencies = [
  "aegis-agent",
  "aegis-ipc",
+ "aegis-ml",
  "aegis-net",
+ "aegis-ransom",
  "aegis-resp",
+ "aegis-scan",
  "aegis-vuln",
 ]
 
