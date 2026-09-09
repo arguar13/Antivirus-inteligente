@@ -1,0 +1,18 @@
+# Estado y proveedores de Terraform: nunca se versionan.
+#
+# El estado contiene identificadores y, segun los recursos, valores sensibles;
+# vive en un backend remoto cifrado, no en el repositorio.
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+terraform/*.tfplan
+
+# Inventario real de la flota (el de ejemplo si se versiona).
+ansible/inventario.ini
+ansible/secretos/
+
+# Artefactos del instalador de Windows.
+windows/payload/
+windows/*.msi

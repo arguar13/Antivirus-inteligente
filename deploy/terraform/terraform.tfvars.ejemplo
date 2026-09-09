@@ -1,0 +1,33 @@
+# Ejemplo de configuracion. Copiar a terraform.tfvars y ajustar.
+#
+# terraform.tfvars NO se versiona: ver deploy/.gitignore.
+
+region  = "eu-west-1"
+entorno = "produccion"
+nombre  = "aegis"
+
+zonas = ["eu-west-1a", "eu-west-1b", "eu-west-1c"]
+
+# OBLIGATORIO y sin valor por defecto: la consola puede aislar toda la flota.
+# Poner aqui solo los rangos de la red de administracion.
+redes_administracion = [
+  "203.0.113.0/24", # VPN corporativa
+  "198.51.100.0/28" # oficina central
+]
+
+# El puerto de flota se protege con mTLS mutuo, no con la topologia de red: los
+# endpoints pueden estar en cualquier parte, incluso fuera de la organizacion.
+redes_flota = ["0.0.0.0/0"]
+
+# AMI construida por el pipeline, con el binario auditado dentro.
+imagen_servidor = "ami-0123456789abcdef0"
+
+# Certificado de ACM para la consola.
+certificado_consola_arn = "arn:aws:acm:eu-west-1:111122223333:certificate/00000000-0000-0000-0000-000000000000"
+
+instancias_servidor          = 3
+clase_instancia_servidor     = "c7g.large"
+clase_base_datos             = "db.m7g.large"
+almacenamiento_base_datos_gb = 200
+retencion_copias_dias        = 35
+nodos_redis                  = 2

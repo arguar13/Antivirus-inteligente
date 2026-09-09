@@ -1,0 +1,34 @@
+---
+# Valores por defecto del rol. Se sobreescriben desde el inventario o el
+# playbook; ninguno guarda un secreto.
+
+# Origen del paquete del agente. Un repositorio interno, no Internet: el
+# artefacto que se instala tiene que ser el que publico el pipeline, con su
+# suma SHA-256 verificada.
+aegis_agente_repositorio_url: "https://paquetes.interno.empresa.local/aegis"
+aegis_agente_version: "1.0.0"
+
+# Suma del binario. Verificarla es lo que convierte "descargar un fichero" en
+# "instalar el artefacto auditado".
+aegis_agente_sha256: ""
+
+# Plano de control al que se conecta la flota (salida `flota_endpoint` de Terraform).
+aegis_agente_servidor_flota: "aegis-flota.empresa.local:8443"
+
+# Rutas de instalacion.
+aegis_agente_bin_dir: /usr/local/bin
+aegis_agente_etc_dir: /etc/aegis
+aegis_agente_var_dir: /var/lib/aegis
+aegis_agente_log_dir: /var/log/aegis
+
+# Usuario de servicio sin shell ni directorio propio.
+aegis_agente_usuario: aegis
+aegis_agente_grupo: aegis
+
+# Ancla de confianza de la flota: el certificado PUBLICO de la CA del plano de
+# control. Solo el certificado; la clave privada jamas sale del servidor.
+aegis_agente_ca_cert: ""
+
+# Presupuesto de memoria del agente, coherente con el que vigila el pipeline.
+aegis_agente_memoria_max: 64M
+aegis_agente_cpu_max: "40%"

@@ -1,0 +1,32 @@
+# Configuracion del agente AegisCore. Generada por Ansible; no editar a mano.
+# Cualquier cambio manual se pierde en el siguiente despliegue.
+
+[identidad]
+# El CN se deriva del nombre de la maquina en el dominio: es lo que el plano de
+# control vera como identidad autenticada del endpoint.
+cn = "{{ inventory_hostname }}"
+directorio_pki = "{{ aegis_agente_etc_dir }}/pki"
+
+[flota]
+servidor = "{{ aegis_agente_servidor_flota }}"
+ca = "{{ aegis_agente_etc_dir }}/pki/flota-ca.crt"
+# Intervalo de latido; el plano de control puede indicar otro al enrolar.
+intervalo_latido_seg = 30
+# El canal de politica queda abierto: es lo que hace que una regla global llegue
+# en milisegundos y no en el siguiente latido.
+suscribir_politica = true
+
+[almacenamiento]
+datos = "{{ aegis_agente_var_dir }}"
+registros = "{{ aegis_agente_log_dir }}"
+
+[recursos]
+# Coherente con el limite duro de systemd; el agente se autolimita antes de que
+# el sistema tenga que matarlo.
+memoria_max_mb = {{ aegis_agente_memoria_max | regex_replace('M$','') | int }}
+
+[deteccion]
+ebpf = true
+integridad_kernel = true
+firmware = true
+comportamiento = true

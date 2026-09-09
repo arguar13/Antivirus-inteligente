@@ -199,7 +199,34 @@ jobs:
       - run: ./tools/ci/servidor.sh
 
   # ---------------------------------------------------------------------------
-  # 9. Artefactos de lanzamiento: binarios ESTATICOS (musl), con sumas SHA-256 y
+  # 9. Infraestructura como codigo. Se valida con las herramientas REALES:
+  #    terraform con su proveedor, ansible-lint en perfil de produccion y el
+  #    esquema oficial de WiX. Una plantilla que "parece bien" no vale: en
+  #    despliegue afecta a miles de maquinas a la vez.
+  # ---------------------------------------------------------------------------
+  despliegue:
+    name: Infraestructura como codigo
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+      - name: Instalar validadores
+        run: |
+          python3 -m pip install --quiet ansible-core ansible-lint lxml
+          # PowerShell, para comprobar los scripts de despliegue por GPO.
+          sudo apt-get update && sudo apt-get install -y powershell || true
+      - name: Descargar el esquema de WiX v3
+        run: |
+          curl -fsSL -o /tmp/wix.xsd \
+            https://raw.githubusercontent.com/wixtoolset/wix3/develop/src/tools/wix/Xsd/wix.xsd
+      - run: WIX_XSD=/tmp/wix.xsd ./tools/ci/despliegue.sh
+
+  # ---------------------------------------------------------------------------
+  # 10. Artefactos de lanzamiento: binarios ESTATICOS (musl), con sumas SHA-256 y
   #    manifiesto de procedencia. Solo se construyen si lint y pruebas pasan:
   #    publicar un artefacto de codigo que no compila limpio es peor que no
   #    publicar nada.
@@ -234,7 +261,7 @@ jobs:
           retention-days: 90
 
   # ---------------------------------------------------------------------------
-  # 10. Puerta unica. Es el UNICO check que hay que exigir en la proteccion de
+  # 11. Puerta unica. Es el UNICO check que hay que exigir en la proteccion de
   #    rama: agrega el resultado de todos los demas, asi que anadir un job nuevo
   #    no obliga a reconfigurar GitHub. Falla si cualquier dependencia fallo o
   #    fue cancelada.
@@ -242,7 +269,7 @@ jobs:
   gate:
     name: Puerta de calidad
     if: always()
-    needs: [lint, test, ebpf, sanitizers, fuzz-smoke, supply-chain, docs, servidor, artifacts]
+    needs: [lint, test, ebpf, sanitizers, fuzz-smoke, supply-chain, docs, servidor, despliegue, artifacts]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

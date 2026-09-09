@@ -47,6 +47,7 @@ declare -a JOBS=(
     "supply-chain"
     "docs"
     "servidor"
+    "despliegue"
     "artifacts"
 )
 
@@ -60,6 +61,7 @@ comando_de_job() {
         supply-chain) echo "./tools/ci/supply_chain.sh" ;;
         docs)         echo "./tools/check-links.sh" ;;
         servidor)     echo "./tools/ci/servidor.sh" ;;
+        despliegue)   echo "./tools/ci/despliegue.sh" ;;
         artifacts)    echo "./tools/ci/artifacts.sh" ;;
         *)            echo "" ;;
     esac

@@ -1,0 +1,129 @@
+---
+# Despliegue de AegisCore sobre una flota Linux.
+#
+# ESTRATEGIA: POR TANDAS, Y PARANDO AL PRIMER SIGNO DE PROBLEMA
+#
+# Desplegar un EDR en miles de maquinas a la vez es la forma mas rapida de
+# tumbar una organizacion entera con un solo paquete defectuoso. Este playbook
+# avanza por tandas y se detiene si una falla, de modo que un error afecta a un
+# porcentaje pequeno de la flota y no a toda.
+#
+# Uso:
+#   ansible-playbook -i inventario.ini deploy_aegis.yml \
+#     -e "aegis_sha256=<suma> aegis_agente_version=1.0.0" \
+#     -e "@secretos/ca.yml"
+#
+# Ensayo sin tocar nada:
+#   ansible-playbook -i inventario.ini deploy_aegis.yml --check --diff
+
+- name: Comprobaciones previas de la flota
+  hosts: flota
+  gather_facts: true
+  any_errors_fatal: true
+  tags: [comprobaciones]
+
+  tasks:
+    - name: Comprobar que el sistema esta soportado
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] in ['Debian', 'RedHat', 'Suse']
+          - ansible_facts['architecture'] in ['x86_64', 'aarch64']
+        fail_msg: >-
+          {{ inventory_hostname }}: {{ ansible_facts['os_family'] }}
+          {{ ansible_facts['architecture'] }} no esta soportado. Se detiene el
+          despliegue entero: instalar un agente donde no corre deja el endpoint
+          peor que antes, con un servicio muerto que nadie mira.
+        quiet: true
+
+    - name: Comprobar que el kernel soporta eBPF
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['kernel'] is version('4.18', '>=')
+        fail_msg: >-
+          {{ inventory_hostname }}: kernel {{ ansible_facts['kernel'] }}.
+          Por debajo de 4.18 no hay eBPF utilizable y el agente perderia su
+          principal fuente de telemetria.
+        quiet: true
+
+    - name: Comprobar espacio libre
+      ansible.builtin.assert:
+        that:
+          - >-
+            (ansible_facts['mounts'] | selectattr('mount', 'equalto', '/')
+             | map(attribute='size_available') | first | default(0)) > 1073741824
+        fail_msg: "{{ inventory_hostname }}: menos de 1 GiB libre en /"
+        quiet: true
+
+    - name: Detectar otro EDR instalado
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /opt/CrowdStrike
+        - /opt/sentinelone
+        - /opt/microsoft/mdatp
+      register: aegis_otros_edr
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Avisar si convive con otro EDR
+      ansible.builtin.debug:
+        msg: >-
+          AVISO en {{ inventory_hostname }}: hay otro EDR instalado
+          ({{ aegis_otros_edr.results | selectattr('stat.exists') | map(attribute='item') | join(', ') }}).
+          Dos EDR compitiendo por los mismos enganches del kernel pueden
+          bloquearse mutuamente o degradar la maquina. Revisar antes de seguir.
+      when: aegis_otros_edr.results | selectattr('stat.exists') | list | length > 0
+
+# --- Servidores criticos: de uno en uno -------------------------------------
+- name: Desplegar en servidores criticos
+  hosts: servidores_criticos
+  become: true
+  # Uno cada vez. En un controlador de dominio o un servidor de nominas, la
+  # prudencia vale mas que la velocidad.
+  serial: 1
+  any_errors_fatal: true
+  tags: [criticos]
+
+  roles:
+    - role: aegis_agente
+
+# --- Resto de servidores: por tandas ----------------------------------------
+- name: Desplegar en el resto de servidores
+  hosts: servidores
+  become: true
+  serial: "{{ aegis_lote | default('10%') }}"
+  # Si mas del 10% de una tanda falla, se para: es la senal de que el problema
+  # es del paquete y no de una maquina concreta.
+  max_fail_percentage: 10
+  tags: [servidores]
+
+  roles:
+    - role: aegis_agente
+
+# --- Estaciones de trabajo: tandas mayores ----------------------------------
+- name: Desplegar en estaciones de trabajo
+  hosts: estaciones
+  become: true
+  serial: "{{ aegis_lote_estaciones | default('20%') }}"
+  max_fail_percentage: 15
+  tags: [estaciones]
+
+  roles:
+    - role: aegis_agente
+
+# --- Informe final ----------------------------------------------------------
+- name: Informe del despliegue
+  hosts: flota
+  gather_facts: false
+  run_once: true
+  tags: [always]
+
+  tasks:
+    - name: Resumen
+      ansible.builtin.debug:
+        msg:
+          - "Endpoints alcanzados : {{ ansible_play_hosts_all | length }}"
+          - "Con exito            : {{ ansible_play_hosts | length }}"
+          - "Con fallo            : {{ (ansible_play_hosts_all | length) - (ansible_play_hosts | length) }}"
+          - "Version desplegada   : {{ aegis_agente_version | default('no indicada') }}"
+          - "Plano de control     : {{ aegis_agente_servidor_flota | default('no indicado') }}"

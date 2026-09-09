@@ -1,0 +1,49 @@
+# Supervisor de auto-defensa de AegisCore. Generado por Ansible.
+#
+# Vigila que el agente siga vivo. Es lo que convierte "matar el antivirus" en un
+# estorbo de unos segundos en vez de en una via libre: la primera accion de
+# buena parte del malware es intentar detener el EDR.
+
+[Unit]
+Description=Supervisor de auto-defensa de AegisCore
+Documentation=https://github.com/arguar13/Antivirus-inteligente
+After=aegis-agent.service
+# Sin esto, parar el agente pararia tambien al supervisor, que es justo lo que
+# un atacante intentaria.
+PartOf=
+
+[Service]
+Type=simple
+ExecStart={{ aegis_agente_bin_dir }}/aegis-watchdog --vigilar aegis-agent.service
+User=root
+Group=root
+
+# El supervisor solo necesita hablar con systemd para levantar un servicio.
+CapabilityBoundingSet=CAP_KILL
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths={{ aegis_agente_log_dir }}
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+
+MemoryMax=32M
+TasksMax=16
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aegis-watchdog
+
+[Install]
+WantedBy=multi-user.target

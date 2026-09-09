@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+#
+# Arranque de una instancia del plano de control de AegisCore.
+#
+# No descarga nada de Internet: el binario `aegis-server` ya viene en la AMI que
+# construyo el pipeline, con su suma SHA-256 y su manifiesto de procedencia. La
+# instancia arranca con el artefacto AUDITADO, no con lo que hubiera en un
+# repositorio en el momento del arranque.
+set -euo pipefail
+
+REGION="${region}"
+EFS_ID="${efs_id}"
+PUNTO_ACCESO="${efs_punto_acceso}"
+SECRETO_PG="${secreto_postgres}"
+SECRETO_REDIS="${secreto_redis}"
+ENTORNO="${entorno}"
+
+registrar() { logger -t aegis-arranque "$1"; echo "[aegis] $1"; }
+
+# --- 1. Montar la CA de la flota -------------------------------------------
+# Es lo primero porque sin ella el servidor generaria una CA nueva y dejaria
+# fuera a toda la flota. El punto de acceso ya impone dueno 10001 y modo 0700,
+# que es justo lo que el servidor exige para arrancar.
+registrar "montando el almacenamiento de la CA"
+mkdir -p /var/lib/aegis/ca
+mount -t efs -o tls,accesspoint=$PUNTO_ACCESO "$EFS_ID":/ /var/lib/aegis/ca
+grep -q "/var/lib/aegis/ca" /etc/fstab || \
+  echo "$EFS_ID:/ /var/lib/aegis/ca efs _netdev,tls,accesspoint=$PUNTO_ACCESO 0 0" >> /etc/fstab
+
+# --- 2. Resolver secretos ---------------------------------------------------
+# Se leen en el arranque y se escriben en un fichero de entorno que solo lee
+# root, en vez de pasarlos por la linea de comandos del proceso —donde
+# cualquier usuario del sistema podria verlos en /proc—.
+registrar "resolviendo credenciales"
+PG=$(aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SECRETO_PG" --query SecretString --output text)
+RD=$(aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SECRETO_REDIS" --query SecretString --output text)
+
+PG_USUARIO=$(echo "$PG" | jq -r .usuario)
+PG_CLAVE=$(echo "$PG" | jq -r .contrasena | jq -sRr @uri)
+PG_HOST=$(echo "$PG" | jq -r .host)
+PG_PUERTO=$(echo "$PG" | jq -r .puerto)
+PG_BASE=$(echo "$PG" | jq -r .base)
+RD_TOKEN=$(echo "$RD" | jq -r .token | jq -sRr @uri)
+RD_HOST=$(echo "$RD" | jq -r .host)
+
+umask 077
+cat > /etc/aegis/servidor.env <<ENTORNO
+# Generado en el arranque. No editar a mano.
+AEGIS_PG_URL=postgres://$PG_USUARIO:$PG_CLAVE@$PG_HOST:$PG_PUERTO/$PG_BASE?sslmode=require
+AEGIS_REDIS_URL=rediss://:$RD_TOKEN@$RD_HOST:6379
+AEGIS_CA_DIR=/var/lib/aegis/ca
+AEGIS_API_ADDR=0.0.0.0:8080
+AEGIS_GRPC_ADDR=0.0.0.0:50051
+AEGIS_FLEET_ADDR=0.0.0.0:8443
+AEGIS_LOG=info,sqlx=warn
+ENTORNO
+chmod 600 /etc/aegis/servidor.env
+chown root:root /etc/aegis/servidor.env
+
+# --- 3. Arrancar el servicio ------------------------------------------------
+registrar "arrancando el plano de control ($ENTORNO)"
+systemctl daemon-reload
+systemctl enable --now aegis-server
+
+# --- 4. Esperar a que este realmente listo ----------------------------------
+# El balanceador usa /salud, que comprueba PostgreSQL y Redis de verdad. Esperar
+# aqui evita que la instancia entre en servicio y empiece a perder telemetria.
+for _ in $(seq 1 60); do
+  if curl -fsS http://127.0.0.1:8080/salud | grep -q '"estado":"listo"'; then
+    registrar "plano de control listo"
+    exit 0
+  fi
+  sleep 2
+done
+
+registrar "ERROR: el plano de control no alcanzo el estado listo"
+exit 1

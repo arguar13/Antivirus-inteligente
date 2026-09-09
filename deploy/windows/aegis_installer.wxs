@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Instalador MSI del agente AegisCore para Windows.
+
+  Pensado para despliegue MASIVO Y SILENCIOSO por directiva de grupo:
+
+      msiexec /i aegis.msi /qn SERVIDOR_FLOTA=aegis.empresa.local:8443
+
+  DECISIONES QUE IMPORTAN
+
+  - El servicio se instala DETENIDO y lo arranca un paso posterior, cuando ya
+    tiene identidad. Un EDR que arranca sin poder autenticarse contra el plano
+    de control genera ruido en cada endpoint de la organizacion a la vez.
+
+  - La desinstalacion NO borra la identidad del endpoint (su clave y su
+    certificado). Reinstalar tras una actualizacion fallida no debe obligar a
+    reenrolar miles de maquinas.
+
+  - `MajorUpgrade` con `AllowSameVersionUpgrades` y bajada de version prohibida:
+    en una flota, volver a una version anterior por accidente es como se
+    reintroduce una vulnerabilidad ya corregida.
+ -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <Product Id="*"
+           Name="AegisCore Endpoint Agent"
+           Language="1033"
+           Codepage="1252"
+           Version="1.0.0.0"
+           Manufacturer="AegisCore"
+           UpgradeCode="7B2A9C64-1E3D-4F58-9A21-8C5D6E0F3B47">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="Agente EDR AegisCore"
+             Comments="Instalacion silenciosa: msiexec /i aegis.msi /qn"
+             Manufacturer="AegisCore" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Actualizaciones __________________________________________________ -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="Ya hay instalada una version mas reciente de AegisCore. Bajar de version reintroduciria vulnerabilidades ya corregidas." />
+
+    <!-- Requisitos ________________________________________________________ -->
+    <Condition Message="AegisCore requiere Windows 10 / Server 2016 o posterior.">
+      <![CDATA[Installed OR (VersionNT >= 603)]]>
+    </Condition>
+
+    <Condition Message="AegisCore requiere Windows de 64 bits.">
+      <![CDATA[Installed OR VersionNT64]]>
+    </Condition>
+
+    <!-- Propiedades configurables desde la linea de comandos ______________ -->
+    <!-- Se declaran publicas (en mayusculas) para que `msiexec` pueda
+         fijarlas, y `Secure` para que sobrevivan a la elevacion durante una
+         instalacion silenciosa por directiva de grupo. -->
+    <Property Id="SERVIDOR_FLOTA" Value="aegis.empresa.local:8443" Secure="yes" />
+    <Property Id="CA_FLOTA" Secure="yes" />
+    <Property Id="ARRANCAR_SERVICIO" Value="1" Secure="yes" />
+
+    <!-- Estructura de directorios ________________________________________ -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="AegisCore" />
+      </Directory>
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="DATOSAEGIS" Name="AegisCore">
+          <Directory Id="PKIAEGIS" Name="pki" />
+          <Directory Id="REGISTROSAEGIS" Name="logs" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <!-- Componentes ________________________________________________________ -->
+    <ComponentGroup Id="Binarios" Directory="INSTALLFOLDER">
+
+      <Component Id="AgenteExe" Guid="A1C4E8D2-5B79-4E3A-9F16-2D8B7C0A4E51">
+        <File Id="aegis_agent.exe"
+              Name="aegis-agent.exe"
+              Source="payload/aegis-agent.exe"
+              KeyPath="yes" />
+
+        <!-- El servicio se instala DETENIDO: lo arranca el paso posterior,
+             cuando ya hay identidad. -->
+        <ServiceInstall Id="ServicioAgente"
+                        Name="AegisAgent"
+                        DisplayName="AegisCore Endpoint Agent"
+                        Description="Deteccion y respuesta en el endpoint (EDR)."
+                        Type="ownProcess"
+                        Start="auto"
+                        Account="LocalSystem"
+                        ErrorControl="normal"
+                        Vital="yes">
+          <!-- Reinicio automatico indefinido. Un EDR que se rinde tras dos
+               intentos deja la maquina desprotegida justo cuando algo lo esta
+               tumbando a proposito. -->
+          <util:ServiceConfig xmlns:util="http://schemas.microsoft.com/wix/UtilExtension"
+                              FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <ServiceControl Id="ControlAgente"
+                        Name="AegisAgent"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+
+      <Component Id="SupervisorExe" Guid="C3F7A1B8-9D2E-4A65-8B34-1E5C9F7D2A08">
+        <File Id="aegis_watchdog.exe"
+              Name="aegis-watchdog.exe"
+              Source="payload/aegis-watchdog.exe"
+              KeyPath="yes" />
+
+        <ServiceInstall Id="ServicioSupervisor"
+                        Name="AegisWatchdog"
+                        DisplayName="AegisCore Self-Defense Watchdog"
+                        Description="Vigila que el agente EDR siga en ejecucion."
+                        Type="ownProcess"
+                        Start="auto"
+                        Account="LocalSystem"
+                        ErrorControl="normal"
+                        Vital="yes" />
+
+        <ServiceControl Id="ControlSupervisor"
+                        Name="AegisWatchdog"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+      </Component>
+
+      <Component Id="Cliente" Guid="E5B2D9C1-4A38-4F72-9C60-3B7E1A8D5F29">
+        <File Id="aegisctl.exe" Name="aegisctl.exe" Source="payload/aegisctl.exe" KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+
+    <!-- Configuracion y estado ____________________________________________ -->
+    <ComponentGroup Id="Configuracion">
+
+      <Component Id="RegistroConfig" Directory="INSTALLFOLDER"
+                 Guid="B8D3F6A0-7C15-4E29-8A47-6F2B9C4E1D73">
+        <RegistryKey Root="HKLM" Key="SOFTWARE\AegisCore\Agent">
+          <RegistryValue Name="ServidorFlota" Type="string" Value="[SERVIDOR_FLOTA]" KeyPath="yes" />
+          <RegistryValue Name="DirectorioPki" Type="string" Value="[PKIAEGIS]" />
+          <RegistryValue Name="DirectorioLogs" Type="string" Value="[REGISTROSAEGIS]" />
+          <RegistryValue Name="Version" Type="string" Value="1.0.0.0" />
+        </RegistryKey>
+      </Component>
+
+      <!-- La identidad del endpoint NO se borra al desinstalar: reinstalar
+           tras una actualizacion fallida no puede obligar a reenrolar miles de
+           maquinas. `Permanent` lo garantiza. -->
+      <Component Id="DirectorioPki" Directory="PKIAEGIS"
+                 Guid="D4A7C2E9-8B61-4D35-9E08-5C3F7A1B6E42" Permanent="yes">
+        <CreateFolder>
+          <!-- Solo SYSTEM y administradores. La clave privada del endpoint es
+               su identidad ante el plano de control: si un usuario del equipo
+               puede leerla, puede suplantar a esa maquina en la flota. -->
+          <util:PermissionEx xmlns:util="http://schemas.microsoft.com/wix/UtilExtension"
+                             User="SYSTEM" GenericAll="yes" />
+          <util:PermissionEx xmlns:util="http://schemas.microsoft.com/wix/UtilExtension"
+                             User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+        <RegistryValue Root="HKLM" Key="SOFTWARE\AegisCore\Agent"
+                       Name="PkiCreado" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="DirectorioRegistros" Directory="REGISTROSAEGIS"
+                 Guid="F1E8B3D5-2A94-4C67-8D51-9B0A6E3C7F14">
+        <CreateFolder />
+        <RegistryValue Root="HKLM" Key="SOFTWARE\AegisCore\Agent"
+                       Name="LogsCreado" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+
+    <!-- Funcionalidad ______________________________________________________ -->
+    <Feature Id="Principal" Title="Agente AegisCore" Level="1" Absent="disallow">
+      <ComponentGroupRef Id="Binarios" />
+      <ComponentGroupRef Id="Configuracion" />
+    </Feature>
+
+    <!-- Acciones personalizadas ____________________________________________ -->
+    <!-- Enrolamiento: el agente genera su clave EN LA MAQUINA y envia solo una
+         peticion de firma. La clave privada no viaja por la red ni pasa por el
+         servidor de despliegue. -->
+    <CustomAction Id="PrepararEnrolamiento"
+                  Property="EjecutarEnrolamiento"
+                  Value="&quot;[INSTALLFOLDER]aegis-agent.exe&quot; enrolar --servidor &quot;[SERVIDOR_FLOTA]&quot; --salida &quot;[PKIAEGIS]&quot;"
+                  Execute="immediate" />
+
+    <CustomAction Id="EjecutarEnrolamiento"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec64"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="no" />
+
+    <CustomAction Id="PrepararArranque"
+                  Property="EjecutarArranque"
+                  Value="&quot;[SystemFolder]sc.exe&quot; start AegisAgent"
+                  Execute="immediate" />
+
+    <CustomAction Id="EjecutarArranque"
+                  BinaryKey="WixCA"
+                  DllEntry="WixQuietExec64"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="no" />
+
+    <InstallExecuteSequence>
+      <Custom Action="PrepararEnrolamiento" After="InstallFiles">NOT Installed</Custom>
+      <Custom Action="EjecutarEnrolamiento" After="InstallServices">NOT Installed</Custom>
+      <Custom Action="PrepararArranque" After="EjecutarEnrolamiento">
+        <![CDATA[NOT Installed AND ARRANCAR_SERVICIO = "1"]]>
+      </Custom>
+      <Custom Action="EjecutarArranque" After="PrepararArranque">
+        <![CDATA[NOT Installed AND ARRANCAR_SERVICIO = "1"]]>
+      </Custom>
+    </InstallExecuteSequence>
+
+    <!-- Sin interfaz: el despliegue por directiva de grupo es silencioso. -->
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPNOREPAIR" Value="0" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/arguar13/Antivirus-inteligente" />
+
+  </Product>
+</Wix>

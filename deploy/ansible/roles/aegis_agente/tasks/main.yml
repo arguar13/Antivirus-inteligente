@@ -1,0 +1,191 @@
+---
+# Instalacion del agente AegisCore en un endpoint Linux.
+#
+# Todo el rol es idempotente: volver a pasarlo sobre una flota ya desplegada no
+# reinstala ni reinicia nada. En miles de maquinas eso es la diferencia entre
+# una comprobacion de estado inofensiva y una interrupcion del servicio.
+
+- name: Comprobar que se ha indicado la suma del artefacto
+  ansible.builtin.assert:
+    that:
+      - aegis_agente_sha256 | length == 64
+    fail_msg: >-
+      Falta `aegis_agente_sha256`. Instalar un binario sin verificar su suma
+      convierte el repositorio de paquetes en el punto unico desde el que se
+      compromete la flota entera.
+    quiet: true
+
+- name: Comprobar que se ha indicado el ancla de confianza
+  ansible.builtin.assert:
+    that:
+      - aegis_agente_ca_cert | length > 0
+      - "'BEGIN CERTIFICATE' in aegis_agente_ca_cert"
+    fail_msg: >-
+      Falta `aegis_agente_ca_cert`. Sin el certificado de la CA de la flota, el agente
+      no puede verificar al plano de control y aceptaria a cualquiera que
+      alcanzara el puerto.
+    quiet: true
+
+# --- Usuario de servicio ----------------------------------------------------
+- name: Crear el grupo del servicio
+  ansible.builtin.group:
+    name: "{{ aegis_agente_grupo }}"
+    system: true
+    state: present
+
+- name: Crear el usuario del servicio
+  ansible.builtin.user:
+    name: "{{ aegis_agente_usuario }}"
+    group: "{{ aegis_agente_grupo }}"
+    system: true
+    # Sin shell ni directorio propio: si alguien consigue las credenciales del
+    # usuario del servicio, no obtiene una sesion interactiva.
+    shell: /usr/sbin/nologin
+    create_home: false
+    home: "{{ aegis_agente_var_dir }}"
+    state: present
+
+# --- Directorios ------------------------------------------------------------
+- name: Crear los directorios del agente
+  ansible.builtin.file:
+    path: "{{ item.ruta }}"
+    state: directory
+    owner: "{{ item.duenno | default('root') }}"
+    group: "{{ aegis_agente_grupo }}"
+    mode: "{{ item.modo }}"
+  loop:
+    - { ruta: "{{ aegis_agente_etc_dir }}", modo: "0750" }
+    # La identidad del endpoint vive aqui. 0700 y del usuario del servicio: la
+    # clave privada del agente no la lee ni el grupo.
+    - { ruta: "{{ aegis_agente_etc_dir }}/pki", modo: "0700", duenno: "{{ aegis_agente_usuario }}" }
+    - { ruta: "{{ aegis_agente_var_dir }}", modo: "0750", duenno: "{{ aegis_agente_usuario }}" }
+    - { ruta: "{{ aegis_agente_log_dir }}", modo: "0750", duenno: "{{ aegis_agente_usuario }}" }
+  loop_control:
+    label: "{{ item.ruta }}"
+
+# --- Binarios ---------------------------------------------------------------
+- name: Descargar el agente
+  ansible.builtin.get_url:
+    url: "{{ aegis_agente_repositorio_url }}/{{ aegis_agente_version }}/aegis-agent"
+    dest: "{{ aegis_agente_bin_dir }}/aegis-agent"
+    # La suma se comprueba ANTES de que el fichero llegue a su destino: si no
+    # coincide, la tarea falla y no queda un binario a medio verificar.
+    checksum: "sha256:{{ aegis_agente_sha256 }}"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Reiniciar el agente
+
+- name: Descargar el supervisor de auto-defensa
+  ansible.builtin.get_url:
+    url: "{{ aegis_agente_repositorio_url }}/{{ aegis_agente_version }}/aegis-watchdog"
+    dest: "{{ aegis_agente_bin_dir }}/aegis-watchdog"
+    checksum: "sha256:{{ aegis_agente_watchdog_sha256 | default(omit) }}"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Reiniciar el supervisor
+
+# --- Identidad de la flota --------------------------------------------------
+- name: Instalar el ancla de confianza de la flota
+  ansible.builtin.copy:
+    content: "{{ aegis_agente_ca_cert }}"
+    dest: "{{ aegis_agente_etc_dir }}/pki/flota-ca.crt"
+    owner: root
+    group: "{{ aegis_agente_grupo }}"
+    mode: "0644"
+  notify: Reiniciar el agente
+
+# El agente genera su clave EN LA MAQUINA y envia solo una peticion de firma.
+# La clave privada del endpoint no viaja por la red, no pasa por el inventario
+# de Ansible y no queda en el nodo de control. Es la diferencia entre
+# aprovisionar identidades y repartir credenciales.
+- name: Comprobar si el endpoint ya tiene identidad
+  ansible.builtin.stat:
+    path: "{{ aegis_agente_etc_dir }}/pki/endpoint.crt"
+  register: aegis_agente_identidad
+
+- name: Solicitar la identidad inicial al plano de control
+  ansible.builtin.command:
+    cmd: >-
+      {{ aegis_agente_bin_dir }}/aegis-agent enrolar
+      --servidor {{ aegis_agente_servidor_flota }}
+      --ca {{ aegis_agente_etc_dir }}/pki/flota-ca.crt
+      --salida {{ aegis_agente_etc_dir }}/pki
+    creates: "{{ aegis_agente_etc_dir }}/pki/endpoint.crt"
+  become: true
+  become_user: "{{ aegis_agente_usuario }}"
+  when: not aegis_agente_identidad.stat.exists
+  register: aegis_agente_enrolamiento
+  changed_when: aegis_agente_enrolamiento.rc == 0
+
+# --- Configuracion ----------------------------------------------------------
+- name: Escribir la configuracion del agente
+  ansible.builtin.template:
+    src: agente.toml.j2
+    dest: "{{ aegis_agente_etc_dir }}/agente.toml"
+    owner: root
+    group: "{{ aegis_agente_grupo }}"
+    mode: "0640"
+    # Sin validacion, una plantilla mal escrita deja el agente sin arrancar en
+    # todos los endpoints a la vez.
+    validate: "{{ aegis_agente_bin_dir }}/aegis-agent --comprobar-config %s"
+  notify: Reiniciar el agente
+
+# --- Servicios --------------------------------------------------------------
+- name: Instalar las unidades de systemd
+  ansible.builtin.template:
+    src: "{{ item }}.service.j2"
+    dest: "/etc/systemd/system/{{ item }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - aegis-agent
+    - aegis-watchdog
+  notify:
+    - Recargar systemd
+    - Reiniciar el agente
+
+- name: Aplicar los cambios de unidades antes de habilitarlas
+  ansible.builtin.meta: flush_handlers
+
+- name: Habilitar y arrancar el agente
+  ansible.builtin.systemd_service:
+    name: aegis-agent
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Habilitar y arrancar el supervisor
+  ansible.builtin.systemd_service:
+    name: aegis-watchdog
+    enabled: true
+    state: started
+
+# --- Verificacion -----------------------------------------------------------
+# Un despliegue que no comprueba el resultado no es un despliegue, es una
+# esperanza. Estas tareas fallan el host si el agente no quedo operativo, y el
+# playbook para la tanda antes de tocar mas endpoints.
+- name: Comprobar que el agente esta activo
+  ansible.builtin.systemd_service:
+    name: aegis-agent
+  register: aegis_agente_estado
+  failed_when: aegis_agente_estado.status.ActiveState != "active"
+
+- name: Comprobar que el agente alcanza el plano de control
+  ansible.builtin.command:
+    cmd: "{{ aegis_agente_bin_dir }}/aegis-agent estado --json"
+  become: true
+  become_user: "{{ aegis_agente_usuario }}"
+  register: aegis_agente_diagnostico
+  changed_when: false
+  retries: 6
+  delay: 5
+  until: (aegis_agente_diagnostico.stdout | from_json).enrolado | default(false)
+
+- name: Resumen del endpoint
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: agente {{ aegis_agente_version }} activo,
+      enrolado como {{ (aegis_agente_diagnostico.stdout | from_json).cn | default('desconocido') }}
