@@ -173,6 +173,7 @@ crates/
   aegis-update/               Actualización firmada Ed25519 + rollback       [hecho]
   aegis-forensics/            Volcado de memoria en vivo + exploits          [hecho]
   aegis-sync/                 Sincronización diferencial (Merkle) de IoCs    [hecho]
+  aegis-fim/                  Integridad de ficheros (inotify + BLAKE3)      [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
@@ -202,6 +203,7 @@ docs/                         Blueprint arquitectónico
 | 12 | [Actualización segura](docs/12-actualizacion.md) — firmas Ed25519, rollback atómico |
 | 13 | [Análisis forense en vivo](docs/13-forense.md) — volcado sin parar el proceso, vtable/pivote/shellcode |
 | 14 | [Sincronización diferencial](docs/14-sync.md) — árboles de Merkle, tráfico proporcional al cambio |
+| 15 | [Integridad de ficheros](docs/15-fim.md) — inotify, BLAKE3 concurrente, línea base |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo

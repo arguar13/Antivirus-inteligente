@@ -18,6 +18,7 @@ members = [
     "crates/aegis-update",
     "crates/aegis-forensics",
     "crates/aegis-sync",
+    "crates/aegis-fim",
     "crates/aegis-e2e",
 ]
 
