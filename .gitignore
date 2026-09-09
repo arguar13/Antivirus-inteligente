@@ -1,21 +1,31 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
+# Artefactos de compilacion
+target/
 build/
 dist/
-.venv/
-venv/
+*.o
+*.obj
+*.pdb
+*.sys
 
-# Entorno y herramientas
+# Rust
+**/*.rs.bk
+
+# Herramientas
 .pytest_cache/
-.coverage
-htmlcov/
 .mypy_cache/
 .ruff_cache/
+.venv/
+venv/
+__pycache__/
 
-# Artefactos del proyecto
+# Artefactos del producto (nunca deben entrar al repositorio)
 *.joblib
+*.onnx
 models/
 corpus/
 reports/
+*.aegisq
+
+# Entorno local
+.env
+.DS_Store
