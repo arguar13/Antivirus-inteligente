@@ -1,0 +1,199 @@
+/* Consola de flota de AegisCore.
+ *
+ * Paleta oscura a proposito: esta consola se mira durante guardias largas y en
+ * salas con la luz baja. El color se reserva para lo que exige decision —lo
+ * critico en rojo, lo aislado en ambar, lo sano en verde— para que un vistazo
+ * baste. Todo lo demas es gris.
+ */
+
+:root {
+  --fondo: #0d1117;
+  --fondo-2: #161b22;
+  --fondo-3: #1c2230;
+  --borde: #2a3140;
+  --texto: #e6edf3;
+  --texto-2: #9aa7b4;
+  --acento: #4c9aff;
+  --ok: #3fb950;
+  --aviso: #d29922;
+  --grave: #f85149;
+  --critico: #ff6b6b;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+/* El atributo `hidden` tiene que ganar SIEMPRE.
+ *
+ * La hoja de estilos del navegador le da `display:none`, pero cualquier regla de
+ * autor con `display` la sobreescribe, y aqui las hay: `.acceso` y `.modal` son
+ * rejillas. Sin esta linea, el formulario de acceso seguiria pintado debajo de
+ * la consola y —mucho peor— el dialogo que aisla endpoints estaria SIEMPRE en
+ * pantalla, tapando el panel y con el boton de aislar a un clic de distancia.
+ */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--fondo);
+  color: var(--texto);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ── Acceso ─────────────────────────────────────────────────────────── */
+.acceso { display: grid; place-items: center; min-height: 100vh; }
+.tarjeta-acceso {
+  background: var(--fondo-2); border: 1px solid var(--borde);
+  border-radius: 10px; padding: 32px; width: 340px;
+}
+.tarjeta-acceso h1 { margin: 0; font-size: 26px; letter-spacing: -.5px; }
+.tarjeta-acceso h1 span { color: var(--acento); }
+.tarjeta-acceso .sub { margin: 4px 0 24px; color: var(--texto-2); }
+.tarjeta-acceso label { display: block; font-size: 12px; color: var(--texto-2); margin-bottom: 6px; }
+
+input, select, button {
+  font: inherit; border-radius: 6px; border: 1px solid var(--borde);
+  background: var(--fondo-3); color: var(--texto); padding: 9px 11px;
+}
+input:focus, select:focus { outline: 2px solid var(--acento); outline-offset: -1px; }
+button { cursor: pointer; background: var(--acento); border-color: var(--acento); color: #06101f; font-weight: 600; }
+button:hover { filter: brightness(1.1); }
+button.secundario { background: var(--fondo-3); color: var(--texto); border-color: var(--borde); font-weight: 500; }
+button.peligro { background: var(--grave); border-color: var(--grave); color: #1a0505; }
+.tarjeta-acceso input, .tarjeta-acceso button { width: 100%; margin-bottom: 12px; }
+
+.error { color: var(--grave); font-size: 13px; margin: 6px 0 0; }
+
+/* ── Cabecera ───────────────────────────────────────────────────────── */
+.cabecera {
+  display: flex; align-items: center; gap: 24px;
+  padding: 0 20px; height: 52px;
+  background: var(--fondo-2); border-bottom: 1px solid var(--borde);
+  position: sticky; top: 0; z-index: 10;
+}
+.marca { font-weight: 700; font-size: 16px; letter-spacing: -.3px; }
+.marca span { color: var(--acento); }
+
+.pestanas { display: flex; gap: 4px; flex: 1; }
+.pestanas button {
+  background: transparent; border: none; color: var(--texto-2);
+  padding: 8px 14px; border-radius: 6px; font-weight: 500;
+}
+.pestanas button:hover { background: var(--fondo-3); color: var(--texto); }
+.pestanas button.activa { background: var(--fondo-3); color: var(--texto); }
+.pin {
+  background: var(--grave); color: #1a0505; border-radius: 9px;
+  padding: 1px 6px; font-size: 11px; font-weight: 700; margin-left: 6px;
+}
+
+.estado { display: flex; align-items: center; gap: 14px; }
+.enlace { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--texto-2); }
+.enlace i { width: 8px; height: 8px; border-radius: 50%; background: var(--texto-2); }
+.enlace.conectado i { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.enlace.desconectado i { background: var(--grave); }
+.quien { font-size: 12px; color: var(--texto-2); }
+.salir { background: transparent; border: 1px solid var(--borde); color: var(--texto-2); font-weight: 500; padding: 6px 12px; }
+
+/* ── Indicadores ────────────────────────────────────────────────────── */
+.kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--borde); }
+.kpi { background: var(--fondo-2); padding: 14px 18px; }
+.kpi b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+.kpi span { font-size: 11px; color: var(--texto-2); text-transform: uppercase; letter-spacing: .5px; }
+.kpi.ok b { color: var(--ok); }
+.kpi.aviso b { color: var(--aviso); }
+.kpi.grave b { color: var(--grave); }
+
+/* ── Cuerpo ─────────────────────────────────────────────────────────── */
+.cuerpo { display: grid; grid-template-columns: 1fr 300px; gap: 1px; background: var(--borde); min-height: calc(100vh - 52px - 74px); }
+.panel-principal { background: var(--fondo); padding: 20px; overflow: auto; }
+.lateral { background: var(--fondo-2); padding: 16px; }
+.lateral h3 { margin: 0 0 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--texto-2); }
+
+.barra-vista { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.barra-vista h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.filtro { font-size: 13px; color: var(--texto-2); display: flex; align-items: center; gap: 6px; }
+.selector { min-width: 320px; }
+.nota { color: var(--texto-2); font-size: 13px; margin: 0 0 16px; }
+.nota code { background: var(--fondo-3); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
+.vacio { color: var(--texto-2); text-align: center; padding: 40px; }
+
+/* ── Rejilla de flota ───────────────────────────────────────────────── */
+.rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.nodo {
+  background: var(--fondo-2); border: 1px solid var(--borde); border-left-width: 3px;
+  border-radius: 8px; padding: 12px 14px; cursor: pointer;
+}
+.nodo:hover { background: var(--fondo-3); }
+.nodo.en-linea { border-left-color: var(--ok); }
+.nodo.caido { border-left-color: var(--texto-2); opacity: .65; }
+.nodo.aislado { border-left-color: var(--aviso); }
+.nodo.amenazado { border-left-color: var(--grave); }
+.nodo .host { font-weight: 600; }
+.nodo .cn { font-family: var(--mono); font-size: 11px; color: var(--texto-2);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nodo .metricas { display: flex; gap: 12px; margin-top: 8px; font-size: 11px; color: var(--texto-2); }
+.nodo .etiqueta { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px;
+                  background: var(--aviso); color: #241a00; font-weight: 700; margin-top: 6px; }
+
+/* ── Tablas ─────────────────────────────────────────────────────────── */
+.tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tabla th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--texto-2); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--borde);
+}
+.tabla td { padding: 9px 10px; border-bottom: 1px solid var(--fondo-2); vertical-align: top; }
+.tabla tbody tr:hover { background: var(--fondo-2); }
+.tabla .mono { font-family: var(--mono); font-size: 12px; }
+.sev { display: inline-block; width: 26px; text-align: center; border-radius: 4px;
+       font-weight: 700; font-size: 11px; padding: 2px 0; }
+.sev-0, .sev-1 { background: var(--fondo-3); color: var(--texto-2); }
+.sev-2 { background: var(--aviso); color: #241a00; }
+.sev-3 { background: var(--grave); color: #1a0505; }
+.sev-4 { background: var(--critico); color: #1a0505; }
+.tecnica { font-family: var(--mono); font-size: 12px; color: var(--acento); }
+
+/* ── Árbol de procesos ──────────────────────────────────────────────── */
+.lienzo { background: var(--fondo-2); border: 1px solid var(--borde); border-radius: 8px;
+          overflow: auto; min-height: 320px; }
+.lienzo svg { display: block; }
+.arista { stroke: var(--borde); stroke-width: 1.5; fill: none; }
+.caja-proc { fill: var(--fondo-3); stroke: var(--borde); rx: 6; cursor: pointer; }
+.caja-proc:hover { stroke: var(--acento); }
+.caja-proc.raiz { stroke: var(--grave); stroke-width: 2; }
+.caja-proc.contaminado { fill: #2a1d1d; }
+.txt-proc { fill: var(--texto); font-size: 12px; font-family: var(--mono); pointer-events: none; }
+.txt-pid { fill: var(--texto-2); font-size: 10px; font-family: var(--mono); pointer-events: none; }
+.txt-score { font-size: 10px; font-weight: 700; font-family: var(--mono); pointer-events: none; }
+.detalle-nodo { margin-top: 14px; background: var(--fondo-2); border: 1px solid var(--borde);
+                border-radius: 8px; padding: 14px; font-family: var(--mono); font-size: 12px; }
+
+/* ── Reglas ─────────────────────────────────────────────────────────── */
+.form-regla { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.form-regla input { flex: 1; min-width: 150px; }
+
+/* ── Actividad ──────────────────────────────────────────────────────── */
+.actividad { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.actividad li { font-size: 12px; padding: 8px 10px; background: var(--fondo-3);
+                border-radius: 6px; border-left: 2px solid var(--borde); }
+.actividad li.alerta { border-left-color: var(--grave); }
+.actividad li.aislamiento { border-left-color: var(--aviso); }
+.actividad li.politica { border-left-color: var(--acento); }
+.actividad li.enrolado { border-left-color: var(--ok); }
+.actividad .hora { color: var(--texto-2); font-family: var(--mono); font-size: 10px; }
+
+/* ── Modal ──────────────────────────────────────────────────────────── */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: grid; place-items: center; z-index: 100; }
+.modal-caja { background: var(--fondo-2); border: 1px solid var(--borde); border-radius: 10px;
+              padding: 22px; width: 480px; max-width: 92vw; }
+.modal-caja h3 { margin: 0 0 14px; font-size: 16px; }
+.datos { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0 0 16px; font-size: 13px; }
+.datos dt { color: var(--texto-2); }
+.datos dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.aviso-respuesta { background: #2a1d1d; border: 1px solid var(--grave); border-radius: 6px;
+                   padding: 10px 12px; font-size: 12px; color: #ffc9c9; margin-bottom: 16px; }
+.modal-acciones { display: flex; gap: 8px; justify-content: flex-end; }
+
+@media (max-width: 1100px) {
+  .cuerpo { grid-template-columns: 1fr; }
+  .kpis { grid-template-columns: repeat(3, 1fr); }
+}

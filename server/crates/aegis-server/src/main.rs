@@ -125,6 +125,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         margen_desconexion_seg: cfg.margen_desconexion.as_secs() as i64,
     };
     let app = api::enrutador(estado_api)
+        // La consola se sirve desde el propio binario: un solo artefacto que
+        // desplegar, con la misma procedencia que publica el pipeline.
+        .merge(aegis_server::panel::enrutador())
         .layer(tower_http::trace::TraceLayer::new_for_http())
         // El panel se sirve desde otro origen durante el desarrollo; en
         // produccion el despliegue lo pone tras el mismo dominio.

@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AegisCore — Consola de flota</title>
+<!--
+  Consola de administracion de AegisCore.
+
+  Sin cadena de construccion y sin dependencias externas, a proposito: esta
+  pagina es la que puede aislar miles de endpoints, asi que lo que se audita
+  tiene que ser exactamente lo que se sirve. No hay empaquetador transformando
+  el codigo por el camino ni arbol de paquetes de terceros que vigilar.
+
+  La politica de seguridad de contenido de abajo lo refuerza: no se carga nada
+  de fuera, y no se ejecuta nada en linea salvo los modulos propios.
+-->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<link rel="stylesheet" href="/panel/estilo.css">
+</head>
+<body>
+
+<!-- ── Acceso ─────────────────────────────────────────────────────────── -->
+<section id="acceso" class="acceso">
+  <form id="form-acceso" class="tarjeta-acceso">
+    <h1>Aegis<span>Core</span></h1>
+    <p class="sub">Consola de flota</p>
+    <label for="usuario">Operador</label>
+    <input id="usuario" name="usuario" autocomplete="username" required
+           placeholder="operador@empresa" spellcheck="false">
+    <button type="submit">Entrar</button>
+    <p id="error-acceso" class="error" hidden></p>
+  </form>
+</section>
+
+<!-- ── Consola ────────────────────────────────────────────────────────── -->
+<div id="consola" hidden>
+
+  <header class="cabecera">
+    <div class="marca">Aegis<span>Core</span></div>
+    <nav class="pestanas" id="pestanas">
+      <button data-vista="topologia" class="activa">Topología</button>
+      <button data-vista="alertas">Alertas <span id="pin-alertas" class="pin" hidden>0</span></button>
+      <button data-vista="linaje">Linaje</button>
+      <button data-vista="reglas">Reglas</button>
+      <button data-vista="inteligencia">Inteligencia</button>
+    </nav>
+    <div class="estado">
+      <span id="enlace" class="enlace desconectado" title="Estado del canal en tiempo real">
+        <i></i><b>conectando</b>
+      </span>
+      <span id="quien" class="quien"></span>
+      <button id="salir" class="salir" title="Cerrar sesión">Salir</button>
+    </div>
+  </header>
+
+  <!-- Indicadores -->
+  <section class="kpis" id="kpis">
+    <div class="kpi"><b id="k-total">—</b><span>endpoints</span></div>
+    <div class="kpi ok"><b id="k-linea">—</b><span>en línea</span></div>
+    <div class="kpi aviso"><b id="k-aislados">—</b><span>aislados</span></div>
+    <div class="kpi"><b id="k-abiertas">—</b><span>alertas abiertas</span></div>
+    <div class="kpi grave"><b id="k-criticas">—</b><span>críticas</span></div>
+    <div class="kpi"><b id="k-politica">—</b><span>versión de política</span></div>
+  </section>
+
+  <main class="cuerpo">
+    <div class="panel-principal">
+
+      <!-- Topología -->
+      <section class="vista" id="vista-topologia">
+        <div class="barra-vista">
+          <h2>Topología de la flota</h2>
+          <label class="filtro">
+            <input type="checkbox" id="solo-problemas"> Solo con problemas
+          </label>
+        </div>
+        <div id="rejilla-flota" class="rejilla"></div>
+        <p id="flota-vacia" class="vacio" hidden>
+          Ningún endpoint enrolado todavía. Los agentes aparecen aquí en cuanto
+          completan el enrolamiento mTLS.
+        </p>
+      </section>
+
+      <!-- Alertas -->
+      <section class="vista" id="vista-alertas" hidden>
+        <div class="barra-vista">
+          <h2>Alertas</h2>
+          <label class="filtro">
+            <input type="checkbox" id="solo-abiertas" checked> Solo sin resolver
+          </label>
+        </div>
+        <table class="tabla" id="tabla-alertas">
+          <thead>
+            <tr><th>Sev.</th><th>Endpoint</th><th>Categoría</th><th>MITRE ATT&amp;CK</th>
+                <th>Descripción</th><th>Recibida</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="alertas-vacio" class="vacio" hidden>Sin alertas.</p>
+      </section>
+
+      <!-- Linaje de procesos -->
+      <section class="vista" id="vista-linaje" hidden>
+        <div class="barra-vista">
+          <h2>Linaje de procesos</h2>
+          <select id="selector-grafo" class="selector"></select>
+        </div>
+        <p class="nota">
+          Una detección aislada casi nunca concluye nada:
+          <code>python</code> abriendo un socket es rutina;
+          <code>libreoffice → sh → python</code> abriendo un socket es un incidente.
+        </p>
+        <div id="lienzo-arbol" class="lienzo"></div>
+        <div id="detalle-nodo" class="detalle-nodo" hidden></div>
+      </section>
+
+      <!-- Reglas globales -->
+      <section class="vista" id="vista-reglas" hidden>
+        <div class="barra-vista"><h2>Reglas globales</h2></div>
+        <form id="form-regla" class="form-regla">
+          <input id="r-nombre" placeholder="nombre-de-la-regla" required spellcheck="false">
+          <select id="r-tipo">
+            <option value="bloquear_puerto">Bloquear puerto</option>
+            <option value="bloquear_hash">Bloquear hash (SHA-256)</option>
+            <option value="bloquear_proceso">Bloquear proceso</option>
+            <option value="bloquear_red">Bloquear red (CIDR)</option>
+            <option value="aislar_por_puntuacion">Aislar por puntuación</option>
+          </select>
+          <input id="r-valor" placeholder="445" required spellcheck="false">
+          <select id="r-sev">
+            <option value="1">Baja</option>
+            <option value="2" selected>Media</option>
+            <option value="3">Alta</option>
+            <option value="4">Crítica</option>
+          </select>
+          <button type="submit">Publicar a la flota</button>
+        </form>
+        <p id="error-regla" class="error" hidden></p>
+        <table class="tabla" id="tabla-reglas">
+          <thead><tr><th>Estado</th><th>Nombre</th><th>Tipo</th><th>Parámetros</th>
+                     <th>Sev.</th><th>Creada por</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <!-- Inteligencia -->
+      <section class="vista" id="vista-inteligencia" hidden>
+        <div class="barra-vista"><h2>Inteligencia (STIX 2.1)</h2></div>
+        <p class="nota">
+          Ordenada por avistamientos: un indicador visto una vez es una anécdota;
+          uno visto en decenas de endpoints es una campaña en curso.
+        </p>
+        <table class="tabla" id="tabla-stix">
+          <thead><tr><th>Avist.</th><th>Tipo</th><th>Identificador</th>
+                     <th>Resumen</th><th>Último</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="stix-vacio" class="vacio" hidden>Sin inteligencia ingerida todavía.</p>
+      </section>
+
+    </div>
+
+    <!-- Actividad en vivo -->
+    <aside class="lateral">
+      <h3>Actividad en vivo</h3>
+      <ul id="actividad" class="actividad"></ul>
+    </aside>
+  </main>
+</div>
+
+<!-- Respuesta de un clic -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-caja">
+    <h3 id="modal-titulo">Endpoint</h3>
+    <dl id="modal-datos" class="datos"></dl>
+    <div id="modal-aviso" class="aviso-respuesta"></div>
+    <div class="modal-acciones">
+      <button id="btn-aislar" class="peligro">Aislar endpoint</button>
+      <button id="btn-liberar" class="secundario">Liberar</button>
+      <button id="btn-cerrar" class="secundario">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/panel/app.js"></script>
+</body>
+</html>

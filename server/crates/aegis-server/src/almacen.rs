@@ -849,6 +849,68 @@ impl Almacen {
         Ok(version)
     }
 
+    /// Lista los grafos capturados, los mas recientes primero.
+    pub async fn listar_grafos(&self, limite: i64) -> Resultado<Vec<VistaGrafo>> {
+        let filas = sqlx::query(
+            r#"SELECT id, cn_agente, raiz, nodos, capturado_en, recibido_en
+                 FROM grafos ORDER BY recibido_en DESC LIMIT $1"#,
+        )
+        .bind(limite)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas
+            .iter()
+            .map(|f| VistaGrafo {
+                id: f.get("id"),
+                cn_agente: f.get("cn_agente"),
+                raiz: f.get("raiz"),
+                nodos: f.get("nodos"),
+                capturado_en: f.get("capturado_en"),
+                recibido_en: f.get("recibido_en"),
+            })
+            .collect())
+    }
+
+    /// Devuelve los nodos de un grafo, ordenados por profundidad.
+    ///
+    /// El orden importa para quien lo dibuja: recorrer de la raiz hacia las
+    /// hojas permite colocar cada nodo sabiendo ya donde quedo su padre.
+    pub async fn nodos_de_grafo(&self, id: Uuid) -> Resultado<Vec<VistaNodoGrafo>> {
+        let filas = sqlx::query(
+            r#"SELECT clave, pid, padre, creador, profundidad, imagen, cmdline,
+                      clase, iniciado_ns, terminado_ns, taints, puntuacion
+                 FROM grafo_nodos WHERE id_grafo = $1
+                ORDER BY profundidad, clave"#,
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        if filas.is_empty() {
+            return Err(crate::error::ErrorServidor::NoEncontrado(format!(
+                "no hay grafo con identificador {id}"
+            )));
+        }
+
+        Ok(filas
+            .iter()
+            .map(|f| VistaNodoGrafo {
+                clave: f.get("clave"),
+                pid: f.get("pid"),
+                padre: f.get("padre"),
+                creador: f.get("creador"),
+                profundidad: f.get("profundidad"),
+                imagen: f.get("imagen"),
+                cmdline: f.get("cmdline"),
+                clase: f.get("clase"),
+                iniciado_ns: f.get("iniciado_ns"),
+                terminado_ns: f.try_get("terminado_ns").ok().flatten(),
+                taints: f.get("taints"),
+                puntuacion: f.get("puntuacion"),
+            })
+            .collect())
+    }
+
     /// Lista los objetos STIX ingeridos, los mas avistados primero.
     ///
     /// El orden no es capricho: un indicador visto una vez es una anecdota; uno
@@ -889,6 +951,52 @@ impl Almacen {
             None => (0, serde_json::Value::Null),
         })
     }
+}
+
+/// Vista de un grafo capturado.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VistaGrafo {
+    /// Identificador.
+    pub id: Uuid,
+    /// Agente que lo capturo.
+    pub cn_agente: String,
+    /// Clave del nodo que disparo la captura.
+    pub raiz: i64,
+    /// Numero de nodos.
+    pub nodos: i32,
+    /// Momento de captura en el endpoint.
+    pub capturado_en: DateTime<Utc>,
+    /// Momento de llegada.
+    pub recibido_en: DateTime<Utc>,
+}
+
+/// Vista de un nodo del grafo para dibujar el arbol.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VistaNodoGrafo {
+    /// Identidad estable del proceso.
+    pub clave: i64,
+    /// PID observado.
+    pub pid: i64,
+    /// Clave del padre.
+    pub padre: i64,
+    /// Clave del creador.
+    pub creador: i64,
+    /// Profundidad en el linaje.
+    pub profundidad: i32,
+    /// Ruta de la imagen.
+    pub imagen: String,
+    /// Linea de comandos.
+    pub cmdline: String,
+    /// Clase de imagen.
+    pub clase: i32,
+    /// Arranque en nanosegundos.
+    pub iniciado_ns: i64,
+    /// Salida, si termino.
+    pub terminado_ns: Option<i64>,
+    /// Marcas de contaminacion.
+    pub taints: i64,
+    /// Puntuacion de comportamiento.
+    pub puntuacion: i32,
 }
 
 /// Vista de un objeto STIX para el panel.

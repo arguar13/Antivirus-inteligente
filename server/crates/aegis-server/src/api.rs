@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
@@ -51,8 +52,12 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         .route("/api/reglas", get(listar_reglas).post(crear_regla))
         .route("/api/reglas/{id}", axum::routing::delete(borrar_regla))
         .route("/api/reglas/{id}/activa", post(fijar_regla_activa))
-        // Inteligencia
+        // Inteligencia y linaje
         .route("/api/stix/objetos", get(listar_objetos_stix))
+        .route("/api/grafos", get(listar_grafos))
+        .route("/api/grafos/{id}", get(obtener_grafo))
+        // Tiempo real
+        .route("/api/ws", get(websocket))
         // Reputacion k-anonima
         .route("/api/reputacion/{prefijo}", get(consultar_reputacion))
         .route("/api/reputacion", post(registrar_reputacion))
@@ -379,13 +384,25 @@ async fn cambiar_aislamiento(
                 .encolar_comando(&cn, accion, serde_json::json!({}), &usuario)
                 .await
             {
-                Ok(id) => (
-                    StatusCode::ACCEPTED,
-                    Json(serde_json::json!({
-                        "comando": id, "accion": accion, "agente": cn, "ordenado_por": usuario
-                    })),
-                )
-                    .into_response(),
+                Ok(id) => {
+                    // El resto de consolas abiertas ven el cambio al instante:
+                    // dos operadores actuando a ciegas sobre el mismo incidente
+                    // es como se duplican las acciones de respuesta.
+                    estado.servicio.bus().publicar(
+                        crate::eventos::EventoPanel::AislamientoCambiado {
+                            cn: cn.clone(),
+                            aislado: aislar,
+                            por: usuario.clone(),
+                        },
+                    );
+                    (
+                        StatusCode::ACCEPTED,
+                        Json(serde_json::json!({
+                            "comando": id, "accion": accion, "agente": cn, "ordenado_por": usuario
+                        })),
+                    )
+                        .into_response()
+                }
                 Err(e) => error_500(e).into_response(),
             }
         }
@@ -507,13 +524,27 @@ async fn crear_regla(
     // Dar de alta la regla y NO publicar dejaria la flota sin ella: las dos
     // cosas son una sola operacion desde el punto de vista del operador.
     match almacen.recompilar_y_publicar(&r.nombre).await {
-        Ok(version) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({
-                "regla": id, "version_politica": version, "creada_por": usuario
-            })),
-        )
-            .into_response(),
+        Ok(version) => {
+            let activas = almacen
+                .listar_reglas()
+                .await
+                .map(|v| v.iter().filter(|x| x.activa).count())
+                .unwrap_or(0);
+            estado
+                .servicio
+                .bus()
+                .publicar(crate::eventos::EventoPanel::PoliticaPublicada {
+                    version,
+                    reglas: activas,
+                });
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "regla": id, "version_politica": version, "creada_por": usuario
+                })),
+            )
+                .into_response()
+        }
         Err(e) => error_500(e).into_response(),
     }
 }
@@ -625,6 +656,148 @@ async fn listar_objetos_stix(
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => error_500(e).into_response(),
     }
+}
+
+/// Lista los grafos de linaje capturados.
+async fn listar_grafos(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Query(q): Query<Limite>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let limite = q.limite.unwrap_or(50).clamp(1, 1_000);
+    match estado.servicio.almacen().listar_grafos(limite).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Devuelve los nodos de un grafo, para dibujar el arbol de procesos.
+async fn obtener_grafo(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let Ok(uuid) = id.parse::<uuid::Uuid>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "identificador de grafo invalido"})),
+        )
+            .into_response();
+    };
+    match estado.servicio.almacen().nodos_de_grafo(uuid).await {
+        Ok(v) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"id": id, "nodos": v})),
+        )
+            .into_response(),
+        Err(crate::error::ErrorServidor::NoEncontrado(m)) => {
+            (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": m}))).into_response()
+        }
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Token de sesion para la conexion en tiempo real.
+#[derive(Deserialize)]
+struct TokenWs {
+    /// Token emitido por `/api/sesion`.
+    token: Option<String>,
+}
+
+/// Abre la conexion en tiempo real del panel.
+///
+/// # Por que el token viaja en la consulta y no en una cabecera
+///
+/// El API de WebSocket del navegador NO permite anadir cabeceras al handshake:
+/// es una limitacion del estandar, no una decision de diseno. Las alternativas
+/// reales son una cookie o el parametro de consulta. Se usa el parametro porque
+/// mantiene la sesion en el mismo mecanismo que el resto de la API (token
+/// portador, sin estado de cookie ni exposicion a CSRF), a cambio de que el
+/// token pueda aparecer en registros de acceso: por eso las sesiones caducan y
+/// se pueden cerrar. En produccion, ademas, esto viaja siempre sobre TLS.
+async fn websocket(
+    State(estado): State<EstadoApi>,
+    Query(q): Query<TokenWs>,
+    ws: WebSocketUpgrade,
+) -> axum::response::Response {
+    let token = q.token.unwrap_or_default();
+    let usuario = match estado.cache.usuario_de_sesion(&token).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "sesion invalida o caducada"})),
+            )
+                .into_response()
+        }
+        Err(e) => return error_500(e).into_response(),
+    };
+
+    ws.on_upgrade(move |socket| atender_websocket(socket, estado, usuario))
+}
+
+/// Bombea los eventos del bus hacia una consola conectada.
+async fn atender_websocket(mut socket: WebSocket, estado: EstadoApi, usuario: String) {
+    let mut receptor = estado.servicio.bus().suscribir();
+    tracing::info!(usuario = %usuario, consolas = estado.servicio.bus().consolas(),
+        "consola conectada al tiempo real");
+
+    // Primer mensaje: una instantanea, para que la consola pinte algo de
+    // inmediato en vez de una pantalla vacia hasta que ocurra el primer suceso.
+    let resumen = estado
+        .servicio
+        .almacen()
+        .resumen(estado.margen_desconexion_seg)
+        .await
+        .ok();
+    if let Some(r) = resumen {
+        let inicial = serde_json::json!({"tipo": "instantanea", "resumen": r});
+        if socket
+            .send(Message::Text(inicial.to_string().into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+    }
+
+    loop {
+        tokio::select! {
+            // Eventos del bus hacia la consola.
+            recibido = receptor.recv() => match recibido {
+                Ok(evento) => {
+                    let Ok(texto) = serde_json::to_string(&evento) else { continue };
+                    if socket.send(Message::Text(texto.into())).await.is_err() {
+                        break;
+                    }
+                }
+                // La consola se quedo atras y se descartaron eventos: se le dice
+                // para que pida una instantanea, en vez de dejarla creyendo que
+                // tiene el estado completo.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    let aviso = serde_json::json!({"tipo": "desincronizada", "perdidos": n});
+                    if socket.send(Message::Text(aviso.to_string().into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            },
+            // Mensajes de la consola: solo se atiende el cierre y el ping.
+            entrante = socket.recv() => match entrante {
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(_)) => break,
+                _ => {}
+            },
+        }
+    }
+
+    tracing::info!(usuario = %usuario, "consola desconectada del tiempo real");
 }
 
 /// Devuelve el cubo de reputacion de un prefijo de hash.

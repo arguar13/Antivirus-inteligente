@@ -26,9 +26,11 @@ pub mod cache;
 pub mod config;
 pub mod dominio;
 pub mod error;
+pub mod eventos;
 pub mod flota;
 pub mod grpc;
 pub mod notificador;
+pub mod panel;
 pub mod reglas;
 
 /// Codigo generado por tonic a partir de `proto/aegis_fleet.proto`.

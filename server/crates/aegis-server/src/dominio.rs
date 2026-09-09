@@ -14,12 +14,15 @@ use chrono::{DateTime, TimeZone, Utc};
 
 use crate::almacen::{Almacen, EstadoLatido, IngestaStix, NodoGrafo, NuevaAlerta};
 use crate::error::Resultado;
+use crate::eventos::{BusEventos, EventoPanel};
 
 /// Servicio de flota: la logica que ven todos los transportes.
 #[derive(Clone)]
 pub struct ServicioFlota {
     almacen: Almacen,
     intervalo_latido_seg: u64,
+    /// Bus por el que los sucesos llegan al panel en tiempo real.
+    bus: BusEventos,
 }
 
 /// Clasificacion MITRE ATT&CK de una categoria de evento.
@@ -130,7 +133,22 @@ impl ServicioFlota {
         ServicioFlota {
             almacen,
             intervalo_latido_seg,
+            bus: BusEventos::nuevo(),
         }
+    }
+
+    /// Crea el servicio compartiendo un bus de eventos ya existente.
+    pub fn con_bus(almacen: Almacen, intervalo_latido_seg: u64, bus: BusEventos) -> ServicioFlota {
+        ServicioFlota {
+            almacen,
+            intervalo_latido_seg,
+            bus,
+        }
+    }
+
+    /// Bus de eventos, para que la API abra suscripciones de WebSocket.
+    pub fn bus(&self) -> &BusEventos {
+        &self.bus
     }
 
     /// Acceso al almacen, para la API de administracion.
@@ -176,14 +194,23 @@ impl ServicioFlota {
         amenazas_activas: u64,
         version_politica: u64,
     ) -> Resultado<EstadoLatido> {
-        self.almacen
+        let estado = self
+            .almacen
             .registrar_latido(
                 cn,
                 rss_kb.min(i64::MAX as u64) as i64,
                 amenazas_activas.min(i64::MAX as u64) as i64,
                 version_politica.min(i64::MAX as u64) as i64,
             )
-            .await
+            .await?;
+        // El latido alimenta el mapa de topologia: es lo que hace que un
+        // endpoint pase de gris a verde en la consola sin recargar la pagina.
+        self.bus.publicar(EventoPanel::Latido {
+            cn: cn.to_string(),
+            rss_kb: rss_kb.min(i64::MAX as u64) as i64,
+            amenazas: amenazas_activas.min(i64::MAX as u64) as i64,
+        });
+        Ok(estado)
     }
 
     /// Registra un evento de seguridad y devuelve el identificador de incidente.
@@ -204,7 +231,18 @@ impl ServicioFlota {
             tactica: clase.map(|c| c.tactica),
             ocurrido_en: momento_o_ahora(momento_unix),
         };
-        self.almacen.registrar_alerta(cn, &alerta).await
+        let id = self.almacen.registrar_alerta(cn, &alerta).await?;
+        // Una alerta critica que espera al siguiente sondeo del panel es una
+        // alerta que llega tarde.
+        self.bus.publicar(EventoPanel::AlertaNueva {
+            id: id.to_string(),
+            cn: cn.to_string(),
+            severidad: alerta.severidad,
+            categoria: categoria.to_string(),
+            descripcion: descripcion.chars().take(512).collect(),
+            tecnica_mitre: clase.map(|c| c.tecnica.to_string()),
+        });
+        Ok(id)
     }
 }
 
@@ -226,9 +264,15 @@ impl ServicioFlota {
                 bundle_json.len()
             )));
         }
-        self.almacen
+        let ingesta = self
+            .almacen
             .ingerir_stix(cn, bundle_json, Some(momento_o_ahora(momento_unix)))
-            .await
+            .await?;
+        self.bus.publicar(EventoPanel::InteligenciaNueva {
+            cn: cn.to_string(),
+            objetos: ingesta.objetos,
+        });
+        Ok(ingesta)
     }
 
     /// Ingiere el subgrafo de linaje que rodea a una deteccion.
