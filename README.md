@@ -169,6 +169,7 @@ crates/
   aegis-harden/               Cifrado de cadenas + anti-depuración           [hecho]
   aegis-kguard/               Integridad HMAC del eBPF + permisos de mapas   [hecho]
   aegis-audit/                Registro de auditoría cifrado + rotación       [hecho]
+  aegis-ctl/                  Canal de control por socket Unix + aegisctl    [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
@@ -193,6 +194,7 @@ docs/                         Blueprint arquitectónico
 | 6 | [Stack y hoja de ruta](docs/06-stack-y-roadmap.md) — lenguajes, fases, criterios de salida |
 | 8 | [Blindaje del agente](docs/08-blindaje.md) — cifrado de cadenas, anti-depuración, stripping |
 | 9 | [Auditoría local cifrada](docs/09-auditoria.md) — SQLite embebida, AES-256-GCM, rotación |
+| 10 | [Canal de control](docs/10-control.md) — socket Unix 0600, aegisctl, status/scan/isolate/quarantine |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo

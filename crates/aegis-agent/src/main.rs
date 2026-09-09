@@ -42,7 +42,8 @@ fn main() -> std::process::ExitCode {
         eprintln!(
             "aegis-agent - agente de deteccion de AegisCore\n\
              \n\
-             USO: aegis-agent [--stats-interval SEGUNDOS] [--harden]\n\
+             USO: aegis-agent [--stats-interval SEGUNDOS] [--harden] \n\
+             \x20    [--control-socket RUTA]\n\
              \n\
              Requiere CAP_BPF y CAP_PERFMON (o root) para cargar las sondas,\n\
              y un kernel con CONFIG_DEBUG_INFO_BTF=y."
@@ -59,7 +60,40 @@ fn main() -> std::process::ExitCode {
 
     blindar(args.iter().any(|a| a == "--harden"));
 
-    ejecutar(intervalo)
+    let control_socket = args
+        .windows(2)
+        .find(|w| w[0] == "--control-socket")
+        .map(|w| w[1].clone());
+
+    ejecutar(intervalo, control_socket)
+}
+
+/// Fuente de estado para el canal de control, respaldada por el pipeline.
+///
+/// Solo lee contadores atomicos, asi que compartir el pipeline con el hilo de
+/// control no introduce contencion ni bloqueos con el bucle de eventos.
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+struct EstadoPipeline {
+    pipeline: Arc<Pipeline>,
+}
+
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+impl aegis_ctl::StatusSource for EstadoPipeline {
+    fn events_received(&self) -> u64 {
+        self.pipeline
+            .stats
+            .received
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn events_escalated(&self) -> u64 {
+        self.pipeline
+            .stats
+            .escalated
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+    fn state(&self) -> String {
+        "running".to_string()
+    }
 }
 
 /// Blindaje del agente (FASE 13).
@@ -109,7 +143,7 @@ fn blindar(agresivo: bool) {
 }
 
 #[cfg(all(target_os = "linux", feature = "bpf"))]
-fn ejecutar(intervalo: Duration) -> std::process::ExitCode {
+fn ejecutar(intervalo: Duration, control_socket: Option<String>) -> std::process::ExitCode {
     use aegis_agent::bpf;
 
     instalar_manejadores();
@@ -118,6 +152,34 @@ fn ejecutar(intervalo: Duration) -> std::process::ExitCode {
         GraphConfig::default(),
         TriageConfig::default(),
     ));
+
+    // Canal de control opcional: si se pidio un socket, se levanta el servidor
+    // en un hilo aparte. Lo caro del control (YARA) se carga en diferido, asi
+    // que el hilo en reposo no anade memoria al presupuesto.
+    let control_stop = Arc::new(AtomicBool::new(false));
+    let control_hilo = control_socket.as_ref().and_then(|ruta| {
+        match aegis_ctl::ControlServer::bind(ruta) {
+            Ok(server) => {
+                eprintln!("aegis-agent: canal de control en {ruta}");
+                let handler = aegis_ctl::AgentControl::lazy(
+                    std::path::PathBuf::from("/var/lib/aegiscore/quarantine"),
+                    /*isolate_dry_run=*/ false,
+                    Arc::new(EstadoPipeline {
+                        pipeline: Arc::clone(&pipeline),
+                    }),
+                );
+                let parar = Arc::clone(&control_stop);
+                Some(std::thread::spawn(move || {
+                    server.serve(&handler, &parar);
+                }))
+            }
+            Err(e) => {
+                eprintln!("aegis-agent: no se pudo abrir el canal de control: {e}");
+                None
+            }
+        }
+    });
+
     let config = bpf::SourceConfig::default();
 
     eprintln!(
@@ -157,6 +219,12 @@ fn ejecutar(intervalo: Duration) -> std::process::ExitCode {
         }
     });
 
+    // El hilo de control se detiene cuando el bucle de eventos termina.
+    control_stop.store(true, Ordering::Relaxed);
+    if let Some(h) = control_hilo {
+        let _ = h.join();
+    }
+
     match resultado {
         Ok(stats) => {
             eprintln!(
@@ -188,7 +256,7 @@ fn ejecutar(intervalo: Duration) -> std::process::ExitCode {
 }
 
 #[cfg(not(all(target_os = "linux", feature = "bpf")))]
-fn ejecutar(_intervalo: Duration) -> std::process::ExitCode {
+fn ejecutar(_intervalo: Duration, _control_socket: Option<String>) -> std::process::ExitCode {
     let _ = (&PARAR, Arc::new(0u8), Instant::now());
     let _ = Pipeline::new(GraphConfig::default(), TriageConfig::default());
     eprintln!(
