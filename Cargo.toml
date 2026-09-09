@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/aegis-ipc"]
+members = ["crates/aegis-ipc", "crates/aegis-agent"]
 
 [workspace.package]
 version = "0.1.0"

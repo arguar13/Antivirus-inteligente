@@ -60,12 +60,49 @@ pub enum RingError {
 }
 
 /// Vista de solo lectura sobre un registro del ring, sin copia.
+#[derive(Debug)]
 pub struct EventView<'a> {
     hdr: AegisEvtHdr,
     bytes: &'a [u8],
 }
 
 impl<'a> EventView<'a> {
+    /// Interpreta un registro suelto que ya no viene del ring SPSC propio.
+    ///
+    /// En Linux el transporte es `BPF_MAP_TYPE_RINGBUF`, que entrega cada
+    /// registro por separado a un callback en vez de exponer un buffer
+    /// circular con cursores. El CONTENIDO del registro es el mismo ABI, asi
+    /// que el correlador no cambia; solo cambia como llega.
+    ///
+    /// Valida igual que [`RingConsumer::drain`]: magic, version del ABI y
+    /// coherencia de `total_len`. El productor es codigo de kernel y por tanto
+    /// confiable, pero un bug suyo no debe convertirse en una lectura fuera de
+    /// rango dentro del agente.
+    pub fn parse(bytes: &'a [u8]) -> Result<EventView<'a>, RingError> {
+        if bytes.len() < core::mem::size_of::<AegisEvtHdr>() {
+            return Err(RingError::Corrupt);
+        }
+        // SAFETY: se acaba de comprobar que hay al menos una cabecera completa.
+        // La lectura es unaligned porque el ring buffer de BPF no garantiza
+        // alineacion de 64 bytes para el inicio de cada registro.
+        let hdr = unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const AegisEvtHdr) };
+
+        if hdr.magic != AEGIS_EVT_MAGIC || hdr.abi_version != AEGIS_ABI_VERSION {
+            return Err(RingError::Corrupt);
+        }
+        let total_len = hdr.total_len as usize;
+        if total_len < core::mem::size_of::<AegisEvtHdr>()
+            || total_len % RECORD_ALIGN as usize != 0
+            || total_len > bytes.len()
+        {
+            return Err(RingError::Corrupt);
+        }
+        Ok(EventView {
+            hdr,
+            bytes: &bytes[..total_len],
+        })
+    }
+
     /// Cabecera del evento.
     #[inline]
     pub fn header(&self) -> &AegisEvtHdr {
@@ -157,15 +194,26 @@ unsafe impl Payload for crate::abi::AegisFileOp {
     ];
 }
 unsafe impl Payload for crate::abi::AegisRemoteMem {
+    // HANDLE_REQUEST comparte payload: en Linux lo produce ptrace(), que es el
+    // equivalente exacto de abrir un handle a otro proceso con permiso de
+    // lectura o escritura de memoria. Los campos se reutilizan sin forzarlos:
+    // target_pid es el proceso objetivo, alloc_type la peticion de ptrace y
+    // address el argumento addr.
     const EVENT_TYPES: &'static [u16] = &[
         evt::REMOTE_ALLOC,
         evt::REMOTE_WRITE,
         evt::REMOTE_PROTECT,
         evt::REMOTE_THREAD,
+        evt::HANDLE_REQUEST,
     ];
 }
 unsafe impl Payload for crate::abi::AegisSyscallAnomaly {
     const EVENT_TYPES: &'static [u16] = &[evt::SYSCALL_ANOMALY];
+}
+
+// SAFETY: `#[repr(C)]` compuesta de enteros sin signo y arrays de u8.
+unsafe impl Payload for crate::abi::AegisNetConn {
+    const EVENT_TYPES: &'static [u16] = &[evt::NET_CONNECT];
 }
 
 /// Consumidor del ring. Se adjunta a una seccion ya mapeada por el llamante.
@@ -763,6 +811,58 @@ mod tests {
         assert_eq!(
             RingConsumer::atomic_u32(ring.base, offset_consumer_alive()).load(Ordering::Acquire),
             99
+        );
+    }
+
+    #[test]
+    fn parse_valida_registros_sueltos() {
+        // Registro bien formado, como el que entrega el ring buffer de BPF.
+        let (payload, strings) = proc_create("/usr/bin/id", "id -u");
+        let mut rec = vec![0u8; 512];
+        let hdr = AegisEvtHdr {
+            magic: AEGIS_EVT_MAGIC,
+            abi_version: AEGIS_ABI_VERSION,
+            ty: evt::PROCESS_CREATE,
+            total_len: 512,
+            flags: 0,
+            seq: 1,
+            ts_ns: 5,
+            actor_key: 0xABCD,
+            target_key: 0,
+            cpu: 0,
+            verdict_id: 0,
+            reserved: 0,
+        };
+        // SAFETY: `rec` tiene 512 bytes y la cabecera ocupa 64.
+        unsafe { std::ptr::write_unaligned(rec.as_mut_ptr() as *mut AegisEvtHdr, hdr) };
+        rec[64..64 + payload.len()].copy_from_slice(&payload);
+        let soff = 64 + payload.len();
+        rec[soff..soff + strings.len()].copy_from_slice(&strings);
+
+        let ev = EventView::parse(&rec).expect("registro valido");
+        assert_eq!(ev.event_type(), evt::PROCESS_CREATE);
+        let p: AegisProcCreate = ev.payload().unwrap();
+        assert_eq!(ev.resolve_str(p.image_path).unwrap(), "/usr/bin/id");
+
+        // Demasiado corto para contener una cabecera.
+        assert_eq!(
+            EventView::parse(&rec[..32]).unwrap_err(),
+            RingError::Corrupt
+        );
+        // total_len declara mas bytes de los que se entregan.
+        let mut corto = rec.clone();
+        corto.truncate(256);
+        assert_eq!(EventView::parse(&corto).unwrap_err(), RingError::Corrupt);
+        // Magic incorrecto.
+        let mut malo = rec.clone();
+        malo[0] = 0;
+        assert_eq!(EventView::parse(&malo).unwrap_err(), RingError::Corrupt);
+        // total_len que no es multiplo de la alineacion de registro.
+        let mut desalineado = rec.clone();
+        desalineado[8..12].copy_from_slice(&100u32.to_le_bytes());
+        assert_eq!(
+            EventView::parse(&desalineado).unwrap_err(),
+            RingError::Corrupt
         );
     }
 
