@@ -619,6 +619,27 @@ def escenario_syscall_directa():
         fallo(f"la syscall directa se escapo del guardia: {r.stdout.strip()} {r.stderr.strip()}")
 
 
+# ---------------------------------------------------------------------------
+# 14. Control de acceso de la flota: un endpoint sin certificado de la CA de la
+#     flota no pasa del handshake mTLS; el legitimo se enrola (FASE 34).
+# ---------------------------------------------------------------------------
+
+
+def escenario_flota():
+    titulo(14, "un endpoint impostor intenta unirse a la flota y el mTLS mutuo lo rechaza")
+
+    binario = ejemplo("aegis-fleet", "fleet_probe")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar la sonda de flota")
+        return
+
+    r = run([binario])
+    if r.returncode == 0 and "DEFENDIDO" in r.stdout:
+        ok("el plano de control enrolo al agente legitimo y rechazo al impostor de otra CA")
+    else:
+        fallo(f"el control de acceso de la flota fallo: {r.stdout.strip()} {r.stderr.strip()}")
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -634,9 +655,10 @@ def main():
     escenario_bootkit()
     escenario_empaquetador()
     escenario_syscall_directa()
+    escenario_flota()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({13} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({14} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1

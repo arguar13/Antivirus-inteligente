@@ -1,0 +1,24 @@
+[package]
+name = "aegis-fleet"
+description = "Agente de gestion de flota sobre gRPC/mTLS con certificados de rotacion automatica y claves que nunca tocan el disco"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem", "x509-parser"] }
+rustls-pki-types = "1"
+zeroize = "1"
+sha2 = "0.10"
+time = { version = "0.3", default-features = false }
+
+[[bin]]
+name = "aegis-fleet"
+path = "src/main.rs"

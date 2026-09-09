@@ -103,6 +103,21 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "syscallguard" ]; then
     fi
 fi
 
+# Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
+# en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
+# el informe lo confirma donde corre la puerta de calidad.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fleet" ]; then
+    printf '%s==>%s Flota · gestion sobre gRPC/mTLS con certificados rotativos\n' "$GRIS" "$FIN"
+    if cargo run -q -p aegis-fleet --example fleet_support > /tmp/aegis-fleet.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-fleet.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-fleet.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 paso docs  "Docs · enlaces relativos"   ./tools/check-links.sh
 # El fichero de cadenas cifradas (FASE 13) tiene que estar al dia respecto al
 # manifiesto: si alguien cambia una cadena critica y no regenera, el binario
@@ -156,6 +171,7 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
         cargo build -q -p aegis-firmware --example bootkit_probe 2>/dev/null
         cargo build -q -p aegis-unpacker --example unpack_probe 2>/dev/null
         cargo build -q -p aegis-syscallguard --example syscall_probe 2>/dev/null
+        cargo build -q -p aegis-fleet --example fleet_probe 2>/dev/null
         make -C drivers/linux/aegis-bpf build sign >/dev/null 2>&1 || true
         if python3 tests/red_team_sim.py > /tmp/aegis-redteam.log 2>&1; then
             printf '    %sOK%s\n' "$VERDE" "$FIN"
