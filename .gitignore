@@ -29,3 +29,4 @@ reports/
 # Entorno local
 .env
 .DS_Store
+drivers/linux/aegis-bpf/out/

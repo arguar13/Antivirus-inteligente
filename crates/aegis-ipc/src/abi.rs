@@ -125,6 +125,18 @@ pub mod mem_flags {
     pub const RX_TRANSITION: u32 = 0x0000_0008;
 }
 
+/// Flags de [`AegisNetConn`].
+pub mod net_flags {
+    /// Conexion saliente.
+    pub const OUTBOUND: u32 = 0x0000_0001;
+    /// Conexion entrante aceptada.
+    pub const INBOUND: u32 = 0x0000_0002;
+    /// El extremo remoto es la propia maquina.
+    pub const LOOPBACK: u32 = 0x0000_0004;
+    /// El destino cae en un rango privado RFC1918.
+    pub const PRIVATE_DST: u32 = 0x0000_0008;
+}
+
 /// Flags de [`AegisSyscallAnomaly`].
 pub mod sys_flags {
     /// La direccion de retorno cae en memoria privada.
@@ -318,6 +330,40 @@ pub struct AegisSyscallAnomaly {
     pub flags: u32,
 }
 
+/// Conexion de red.
+///
+/// Las direcciones ocupan siempre 16 bytes: IPv4 usa los cuatro primeros y el
+/// resto queda a cero, para que el correlador no tenga que ramificar por
+/// familia de direcciones en cada evento.
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct AegisNetConn {
+    /// Direccion origen.
+    pub saddr: [u8; 16],
+    /// Direccion destino.
+    pub daddr: [u8; 16],
+    /// PID que origina la conexion.
+    pub pid: u32,
+    /// Puerto origen, en orden de host.
+    pub sport: u16,
+    /// Puerto destino, en orden de host.
+    pub dport: u16,
+    /// `AF_INET` (2) o `AF_INET6` (10).
+    pub family: u16,
+    /// `IPPROTO_TCP` (6) o `IPPROTO_UDP` (17).
+    pub protocol: u16,
+    /// Estado TCP previo.
+    pub old_state: u16,
+    /// Estado TCP nuevo.
+    pub new_state: u16,
+    /// Combinacion de [`net_flags`].
+    pub flags: u32,
+    /// Reservado.
+    pub reserved0: u32,
+    /// Reservado.
+    pub reserved1: u64,
+}
+
 /// Respuesta del agente a una operacion pendiente de veredicto.
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -403,6 +449,10 @@ const _: () = {
 
     assert!(size_of::<AegisRemoteMem>() == 48);
     assert!(size_of::<AegisSyscallAnomaly>() == 48);
+    assert!(size_of::<AegisNetConn>() == 64);
+    assert!(offset_of!(AegisNetConn, pid) == 32);
+    assert!(offset_of!(AegisNetConn, flags) == 48);
+
     assert!(size_of::<AegisVerdict>() == 24);
 
     assert!(size_of::<AegisRingCtrl>() == 192);

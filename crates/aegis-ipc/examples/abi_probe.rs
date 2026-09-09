@@ -112,6 +112,18 @@ fn main() {
     p_off!("aegis_syscall_anomaly_t", AegisSyscallAnomaly, "region_type", region_type);
     p_off!("aegis_syscall_anomaly_t", AegisSyscallAnomaly, "flags", flags);
 
+    p_size!("aegis_net_conn_t", AegisNetConn);
+    p_off!("aegis_net_conn_t", AegisNetConn, "saddr", saddr);
+    p_off!("aegis_net_conn_t", AegisNetConn, "daddr", daddr);
+    p_off!("aegis_net_conn_t", AegisNetConn, "pid", pid);
+    p_off!("aegis_net_conn_t", AegisNetConn, "sport", sport);
+    p_off!("aegis_net_conn_t", AegisNetConn, "dport", dport);
+    p_off!("aegis_net_conn_t", AegisNetConn, "family", family);
+    p_off!("aegis_net_conn_t", AegisNetConn, "protocol", protocol);
+    p_off!("aegis_net_conn_t", AegisNetConn, "old_state", old_state);
+    p_off!("aegis_net_conn_t", AegisNetConn, "new_state", new_state);
+    p_off!("aegis_net_conn_t", AegisNetConn, "flags", flags);
+
     p_size!("aegis_verdict_t", AegisVerdict);
     p_off!("aegis_verdict_t", AegisVerdict, "verdict_id", verdict_id);
     p_off!("aegis_verdict_t", AegisVerdict, "detection_id", detection_id);
@@ -145,4 +157,9 @@ fn main() {
     println!("const AEGIS_MEM_F_RX_TRANSITION {}", mem_flags::RX_TRANSITION);
     println!("const AEGIS_SYS_F_INDIRECT {}", sys_flags::INDIRECT);
     println!("const AEGIS_IL_MEDIUM {}", integrity::MEDIUM);
+    println!("const AEGIS_EVT_NET_CONNECT {}", evt::NET_CONNECT);
+    println!("const AEGIS_EVT_HANDLE_REQUEST {}", evt::HANDLE_REQUEST);
+    println!("const AEGIS_EVT_PROCESS_EXIT {}", evt::PROCESS_EXIT);
+    println!("const AEGIS_EVT_FILE_PRE_CREATE {}", evt::FILE_PRE_CREATE);
+    println!("const AEGIS_NET_F_OUTBOUND {}", net_flags::OUTBOUND);
 }

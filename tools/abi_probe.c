@@ -93,6 +93,18 @@ int main(void)
     P_OFF(aegis_syscall_anomaly_t, region_type);
     P_OFF(aegis_syscall_anomaly_t, flags);
 
+    P_SIZE(aegis_net_conn_t);
+    P_OFF(aegis_net_conn_t, saddr);
+    P_OFF(aegis_net_conn_t, daddr);
+    P_OFF(aegis_net_conn_t, pid);
+    P_OFF(aegis_net_conn_t, sport);
+    P_OFF(aegis_net_conn_t, dport);
+    P_OFF(aegis_net_conn_t, family);
+    P_OFF(aegis_net_conn_t, protocol);
+    P_OFF(aegis_net_conn_t, old_state);
+    P_OFF(aegis_net_conn_t, new_state);
+    P_OFF(aegis_net_conn_t, flags);
+
     P_SIZE(aegis_verdict_t);
     P_OFF(aegis_verdict_t, verdict_id);
     P_OFF(aegis_verdict_t, detection_id);
@@ -127,5 +139,10 @@ int main(void)
     printf("const AEGIS_MEM_F_RX_TRANSITION %u\n", AEGIS_MEM_F_RX_TRANSITION);
     printf("const AEGIS_SYS_F_INDIRECT %u\n", AEGIS_SYS_F_INDIRECT);
     printf("const AEGIS_IL_MEDIUM %u\n", AEGIS_IL_MEDIUM);
+    printf("const AEGIS_EVT_NET_CONNECT %u\n", AEGIS_EVT_NET_CONNECT);
+    printf("const AEGIS_EVT_HANDLE_REQUEST %u\n", AEGIS_EVT_HANDLE_REQUEST);
+    printf("const AEGIS_EVT_PROCESS_EXIT %u\n", AEGIS_EVT_PROCESS_EXIT);
+    printf("const AEGIS_EVT_FILE_PRE_CREATE %u\n", AEGIS_EVT_FILE_PRE_CREATE);
+    printf("const AEGIS_NET_F_OUTBOUND %u\n", AEGIS_NET_F_OUTBOUND);
     return 0;
 }

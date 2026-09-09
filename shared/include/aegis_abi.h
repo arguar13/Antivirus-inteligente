@@ -229,6 +229,35 @@ typedef struct {
 } aegis_syscall_anomaly_t;
 AEGIS_STATIC_ASSERT(sizeof(aegis_syscall_anomaly_t) == 48, "aegis_syscall_anomaly_t == 48");
 
+/*
+ * Conexion de red. En Linux lo alimenta el tracepoint sock/inet_sock_set_state,
+ * que es estable entre versiones de kernel; en Windows, la capa ALE de WFP.
+ *
+ * Las direcciones viajan siempre en 16 bytes: IPv4 ocupa los cuatro primeros y
+ * el resto queda a cero. Un solo formato evita ramificar todo el correlador de
+ * Ring 3 por familia de direcciones.
+ */
+#define AEGIS_NET_F_OUTBOUND   0x00000001u
+#define AEGIS_NET_F_INBOUND    0x00000002u
+#define AEGIS_NET_F_LOOPBACK   0x00000004u
+#define AEGIS_NET_F_PRIVATE_DST 0x00000008u /* destino en rango RFC1918        */
+
+typedef struct {
+    uint8_t  saddr[16];     /* 0  */
+    uint8_t  daddr[16];     /* 16 */
+    uint32_t pid;           /* 32 */
+    uint16_t sport;         /* 36 */
+    uint16_t dport;         /* 38 */
+    uint16_t family;        /* 40  AF_INET=2, AF_INET6=10                      */
+    uint16_t protocol;      /* 42  IPPROTO_TCP=6, IPPROTO_UDP=17               */
+    uint16_t old_state;     /* 44 */
+    uint16_t new_state;     /* 46 */
+    uint32_t flags;         /* 48  AEGIS_NET_F_*                               */
+    uint32_t reserved0;     /* 52 */
+    uint64_t reserved1;     /* 56 */
+} aegis_net_conn_t;
+AEGIS_STATIC_ASSERT(sizeof(aegis_net_conn_t) == 64, "aegis_net_conn_t == 64");
+
 /* --------------------------------------------------------------------------
  * Canal de veredicto (sincrono, bloqueante y acotado en tiempo).
  * -------------------------------------------------------------------------- */
