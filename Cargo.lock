@@ -19,6 +19,13 @@ name = "aegis-ipc"
 version = "0.1.0"
 
 [[package]]
+name = "aegis-vuln"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"

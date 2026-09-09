@@ -142,13 +142,14 @@ protección en cuanto se cae el enlace.
 shared/include/aegis_abi.h    Contrato ABI Ring 0 <-> Ring 3 (fuente de verdad)
 crates/
   aegis-ipc/                  Espejo Rust del ABI + consumidor del ring   [hecho]
-  aegis-agent/                Servicio: colector, grafo de procesos, árbitro
+  aegis-agent/                Colector eBPF, grafo de linaje, triaje      [hecho]
+  aegis-vuln/                 Escáner de postura y CVE del host           [hecho]
   aegis-scan/                 YARA-X, inferencia ONNX, analizador PE/ELF
   aegis-resp/                 WFP, cuarentena, rollback
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
-  linux/aegis-bpf/            eBPF CO-RE + LSM (C, libbpf)
+  linux/aegis-bpf/            Sondas eBPF CO-RE (C, libbpf)               [hecho]
 cloud/
   api/                        Reputación k-anónima (Go)
   sandbox/                    Detonación en microVM (Go)
