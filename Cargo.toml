@@ -12,6 +12,7 @@ members = [
     "crates/aegis-evasion",
     "crates/aegis-intel",
     "crates/aegis-harden",
+    "crates/aegis-kguard",
     "crates/aegis-e2e",
 ]
 

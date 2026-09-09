@@ -61,4 +61,33 @@ fn main() {
             objeto.display()
         );
     }
+
+    // Firma HMAC-SHA256 del bytecode que se va a empotrar (FASE 14). Se calcula
+    // aqui, en la compilacion, y se emite como una constante que el cargador
+    // comprueba antes de entregar el programa al kernel: si alguien parchea la
+    // region del .o dentro del binario del agente, el HMAC de tiempo de
+    // ejecucion no coincide con este y la carga se rechaza.
+    let bytes = std::fs::read(&objeto).expect("no se pudo leer el objeto eBPF compilado");
+    let clave = match std::env::var("AEGIS_BPF_HMAC_KEY") {
+        Ok(h) => descifrar_hex(&h).expect("AEGIS_BPF_HMAC_KEY debe ser hex"),
+        Err(_) => aegis_kguard::DEV_BPF_KEY.to_vec(),
+    };
+    let hmac = aegis_kguard::integrity::hmac_sha256(&clave, &bytes);
+    let hex: String = hmac.iter().map(|b| format!("{b:02x}")).collect();
+    std::fs::write(out_dir.join("aegis_probes.hmac"), hex)
+        .expect("no se pudo escribir la firma del bytecode");
+    // La clave usada tambien se emite, para que el cargador verifique con
+    // exactamente la misma (incluida la de produccion pasada por entorno).
+    let clave_hex: String = clave.iter().map(|b| format!("{b:02x}")).collect();
+    std::fs::write(out_dir.join("aegis_probes.key"), clave_hex)
+        .expect("no se pudo escribir la clave de verificacion");
+}
+
+fn descifrar_hex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).ok())
+        .collect()
 }

@@ -37,7 +37,7 @@ BPF_CFLAGS := -target bpf -O2 -g \
 VERIFY_CFLAGS := -O2 -Wall -Wextra -Werror -Iinclude -I$(ABI_INC)
 VERIFY_LDLIBS := -lbpf -lelf -lz
 
-.PHONY: build verify clean dump
+.PHONY: build verify sign check-integrity clean dump
 
 build: $(BPF_OBJ) $(XDP_OBJ)
 
@@ -63,6 +63,18 @@ $(VERIFIER): tools/aegis_bpf_verify.c | $(BUILD)
 verify: $(BPF_OBJ) $(XDP_OBJ) $(VERIFIER)
 	@./$(VERIFIER) $(BPF_OBJ)
 	@./$(VERIFIER) $(XDP_OBJ)
+
+# Firma HMAC-SHA256 del bytecode. Se ejecuta tras compilar: el manifiesto que
+# produce lo verifica el agente antes de cargar cada programa en el kernel.
+sign: $(BPF_OBJ) $(XDP_OBJ)
+	@python3 tools/sign_bytecode.py sign $(BPF_OBJ) $(XDP_OBJ)
+
+# Verifica que los objetos compilados coinciden con sus firmas. Si el manifiesto
+# no existe todavia, lo genera: asi el primer `check-integrity` no falla por una
+# ausencia que no es una manipulacion.
+check-integrity: $(BPF_OBJ) $(XDP_OBJ)
+	@test -f out/bytecode.manifest || python3 tools/sign_bytecode.py sign $(BPF_OBJ) $(XDP_OBJ)
+	@python3 tools/sign_bytecode.py check $(BPF_OBJ) $(XDP_OBJ)
 
 dump: $(BPF_OBJ)
 	llvm-objdump -S --no-show-raw-insn $(BPF_OBJ)

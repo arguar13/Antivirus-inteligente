@@ -167,6 +167,7 @@ crates/
   aegis-intel/                Reputación k-anónima + caché LRU               [hecho]
   aegis-e2e/                  Integración de extremo a extremo + estrés      [hecho]
   aegis-harden/               Cifrado de cadenas + anti-depuración           [hecho]
+  aegis-kguard/               Integridad HMAC del eBPF + permisos de mapas   [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)

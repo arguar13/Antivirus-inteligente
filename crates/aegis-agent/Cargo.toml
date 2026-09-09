@@ -22,6 +22,7 @@ bpf = ["dep:libbpf-rs", "dep:libc"]
 aegis-ipc = { path = "../aegis-ipc" }
 aegis-ransom = { path = "../aegis-ransom" }
 aegis-harden = { path = "../aegis-harden" }
+aegis-kguard = { path = "../aegis-kguard" }
 dashmap = "6"
 thiserror = "2"
 libbpf-rs = { version = "0.24", optional = true }
@@ -33,3 +34,6 @@ anyhow = "1"
 [[bin]]
 name = "aegis-agent"
 path = "src/main.rs"
+
+[build-dependencies]
+aegis-kguard = { path = "../aegis-kguard" }

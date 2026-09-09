@@ -83,6 +83,13 @@ pub enum TelemetryError {
     )]
     InsufficientPrivileges,
 
+    /// La firma del bytecode eBPF no coincide: fue manipulado.
+    #[error(
+        "integridad del bytecode eBPF comprometida: la firma HMAC no coincide, \
+         el programa NO se carga en el kernel"
+    )]
+    BytecodeTampered,
+
     /// Un registro del ring buffer no es interpretable.
     #[error("registro de telemetria invalido: {0}")]
     MalformedRecord(&'static str),

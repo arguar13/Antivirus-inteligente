@@ -129,3 +129,75 @@ desensamblador a partir de algo:
 | `debug = false` | No se emite DWARF que reintroduzca esos nombres. |
 | `lto = "fat"` + `codegen-units = 1` | El inlining agresivo disuelve los límites de función, de modo que ni siquiera la estructura del código refleja el fuente. |
 | `panic = "abort"` | Sin tablas de desenrollado de pila que revelen la estructura de llamadas. |
+
+---
+
+## 8.4 Integridad del bytecode eBPF (Ring 0)
+
+### El problema
+
+El agente carga en el kernel unos programas eBPF compilados a parte. Entre que
+se compilan y que se cargan hay una ventana, y un programa en Ring 0 con los
+permisos del agente es lo más valioso que puede robar un atacante. Cargarlo con
+las manos del defensor es la vía más limpia: bastaría sustituir un `.bpf.o` por
+otro.
+
+El bytecode se empotra en el binario del agente con `include_bytes!`, así que no
+hay un `.o` suelto que sustituir. Pero el binario en disco sí se puede parchear:
+la defensa es **firmar el bytecode y verificarlo antes de cargarlo**.
+
+### Por qué HMAC y no un hash
+
+Un `sha256sum` detecta la corrupción accidental, no al atacante: si cambia el
+bytecode, recalcula el hash y ya está. El **HMAC-SHA256** exige una clave que el
+atacante no tiene. Puede cambiar el bytecode, pero no puede producir el HMAC
+válido sin la clave, así que la comparación falla.
+
+```
+build.rs (compilación)                 bpf.rs (arranque)
+─────────────────────                  ─────────────────
+HMAC(clave, bytecode) ──► constante ──► HMAC(clave, BPF_OBJECT)
+                          empotrada          │
+                                      ¿coincide? ── no ──► BytecodeTampered, no se carga
+```
+
+La verificación es lo **primero** que hace el cargador, antes incluso del
+preflight del entorno: no tiene sentido comprobar capacidades o BTF para un
+binario en el que ya no se confía. Y la comparación es en **tiempo constante**,
+para no filtrar por el tiempo de respuesta cuántos bytes acertó un atacante.
+
+### El pipeline de firma
+
+`drivers/linux/aegis-bpf/tools/sign_bytecode.py` firma los `.bpf.o` compilados y
+escribe `out/bytecode.manifest` (formato `nombre  hex64`, como `sha256sum`).
+`make check-integrity` —incluido en `make ci`— verifica que los objetos
+compilados coinciden con sus firmas.
+
+La firma la produce Python (HMAC-SHA256 de la biblioteca estándar) y la verifica
+el crate `aegis-kguard` (la caja `hmac` de Rust): **dos implementaciones
+independientes que tienen que coincidir**, comprobado tanto contra el vector 2
+de la RFC 4231 como en una prueba de interoperabilidad directa.
+
+En desarrollo la clave es fija y pública (no debilita nada mientras solo firme
+el pipeline de desarrollo). En producción es un secreto de compilación que se
+pasa por `AEGIS_BPF_HMAC_KEY` y sustituye a la de desarrollo.
+
+## 8.5 Bloqueo de permisos de los mapas eBPF
+
+Los mapas eBPF son la memoria compartida entre Ring 0 y Ring 3: el ring buffer
+de eventos, la configuración, las tablas de estado. Cuando un mapa se **fija**
+(pin) en el sistema de ficheros bpf para sobrevivir a reinicios del agente,
+aparece como un fichero con permisos. Fijado con permisos laxos, cualquier
+usuario podría volcar su contenido —rutas vigiladas, PIDs, configuración de
+detección— o escribir en la configuración para desactivar sondas.
+
+La regla: los mapas críticos se fijan con **0600 y propietario root**. No 0640
+ni 0644; el contenido de los mapas de un EDR no es información que un usuario sin
+privilegios deba leer, y un grupo con acceso amplía la superficie sin necesidad.
+
+`aegis-kguard::mapperms` no fija los mapas (eso lo hace el cargador con libbpf):
+**calcula y verifica** los permisos, que es la parte con lógica. El bloqueo se
+hace en dos pasos deliberados —`chmod` a 0600 y después **comprobar** que quedó
+así— porque un `umask` heredado puede recortar bits de forma que el resultado no
+sea el pedido. Verificar el resultado es lo que convierte "pedimos 0600" en "es
+0600".

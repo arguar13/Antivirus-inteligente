@@ -21,6 +21,43 @@ use crate::error::TelemetryError;
 /// telemetria, y el agente lo cargaria sin saberlo.
 const BPF_OBJECT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/aegis_probes.bpf.o"));
 
+/// Firma HMAC-SHA256 del bytecode empotrado, calculada en la compilacion por
+/// `build.rs` (FASE 14). El cargador la recalcula sobre [`BPF_OBJECT`] y la
+/// compara antes de entregar el programa al kernel: si la region del `.o` dentro
+/// del binario del agente fue parcheada, la firma no coincide y la carga se
+/// rechaza.
+const BPF_OBJECT_HMAC: &str = include_str!(concat!(env!("OUT_DIR"), "/aegis_probes.hmac"));
+
+/// Clave con la que se firmo el bytecode (la de desarrollo, o la de produccion
+/// pasada por entorno en la compilacion). Se emite junto a la firma para que la
+/// verificacion use exactamente la misma.
+const BPF_OBJECT_KEY: &str = include_str!(concat!(env!("OUT_DIR"), "/aegis_probes.key"));
+
+/// Verifica la integridad del bytecode empotrado antes de cargarlo.
+///
+/// Es el primer paso de `run`, antes incluso del preflight: cargar en el kernel
+/// un programa cuya firma no cuadra es exactamente lo que hay que impedir, y no
+/// tiene sentido comprobar el entorno para un binario en el que ya no se confia.
+fn verificar_integridad_bytecode() -> Result<(), TelemetryError> {
+    let clave = descifrar_hex(BPF_OBJECT_KEY.trim()).ok_or(TelemetryError::BytecodeTampered)?;
+    let esperado = descifrar_hex(BPF_OBJECT_HMAC.trim()).ok_or(TelemetryError::BytecodeTampered)?;
+    let calculado = aegis_kguard::integrity::hmac_sha256(&clave, BPF_OBJECT);
+    if aegis_kguard::integrity::constant_time_eq(&calculado, &esperado) {
+        Ok(())
+    } else {
+        Err(TelemetryError::BytecodeTampered)
+    }
+}
+
+fn descifrar_hex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).ok())
+        .collect()
+}
+
 /// Ruta del BTF del kernel. Sin el, CO-RE no puede reubicar los accesos.
 const KERNEL_BTF: &str = "/sys/kernel/btf/vmlinux";
 
@@ -205,6 +242,10 @@ pub fn run<F>(
 where
     F: FnMut(&[u8]),
 {
+    // Integridad ANTES que nada: no se carga un bytecode en el que no se confia,
+    // y no tiene sentido comprobar el entorno para un binario ya sospechoso.
+    verificar_integridad_bytecode()?;
+
     preflight()?;
 
     let mut builder_obj = ObjectBuilder::default();

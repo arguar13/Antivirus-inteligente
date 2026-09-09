@@ -101,7 +101,10 @@ impl Manifest {
 
     /// Firma esperada de un objeto.
     pub fn get(&self, nombre: &str) -> Option<&[u8; 32]> {
-        self.entradas.iter().find(|(n, _)| n == nombre).map(|(_, h)| h)
+        self.entradas
+            .iter()
+            .find(|(n, _)| n == nombre)
+            .map(|(_, h)| h)
     }
 
     /// Numero de objetos firmados.
@@ -136,7 +139,8 @@ impl Manifest {
             if it.next().is_some() {
                 return Err(IntegrityError::BadManifestLine(l.to_string()));
             }
-            let hmac = parse_hex32(hex).ok_or_else(|| IntegrityError::BadDigest(nombre.to_string()))?;
+            let hmac =
+                parse_hex32(hex).ok_or_else(|| IntegrityError::BadDigest(nombre.to_string()))?;
             m.insert(nombre, hmac);
         }
         Ok(m)
