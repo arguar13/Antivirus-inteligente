@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/aegis-scal",
     "crates/aegis-ipc",
     "crates/aegis-agent",
     "crates/aegis-vuln",

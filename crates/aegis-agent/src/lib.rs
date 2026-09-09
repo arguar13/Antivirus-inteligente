@@ -18,6 +18,7 @@ pub mod decode;
 pub mod error;
 pub mod graph;
 pub mod ransom;
+pub mod scal;
 pub mod triage;
 
 #[cfg(all(target_os = "linux", feature = "bpf"))]

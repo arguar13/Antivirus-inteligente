@@ -1,6 +1,6 @@
 [package]
-name = "aegis-scan"
-description = "Motor de deteccion profunda de AegisCore: YARA sobre ficheros y memoria de procesos"
+name = "aegis-scal"
+description = "Capa de abstraccion del nucleo del sistema (SCAL): telemetria y control independientes del sistema operativo"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,8 +11,5 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-aegis-scal = { path = "../aegis-scal" }
 thiserror = "2"
 libc = "0.2"
-arc-swap = "1"
-yara-x = "0.8"

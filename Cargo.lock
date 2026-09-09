@@ -27,6 +27,7 @@ dependencies = [
  "aegis-ipc",
  "aegis-kguard",
  "aegis-ransom",
+ "aegis-scal",
  "anyhow",
  "dashmap",
  "libbpf-rs",
@@ -83,6 +84,7 @@ dependencies = [
 name = "aegis-fim"
 version = "0.1.0"
 dependencies = [
+ "aegis-scal",
  "blake3",
  "libc",
  "thiserror 2.0.20",
@@ -172,9 +174,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-scal"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-scan"
 version = "0.1.0"
 dependencies = [
+ "aegis-scal",
  "arc-swap",
  "libc",
  "thiserror 2.0.20",

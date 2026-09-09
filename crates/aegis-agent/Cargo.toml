@@ -19,6 +19,7 @@ default = ["bpf"]
 bpf = ["dep:libbpf-rs", "dep:libc"]
 
 [dependencies]
+aegis-scal = { path = "../aegis-scal" }
 aegis-ipc = { path = "../aegis-ipc" }
 aegis-ransom = { path = "../aegis-ransom" }
 aegis-harden = { path = "../aegis-harden" }
@@ -31,6 +32,7 @@ libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
 anyhow = "1"
+aegis-scal = { path = "../aegis-scal" }
 
 [[bin]]
 name = "aegis-agent"
