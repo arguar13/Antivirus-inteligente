@@ -1,0 +1,16 @@
+[package]
+name = "aegis-syscallguard"
+description = "Deteccion de syscalls directas respaldada por hardware (PMU/DRx) y verificacion cruzada del origen de cada syscall"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aegis-scal = { path = "../aegis-scal" }
+thiserror = "2"
+libc = "0.2"

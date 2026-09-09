@@ -31,3 +31,4 @@ reports/
 .DS_Store
 drivers/linux/aegis-bpf/out/
 crates/aegis-unpacker/tests/fixtures/packer_stub
+crates/aegis-syscallguard/tests/fixtures/syscall_stub

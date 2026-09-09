@@ -88,6 +88,21 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "unpacker" ]; then
     fi
 fi
 
+# SyscallGuard: reporte honesto de las capacidades de hardware (PMU/DRx) y de la
+# via de verificacion cruzada. Igual que el sandbox y el firmware, deja
+# constancia de lo que ofrece la maquina donde corre.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "syscallguard" ]; then
+    printf '%s==>%s SyscallGuard · deteccion de syscalls directas (PMU/DRx)\n' "$GRIS" "$FIN"
+    if cargo run -q -p aegis-syscallguard --example syscallguard_support > /tmp/aegis-syscallguard.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-syscallguard.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-syscallguard.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 paso docs  "Docs · enlaces relativos"   ./tools/check-links.sh
 # El fichero de cadenas cifradas (FASE 13) tiene que estar al dia respecto al
 # manifiesto: si alguien cambia una cadena critica y no regenera, el binario
@@ -140,6 +155,7 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
         cargo build -q -p aegis-kintegrity --example dkom_probe 2>/dev/null
         cargo build -q -p aegis-firmware --example bootkit_probe 2>/dev/null
         cargo build -q -p aegis-unpacker --example unpack_probe 2>/dev/null
+        cargo build -q -p aegis-syscallguard --example syscall_probe 2>/dev/null
         make -C drivers/linux/aegis-bpf build sign >/dev/null 2>&1 || true
         if python3 tests/red_team_sim.py > /tmp/aegis-redteam.log 2>&1; then
             printf '    %sOK%s\n' "$VERDE" "$FIN"

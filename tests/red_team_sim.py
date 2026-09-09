@@ -593,6 +593,32 @@ def escenario_empaquetador():
         fallo(f"el desempaquetado no expuso el codigo: {r.stdout.strip()} {r.stderr.strip()}")
 
 
+# ---------------------------------------------------------------------------
+# 13. Syscall directa: el malware evade los enganches de userland metiendo su
+#     propia instruccion `syscall` en memoria anonima; el guardia lo caza por el
+#     origen de la syscall, cruzando la palabra del kernel con la memoria real
+#     (FASE 33).
+# ---------------------------------------------------------------------------
+
+
+def escenario_syscall_directa():
+    titulo(13, "un binario salta al kernel sin pasar por libc y el guardia lo caza por el origen")
+
+    binario = ejemplo("aegis-syscallguard", "syscall_probe")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar la sonda de syscall directa")
+        return
+
+    r = run([binario])
+    if r.returncode == 2:
+        ok("OMITIDO en esta maquina: " + (r.stderr.strip() or r.stdout.strip()))
+        return
+    if r.returncode == 0 and "DETECTADO" in r.stdout:
+        ok("la syscall directa desde memoria anonima quedo al descubierto por su origen")
+    else:
+        fallo(f"la syscall directa se escapo del guardia: {r.stdout.strip()} {r.stderr.strip()}")
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -607,9 +633,10 @@ def main():
     escenario_rootkit()
     escenario_bootkit()
     escenario_empaquetador()
+    escenario_syscall_directa()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({12} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({13} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1
