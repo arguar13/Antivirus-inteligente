@@ -207,6 +207,67 @@ async fn solo_puede_haber_una_politica_activa() {
     assert_eq!(activas, 1);
 }
 
+/// Dos publicaciones de politica a la vez NO son un caso de laboratorio: son dos
+/// operadores en la consola, o un operador y la automatizacion que empuja una
+/// regla nueva tras ingerir inteligencia. Bajo el nivel de aislamiento por
+/// defecto de PostgreSQL (READ COMMITTED) el `UPDATE ... WHERE activa` de la
+/// segunda transaccion se desbloquea cuando la primera confirma, vuelve a
+/// evaluar la condicion sobre la fila YA desactivada y no afecta a ninguna;
+/// tampoco ve todavia la fila recien insertada. Su `INSERT` choca entonces
+/// contra el indice unico parcial —y contra la clave primaria de version— y la
+/// publicacion se pierde con un error crudo de base de datos.
+///
+/// La garantia que se exige aqui es la del producto: ninguna publicacion se
+/// pierde, cada una recibe su propia version, y la flota nunca queda sin
+/// politica activa.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn publicaciones_de_politica_simultaneas_se_serializan_sin_perder_ninguna() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    const CONCURRENTES: usize = 8;
+
+    let mut tareas = Vec::with_capacity(CONCURRENTES);
+    for i in 0..CONCURRENTES {
+        let a = almacen.clone();
+        tareas.push(tokio::spawn(async move {
+            a.publicar_politica(
+                &format!("simultanea-{i}"),
+                serde_json::json!({ "orden": i }),
+            )
+            .await
+        }));
+    }
+
+    let mut versiones = Vec::with_capacity(CONCURRENTES);
+    for (i, t) in tareas.into_iter().enumerate() {
+        let r = t.await.expect("la tarea no debe entrar en panico");
+        versiones.push(r.unwrap_or_else(|e| {
+            panic!("la publicacion simultanea {i} se perdio: {e}");
+        }));
+    }
+
+    versiones.sort_unstable();
+    let distintas = {
+        let mut v = versiones.clone();
+        v.dedup();
+        v.len()
+    };
+    assert_eq!(
+        distintas, CONCURRENTES,
+        "cada publicacion debe recibir una version propia, sin colisiones: {versiones:?}"
+    );
+
+    // Y al terminar la rafaga sigue habiendo exactamente una politica activa:
+    // la ultima que confirmo.
+    let activas: i64 = sqlx::query_scalar("SELECT count(*) FROM politicas WHERE activa")
+        .fetch_one(almacen.pool())
+        .await
+        .unwrap();
+    assert_eq!(activas, 1);
+}
+
 // ---------------------------------------------------------------------------
 // Cache k-anonima
 // ---------------------------------------------------------------------------

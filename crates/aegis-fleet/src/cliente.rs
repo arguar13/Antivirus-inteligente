@@ -176,6 +176,10 @@ impl ClienteFlota {
             op: "connect",
             source: e,
         })?;
+        // Igual que en el servidor: el protocolo es peticion/respuesta con
+        // mensajes de cientos de bytes. Con Nagle activo, cada llamada paga la
+        // espera del ACK retardado del otro extremo.
+        let _ = sock.set_nodelay(true);
         let nombre = ServerName::try_from(NOMBRE_SERVIDOR)
             .map_err(|e| FleetError::ConfigTls(format!("nombre de servidor: {e}")))?;
         let conn = ClientConnection::new(cfg, nombre).map_err(|e| FleetError::Tls {

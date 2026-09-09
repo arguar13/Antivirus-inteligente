@@ -365,12 +365,14 @@ impl ServidorFlota {
             op: "local_addr",
             source: e,
         })?;
-        listener
-            .set_nonblocking(true)
-            .map_err(|e| FleetError::Red {
-                op: "set_nonblocking",
-                source: e,
-            })?;
+        // Aceptacion BLOQUEANTE, no sondeo.
+        //
+        // Antes el escuchador era no bloqueante y el bucle dormia 20 ms cuando
+        // no habia nada que aceptar. Eso anadia hasta 20 ms de espera a CADA
+        // conexion nueva —y en este protocolo cada llamada abre una conexion—,
+        // un coste invisible que en una flota de miles de endpoints se paga
+        // multiplicado por cada latido. La parada ordenada se resuelve mas
+        // abajo despertando el `accept` con una conexion local.
 
         let parar = Arc::new(AtomicBool::new(false));
         let parar_hilo = parar.clone();
@@ -378,20 +380,27 @@ impl ServidorFlota {
         let manejador = self.manejador.clone();
 
         let handle = std::thread::spawn(move || {
-            while !parar_hilo.load(Ordering::SeqCst) {
-                match listener.accept() {
-                    Ok((sock, _)) => {
-                        let cfg = cfg.clone();
-                        let manejador = manejador.clone();
-                        std::thread::spawn(move || {
-                            let _ = atender_conexion(cfg, manejador, sock);
-                        });
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(std::time::Duration::from_millis(20));
-                    }
-                    Err(_) => break,
+            // `accept` solo devuelve Err cuando el escuchador ha quedado
+            // inservible (descriptor cerrado, recursos agotados); ahi no hay
+            // nada que reintentar y el hilo termina, igual que al pedir parada.
+            while let Ok((sock, _)) = listener.accept() {
+                // La conexion de despertar que envia `parar()` llega hasta
+                // aqui; si ya se pidio parar, se descarta y se sale sin
+                // atenderla.
+                if parar_hilo.load(Ordering::SeqCst) {
+                    break;
                 }
+                // Sin esto, el algoritmo de Nagle retiene la respuesta
+                // esperando mas datos que nunca llegan, y su interaccion con el
+                // ACK retardado del cliente anade ~40 ms a CADA llamada. El
+                // protocolo son mensajes pequenos de ida y vuelta: agruparlos
+                // no ahorra nada y cuesta muchisimo.
+                let _ = sock.set_nodelay(true);
+                let cfg = cfg.clone();
+                let manejador = manejador.clone();
+                std::thread::spawn(move || {
+                    let _ = atender_conexion(cfg, manejador, sock);
+                });
             }
         });
 
@@ -419,15 +428,26 @@ impl ServidorEnEjecucion {
     /// Para el servidor y espera a que el bucle de aceptacion termine.
     pub fn parar(mut self) {
         self.parar.store(true, Ordering::SeqCst);
+        self.despertar();
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
+    }
+
+    /// Despierta el `accept` bloqueante con una conexion local que se descarta.
+    ///
+    /// Es el precio de no sondear: el hilo de aceptacion duerme dentro del
+    /// nucleo hasta que llega una conexion, asi que para que note la orden de
+    /// parada hay que darle exactamente eso, una conexion.
+    fn despertar(&self) {
+        let _ = std::net::TcpStream::connect(self.direccion);
     }
 }
 
 impl Drop for ServidorEnEjecucion {
     fn drop(&mut self) {
         self.parar.store(true, Ordering::SeqCst);
+        let _ = std::net::TcpStream::connect(self.direccion);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }

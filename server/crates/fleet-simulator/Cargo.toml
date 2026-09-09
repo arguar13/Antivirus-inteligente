@@ -1,0 +1,26 @@
+[package]
+name = "fleet-simulator"
+description = "Generador de carga: simula una flota de miles de agentes contra el plano de control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fleet_simulator"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# El codec y la PKI del agente REAL: el simulador habla exactamente el mismo
+# protocolo de cable, con los mismos bytes. Lo unico que cambia es que el
+# transporte es asincrono, que es lo que permite miles de agentes en una maquina.
+aegis-fleet = { path = "../../../crates/aegis-fleet" }
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "signal"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pki-types = "1"

@@ -500,6 +500,11 @@ impl Almacen {
         contenido: serde_json::Value,
     ) -> Resultado<i64> {
         let mut tx = self.pool.begin().await?;
+        // Una publicacion cada vez (ver CERROJO_PUBLICACION).
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(CERROJO_PUBLICACION)
+            .execute(&mut *tx)
+            .await?;
         // Desactivar la anterior ANTES de insertar la nueva: el indice unico
         // parcial sobre `activa` rechazaria dos activas a la vez, que es
         // exactamente la garantia que se busca.
@@ -569,6 +574,38 @@ fn fila_a_alerta(f: &PgRow) -> VistaAlerta {
 /// operador publica la regla contra la instancia B. Sin este aviso cruzado, ese
 /// endpoint no se enteraria hasta reconectar.
 pub const CANAL_POLITICA: &str = "aegis_politica";
+
+/// Cerrojo consultivo que serializa la publicacion de politica.
+///
+/// POR QUE HACE FALTA
+/// ------------------
+/// Publicar politica es un ciclo leer-modificar-escribir sobre la tabla:
+/// desactivar la vigente, calcular `max(version) + 1` e insertar la nueva. Bajo
+/// READ COMMITTED —el aislamiento por defecto de PostgreSQL, y el que usa este
+/// servidor— dos transacciones simultaneas no se ven entre si: la segunda se
+/// queda esperando en el `UPDATE`, y cuando la primera confirma vuelve a
+/// evaluar la condicion sobre la fila ya desactivada, no afecta a ninguna, y
+/// tampoco ve todavia la fila recien insertada. Su `INSERT` choca entonces
+/// contra el indice unico parcial y contra la clave primaria de version, y la
+/// publicacion se PIERDE con un error crudo de base de datos.
+///
+/// No es un caso de laboratorio: son dos operadores en la consola, o un
+/// operador y la automatizacion que recompila reglas tras ingerir inteligencia.
+///
+/// POR QUE UN CERROJO CONSULTIVO Y NO OTRA COSA
+/// -------------------------------------------
+/// - Subir a SERIALIZABLE obligaria a reintentar en TODO el servidor, no solo
+///   aqui, y a que cada llamador supiera distinguir un fallo reintentable.
+/// - `LOCK TABLE politicas IN EXCLUSIVE MODE` sirve, pero es un cerrojo pesado
+///   sobre un objeto que ademas leen los latidos de toda la flota.
+/// - Un cerrojo consultivo es del ambito del CLUSTER, no del proceso, asi que
+///   sigue funcionando con varias instancias del plano de control detras del
+///   balanceador; y al ser `_xact_` se libera solo al confirmar o deshacer la
+///   transaccion, sin ninguna ruta de fuga.
+///
+/// El valor son los ocho bytes ASCII de "AEGISPOL": arbitrario, pero
+/// reconocible en `pg_locks` cuando alguien diagnostique un bloqueo.
+const CERROJO_PUBLICACION: i64 = 0x4145_4749_5350_4F4C;
 
 /// Resultado de ingerir un bundle STIX.
 #[derive(Debug, Clone, Default)]
@@ -814,6 +851,12 @@ impl Almacen {
         let reglas = self.listar_reglas().await?;
 
         let mut tx = self.pool.begin().await?;
+        // El MISMO cerrojo que `publicar_politica`: los dos caminos escriben la
+        // misma tabla y compiten entre si, no solo consigo mismos.
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(CERROJO_PUBLICACION)
+            .execute(&mut *tx)
+            .await?;
         sqlx::query("UPDATE politicas SET activa = FALSE WHERE activa")
             .execute(&mut *tx)
             .await?;
