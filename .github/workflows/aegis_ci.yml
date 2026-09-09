@@ -1,0 +1,219 @@
+name: AegisCore CI
+
+# Pipeline principal de integracion continua (FASE 36).
+#
+# Reconstruido para ser la UNICA puerta por push/PR, sustituyendo al antiguo
+# ci.yml. El pipeline nocturno pesado (fuzzing profundo, sanitizadores, auditoria)
+# vive aparte en devsecops.yml.
+#
+# PRINCIPIO DE DISENO: cada job invoca un script de tools/ci/, no comandos
+# escritos aqui. Esa es la razon de que el runner local (tools/local_runner.sh)
+# pueda ejecutar EXACTAMENTE el mismo pipeline sin deriva: el YAML y el runner
+# comparten la misma fuente de verdad. Si un job cambia, cambia en un solo sitio.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Minimo privilegio: ningun job de este pipeline escribe en el repositorio.
+permissions:
+  contents: read
+
+# Una serie de pushes rapidos no debe dejar ejecuciones obsoletas consumiendo
+# runners; solo interesa el resultado del ultimo commit de cada rama.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Un fallo de red al bajar crates no debe tumbar el pipeline al primer intento.
+  CARGO_NET_RETRY: 3
+  RUSTUP_MAX_RETRIES: 3
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Formato y lints. Es el job mas barato: si falla, no vale la pena gastar
+  #    runners en el resto.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Formato y clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: ./tools/ci/lint.sh
+
+  # ---------------------------------------------------------------------------
+  # 2. Pruebas del workspace sobre una matriz de toolchains. El MSRV no es
+  #    decorativo: si el codigo deja de compilar con 1.82, los clientes que fijan
+  #    esa version se quedan fuera y hay que saberlo aqui, no en su despliegue.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Pruebas (${{ matrix.toolchain }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, "1.82"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.toolchain }}
+      # El cotejo de ABI compila una sonda en C con los dos compiladores.
+      - run: sudo apt-get update && sudo apt-get install -y clang
+      - run: ./tools/ci/test.sh
+
+  # ---------------------------------------------------------------------------
+  # 3. Programas eBPF ante el verificador REAL del kernel. Compilar no demuestra
+  #    nada; el verificador rechaza codigo que compila limpio.
+  # ---------------------------------------------------------------------------
+  ebpf:
+    name: eBPF ante el verificador del kernel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libbpf-dev libelf-dev clang
+      - run: sudo mount -t tracefs nodev /sys/kernel/tracing || true
+      # Con sudo porque cargar programas en el kernel exige privilegios.
+      - run: sudo -E ./tools/ci/ebpf.sh
+
+  # ---------------------------------------------------------------------------
+  # 4. Sanitizacion de memoria: las rutas `unsafe` (ptrace, process_vm_readv,
+  #    perf, ring buffer del driver) no las comprueba el compilador.
+  # ---------------------------------------------------------------------------
+  sanitizers:
+    name: AddressSanitizer
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: asan
+      - run: ./tools/sanitize.sh
+
+  # ---------------------------------------------------------------------------
+  # 5. Fuzzing de humo. El fuzzing PROFUNDO (con corpus persistente) es nocturno
+  #    y vive en devsecops.yml; aqui basta una pasada corta por objetivo para
+  #    cazar una regresion introducida por el commit que se esta probando.
+  # ---------------------------------------------------------------------------
+  fuzz-smoke:
+    name: Fuzzing de humo (libFuzzer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz
+      - run: ./tools/fuzz.sh 20
+      - name: Guardar reproductores
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+
+  # ---------------------------------------------------------------------------
+  # 6. Cadena de suministro: licencias, fuentes y vulnerabilidades conocidas.
+  # ---------------------------------------------------------------------------
+  supply-chain:
+    name: Cadena de suministro
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-deny
+      - uses: taiki-e/install-action@cargo-audit
+      - run: ./tools/ci/supply_chain.sh
+
+  # ---------------------------------------------------------------------------
+  # 7. Documentacion: enlaces relativos que no apunten al vacio.
+  # ---------------------------------------------------------------------------
+  docs:
+    name: Enlaces de la documentacion
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./tools/check-links.sh
+
+  # ---------------------------------------------------------------------------
+  # 8. Artefactos de lanzamiento: binarios ESTATICOS (musl), con sumas SHA-256 y
+  #    manifiesto de procedencia. Solo se construyen si lint y pruebas pasan:
+  #    publicar un artefacto de codigo que no compila limpio es peor que no
+  #    publicar nada.
+  # ---------------------------------------------------------------------------
+  artifacts:
+    name: Artefactos de lanzamiento (estaticos)
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AEGIS_TARGET: x86_64-unknown-linux-musl
+      AEGIS_STATIC: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      # musl-tools trae musl-gcc, imprescindible porque varias dependencias
+      # (yara-x, ring, libbpf) compilan codigo C.
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      - run: ./tools/ci/artifacts.sh
+      - name: Publicar artefactos
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegiscore-linux-x86_64-static
+          path: |
+            dist/
+          if-no-files-found: error
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # 9. Puerta unica. Es el UNICO check que hay que exigir en la proteccion de
+  #    rama: agrega el resultado de todos los demas, asi que anadir un job nuevo
+  #    no obliga a reconfigurar GitHub. Falla si cualquier dependencia fallo o
+  #    fue cancelada.
+  # ---------------------------------------------------------------------------
+  gate:
+    name: Puerta de calidad
+    if: always()
+    needs: [lint, test, ebpf, sanitizers, fuzz-smoke, supply-chain, docs, artifacts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Comprobar el resultado de todos los jobs
+        run: |
+          resultados='${{ join(needs.*.result, " ") }}'
+          echo "resultados de los jobs: $resultados"
+          for r in $resultados; do
+            if [ "$r" != "success" ]; then
+              echo "::error::La puerta de calidad falla: hay un job en estado '$r'."
+              exit 1
+            fi
+          done
+          echo "Todos los jobs pasaron."

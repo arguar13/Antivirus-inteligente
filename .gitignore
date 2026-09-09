@@ -39,3 +39,6 @@ crates/aegis-syscallguard/tests/fixtures/syscall_stub
 /fuzz/artifacts/
 /fuzz/coverage/
 /fuzz/Cargo.lock
+
+# Artefactos de lanzamiento generados por tools/ci/artifacts.sh (FASE 36).
+/dist/

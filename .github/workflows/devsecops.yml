@@ -35,6 +35,7 @@ jobs:
   audit:
     name: Auditoria de dependencias (RustSec)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -46,6 +47,7 @@ jobs:
   sanitize:
     name: Sanitizacion de memoria (AddressSanitizer)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       # El sanitizador exige nightly y el componente rust-src para instrumentar.
@@ -60,6 +62,7 @@ jobs:
   fuzz:
     name: Fuzzing continuo (libFuzzer)
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
