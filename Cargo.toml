@@ -6,6 +6,7 @@ members = [
     "crates/aegis-vuln",
     "crates/aegis-net",
     "crates/aegis-resp",
+    "crates/aegis-scan",
     "crates/aegis-e2e",
 ]
 

@@ -53,14 +53,15 @@ paso docs  "Docs · enlaces relativos"   ./tools/check-links.sh
 if [ -n "${SOLO:-}" ] && [ "$SOLO" != "budget" ]; then :; else
     printf '%s==>%s Presupuesto de memoria del agente\n' "$GRIS" "$FIN"
     if cargo build --release -p aegis-agent -q 2>/dev/null && [ -x target/release/aegis-agent ]; then
-        ./target/release/aegis-agent --stats-interval 300 >/dev/null 2>&1 &
+        ./target/release/aegis-agent --stats-interval 300 >/dev/null 2>/tmp/aegis-budget.err &
         PID_AGENTE=$!
         sleep 4
         RSS=$(grep VmRSS "/proc/$PID_AGENTE/status" 2>/dev/null | awk '{print $2}')
         kill -TERM "$PID_AGENTE" 2>/dev/null
         wait "$PID_AGENTE" 2>/dev/null
         if [ -z "$RSS" ]; then
-            printf '    %somitido (el agente no pudo arrancar; requiere CAP_BPF)%s\n' "$GRIS" "$FIN"
+            printf '    %somitido: el agente no arranco%s\n' "$GRIS" "$FIN"
+            printf '    %s  causa: %s%s\n' "$GRIS" "$(tail -1 /tmp/aegis-budget.err 2>/dev/null | head -c 160)" "$FIN"
         elif [ "$RSS" -lt 51200 ]; then
             printf '    %sOK%s (%s KB de un presupuesto de 51200 KB)\n' "$VERDE" "$FIN" "$RSS"
         else

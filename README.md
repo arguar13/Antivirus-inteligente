@@ -18,6 +18,7 @@ y respuesta.
 | Escáner de postura y CVE | Implementado | 45 pruebas; 690 paquetes inventariados en el host real |
 | IDS de red con XDP | Implementado | 29 pruebas vía `BPF_PROG_TEST_RUN` contra el kernel |
 | Respuesta: kill, cuarentena, aislamiento | Implementado | 22 pruebas con procesos y ficheros reales |
+| Motor YARA-X sobre fichero y memoria | Implementado | 22 pruebas; firma inyectada en la memoria de un proceso hijo y detectada |
 | Integración de extremo a extremo | Implementado | Malware simulado detectado, terminado y revertido |
 | Driver de Windows, ELAM, PPL | Blueprint | Bloqueado por certificación (ver módulo 6) |
 
@@ -158,7 +159,7 @@ crates/
   aegis-vuln/                 Escáner de postura y CVE del host           [hecho]
   aegis-net/                  IDS de red, filtro XDP, detección de barridos [hecho]
   aegis-resp/                 Terminación, cuarentena AES-256-GCM, aislamiento [hecho]
-  aegis-scan/                 YARA-X, inferencia ONNX, analizador PE/ELF
+  aegis-scan/                 YARA-X sobre ficheros y memoria de procesos    [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
