@@ -46,6 +46,14 @@ else
     printf '%s==>%s eBPF · %somitido (subproyecto aun no creado)%s\n' "$GRIS" "$FIN" "$GRIS" "$FIN"
 fi
 paso docs  "Docs · enlaces relativos"   ./tools/check-links.sh
+# El fichero de cadenas cifradas (FASE 13) tiene que estar al dia respecto al
+# manifiesto: si alguien cambia una cadena critica y no regenera, el binario
+# llevaria en claro lo que deberia ir cifrado. Solo aplica si hay python3.
+if command -v python3 >/dev/null 2>&1; then
+    paso harden "Blindaje · cadenas cifradas al dia" python3 tools/obfuscate.py --check
+else
+    printf '%s==>%s Blindaje · %somitido (sin python3)%s\n' "$GRIS" "$FIN" "$GRIS" "$FIN"
+fi
 
 # El presupuesto de recursos es un compromiso del producto (ver README), no una
 # aspiracion. Un componente que se lo salta es un bug atribuible, y por eso se

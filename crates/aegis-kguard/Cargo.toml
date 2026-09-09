@@ -1,0 +1,17 @@
+[package]
+name = "aegis-kguard"
+description = "Integridad del bytecode eBPF y bloqueo de permisos de mapas"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+hmac = "0.12"
+sha2 = "0.10"
+libc = "0.2"

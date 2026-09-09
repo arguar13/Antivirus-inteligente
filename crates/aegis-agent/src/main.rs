@@ -42,7 +42,7 @@ fn main() -> std::process::ExitCode {
         eprintln!(
             "aegis-agent - agente de deteccion de AegisCore\n\
              \n\
-             USO: aegis-agent [--stats-interval SEGUNDOS]\n\
+             USO: aegis-agent [--stats-interval SEGUNDOS] [--harden]\n\
              \n\
              Requiere CAP_BPF y CAP_PERFMON (o root) para cargar las sondas,\n\
              y un kernel con CONFIG_DEBUG_INFO_BTF=y."
@@ -57,7 +57,55 @@ fn main() -> std::process::ExitCode {
         .map(Duration::from_secs)
         .unwrap_or(Duration::from_secs(10));
 
+    blindar(args.iter().any(|a| a == "--harden"));
+
     ejecutar(intervalo)
+}
+
+/// Blindaje del agente (FASE 13).
+///
+/// Descifra en memoria la tabla de cadenas criticas y comprueba si hay un
+/// depurador adjunto. La respuesta AGRESIVA (`PTRACE_TRACEME` + cierre ante un
+/// depurador) es opcional y se activa con `--harden`, no por defecto, por una
+/// razon operativa concreta: un proceso que reclama el trazador convierte la
+/// senal de parada del propio sistema (SIGTERM) en una parada de trazado en vez
+/// de una terminacion, con lo que un supervisor que lo detenga con `kill` se
+/// quedaria esperando. En produccion, donde el agente lo lanza el watchdog y no
+/// un supervisor generico, se pasa `--harden`.
+fn blindar(agresivo: bool) {
+    match aegis_harden::unseal_builtin() {
+        Ok(vault) => {
+            // Se informa del NUMERO, nunca del contenido: un secreto que aparece
+            // en un log deja de serlo.
+            eprintln!(
+                "aegis-agent: blindaje activo, {} cadenas criticas descifradas en memoria",
+                vault.len()
+            );
+        }
+        Err(e) => {
+            // Que el binario no pueda descifrar sus propias cadenas indica una
+            // tabla corrupta o manipulada: es un fallo de integridad, no un
+            // aviso. Se sigue arrancando porque la deteccion no depende de esas
+            // cadenas, pero se deja constancia ruidosa.
+            eprintln!("aegis-agent: AVISO de integridad - no se descifro el blindaje: {e}");
+        }
+    }
+
+    // Comprobacion pasiva SIEMPRE: no reclama el trazador ni cierra el proceso,
+    // asi que es segura bajo cualquier supervisor.
+    let chequeo = aegis_harden::detect();
+    if chequeo.detected {
+        eprintln!(
+            "aegis-agent: AVISO - depurador detectado ({:?}). La integridad de la              deteccion no se puede garantizar bajo depuracion.",
+            chequeo.proc_check
+        );
+    }
+
+    if agresivo {
+        // Respuesta de produccion: reclama el trazador (bloquea adjuntar un
+        // depurador despues) y cierra si ya habia uno.
+        aegis_harden::enforce(aegis_harden::Policy::Terminate);
+    }
 }
 
 #[cfg(all(target_os = "linux", feature = "bpf"))]

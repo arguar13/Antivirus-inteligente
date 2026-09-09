@@ -21,6 +21,7 @@ bpf = ["dep:libbpf-rs", "dep:libc"]
 [dependencies]
 aegis-ipc = { path = "../aegis-ipc" }
 aegis-ransom = { path = "../aegis-ransom" }
+aegis-harden = { path = "../aegis-harden" }
 dashmap = "6"
 thiserror = "2"
 libbpf-rs = { version = "0.24", optional = true }

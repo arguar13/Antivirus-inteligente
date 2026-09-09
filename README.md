@@ -166,6 +166,7 @@ crates/
   aegis-evasion/              Vaciado de proceso, inyección, hooks           [hecho]
   aegis-intel/                Reputación k-anónima + caché LRU               [hecho]
   aegis-e2e/                  Integración de extremo a extremo + estrés      [hecho]
+  aegis-harden/               Cifrado de cadenas + anti-depuración           [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
@@ -188,6 +189,7 @@ docs/                         Blueprint arquitectónico
 | 4 | [Respuesta y aislamiento](docs/04-respuesta.md) — WFP, cuarentena, rollback |
 | 5 | [Nube y threat intelligence](docs/05-cloud.md) — k-anonimato, sandbox |
 | 6 | [Stack y hoja de ruta](docs/06-stack-y-roadmap.md) — lenguajes, fases, criterios de salida |
+| 8 | [Blindaje del agente](docs/08-blindaje.md) — cifrado de cadenas, anti-depuración, stripping |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo

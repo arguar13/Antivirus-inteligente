@@ -11,6 +11,7 @@ members = [
     "crates/aegis-ransom",
     "crates/aegis-evasion",
     "crates/aegis-intel",
+    "crates/aegis-harden",
     "crates/aegis-e2e",
 ]
 
@@ -33,4 +34,12 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 panic = "abort"
-strip = "symbols"
+# Blindaje del binario (FASE 13). `strip = true` elimina la tabla de simbolos Y
+# la informacion de depuracion: sin ellas, un desensamblador parte de cero, sin
+# nombres de funcion ni lineas de codigo. `debug = false` garantiza que no se
+# emita informacion DWARF que reintroduzca esos nombres.
+strip = true
+debug = false
+# Sin nombres de simbolo, los mensajes de panico que incrustan rutas de fichero
+# son de lo poco que queda legible en el binario; se recortan.
+overflow-checks = true
