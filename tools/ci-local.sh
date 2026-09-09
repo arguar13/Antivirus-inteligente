@@ -84,6 +84,28 @@ if [ -n "${SOLO:-}" ] && [ "$SOLO" != "budget" ]; then :; else
     fi
 fi
 
+# Simulacion de Red Team (FASE 17): ataques reales contra las defensas. Es el
+# ultimo paso porque necesita los binarios de ejemplo compilados y ejercita el
+# sistema entero. Requiere python3 y un compilador de C para la victima de
+# inyeccion; si faltan, se omite en vez de fallar.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
+    if command -v python3 >/dev/null 2>&1 && command -v cc >/dev/null 2>&1; then
+        printf '%s==>%s Red Team · simulacion de ataques\n' "$GRIS" "$FIN"
+        cargo build -q -p aegis-evasion --example scan_pid 2>/dev/null
+        cargo build -q -p aegis-ransom --example honeypot_probe 2>/dev/null
+        make -C drivers/linux/aegis-bpf build sign >/dev/null 2>&1 || true
+        if python3 tests/red_team_sim.py > /tmp/aegis-redteam.log 2>&1; then
+            printf '    %sOK%s\n' "$VERDE" "$FIN"
+        else
+            printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+            sed 's/^/    | /' /tmp/aegis-redteam.log | tail -30
+            FALLOS=$((FALLOS + 1))
+        fi
+    else
+        printf '%s==>%s Red Team · %somitido (sin python3 o sin cc)%s\n' "$GRIS" "$FIN" "$GRIS" "$FIN"
+    fi
+fi
+
 echo
 if [ "$FALLOS" -eq 0 ]; then
     printf '%sTodas las comprobaciones pasan.%s\n' "$VERDE" "$FIN"
