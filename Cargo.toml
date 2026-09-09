@@ -15,6 +15,7 @@ members = [
     "crates/aegis-kguard",
     "crates/aegis-audit",
     "crates/aegis-ctl",
+    "crates/aegis-update",
     "crates/aegis-e2e",
 ]
 

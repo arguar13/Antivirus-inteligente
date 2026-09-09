@@ -170,6 +170,7 @@ crates/
   aegis-kguard/               Integridad HMAC del eBPF + permisos de mapas   [hecho]
   aegis-audit/                Registro de auditoría cifrado + rotación       [hecho]
   aegis-ctl/                  Canal de control por socket Unix + aegisctl    [hecho]
+  aegis-update/               Actualización firmada Ed25519 + rollback       [hecho]
   aegis-ui/                   Tauri v2, no residente
 drivers/
   windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
@@ -196,6 +197,7 @@ docs/                         Blueprint arquitectónico
 | 9 | [Auditoría local cifrada](docs/09-auditoria.md) — SQLite embebida, AES-256-GCM, rotación |
 | 10 | [Canal de control](docs/10-control.md) — socket Unix 0600, aegisctl, status/scan/isolate/quarantine |
 | 11 | [Red Team defensiva](docs/11-red-team.md) — ataques reales contra las defensas en cada `make ci` |
+| 12 | [Actualización segura](docs/12-actualizacion.md) — firmas Ed25519, rollback atómico |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo
