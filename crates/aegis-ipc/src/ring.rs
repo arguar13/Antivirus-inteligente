@@ -213,7 +213,7 @@ unsafe impl Payload for crate::abi::AegisSyscallAnomaly {
 
 // SAFETY: `#[repr(C)]` compuesta de enteros sin signo y arrays de u8.
 unsafe impl Payload for crate::abi::AegisNetConn {
-    const EVENT_TYPES: &'static [u16] = &[evt::NET_CONNECT];
+    const EVENT_TYPES: &'static [u16] = &[evt::NET_CONNECT, evt::NET_SCAN, evt::NET_BLOCKED];
 }
 
 /// Consumidor del ring. Se adjunta a una seccion ya mapeada por el llamante.

@@ -19,6 +19,16 @@ name = "aegis-ipc"
 version = "0.1.0"
 
 [[package]]
+name = "aegis-net"
+version = "0.1.0"
+dependencies = [
+ "aegis-ipc",
+ "libbpf-rs",
+ "libc",
+ "thiserror",
+]
+
+[[package]]
 name = "aegis-vuln"
 version = "0.1.0"
 dependencies = [

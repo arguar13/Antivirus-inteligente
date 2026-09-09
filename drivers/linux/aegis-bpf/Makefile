@@ -18,6 +18,7 @@ ABI_INC    := ../../../shared/include
 # target .PHONY del mismo nombre y make descartaria la dependencia de orden.
 BUILD      := out
 BPF_OBJ    := $(BUILD)/aegis_probes.bpf.o
+XDP_OBJ    := $(BUILD)/aegis_xdp.bpf.o
 VERIFIER   := $(BUILD)/aegis_bpf_verify
 
 # -nostdinc + el include de clang primero: para el target bpf no hay libc, y
@@ -38,12 +39,16 @@ VERIFY_LDLIBS := -lbpf -lelf -lz
 
 .PHONY: build verify clean dump
 
-build: $(BPF_OBJ)
+build: $(BPF_OBJ) $(XDP_OBJ)
 
 $(BUILD):
 	@mkdir -p $(BUILD)
 
 $(BPF_OBJ): src/aegis_probes.bpf.c include/aegis_bpf_common.h $(ABI_INC)/aegis_abi.h | $(BUILD)
+	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+	@echo "  BPF   $@"
+
+$(XDP_OBJ): src/aegis_xdp.bpf.c include/aegis_bpf_common.h $(ABI_INC)/aegis_abi.h | $(BUILD)
 	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
 	@echo "  BPF   $@"
 
@@ -55,8 +60,9 @@ $(VERIFIER): tools/aegis_bpf_verify.c | $(BUILD)
 # Compilar no demuestra nada en eBPF: el verificador del kernel rechaza
 # programas que compilan perfectamente (accesos no acotados, bucles que no
 # puede probar que terminan, punteros sin comprobar). Esta es la prueba real.
-verify: $(BPF_OBJ) $(VERIFIER)
+verify: $(BPF_OBJ) $(XDP_OBJ) $(VERIFIER)
 	@./$(VERIFIER) $(BPF_OBJ)
+	@./$(VERIFIER) $(XDP_OBJ)
 
 dump: $(BPF_OBJ)
 	llvm-objdump -S --no-show-raw-insn $(BPF_OBJ)

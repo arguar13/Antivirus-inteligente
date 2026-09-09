@@ -162,4 +162,10 @@ fn main() {
     println!("const AEGIS_EVT_PROCESS_EXIT {}", evt::PROCESS_EXIT);
     println!("const AEGIS_EVT_FILE_PRE_CREATE {}", evt::FILE_PRE_CREATE);
     println!("const AEGIS_NET_F_OUTBOUND {}", net_flags::OUTBOUND);
+    println!("const AEGIS_EVT_NET_SCAN {}", evt::NET_SCAN);
+    println!("const AEGIS_EVT_NET_BLOCKED {}", evt::NET_BLOCKED);
+    println!("const AEGIS_NET_F_SYN {}", net_flags::SYN);
+    println!("const AEGIS_NET_F_DROPPED {}", net_flags::DROPPED);
+    println!("const AEGIS_NET_F_SCAN_SYN {}", net_flags::SCAN_SYN);
+    println!("const AEGIS_NET_F_XDP {}", net_flags::XDP);
 }

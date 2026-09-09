@@ -15,6 +15,18 @@
 #ifndef AEGIS_BPF_COMMON_H
 #define AEGIS_BPF_COMMON_H
 
+/*
+ * Esta cabecera es AUTOCONTENIDA: los programas eBPF la incluyen antes que
+ * aegis_abi.h, asi que no puede depender de macros definidas alli.
+ */
+#ifndef AEGIS_BPF_STATIC_ASSERT
+#  if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#    define AEGIS_BPF_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#  else
+#    define AEGIS_BPF_STATIC_ASSERT(cond, msg)
+#  endif
+#endif
+
 /* ------------------------------------------------------------------------
  * Estructuras de kernel. Solo los campos que se leen.
  * ------------------------------------------------------------------------ */
@@ -154,6 +166,67 @@ enum aegis_stat {
 
 struct aegis_scratch {
     char buf[AEGIS_SCRATCH_LEN];
+};
+
+/* ------------------------------------------------------------------------
+ * Filtro XDP
+ * ------------------------------------------------------------------------ */
+
+#define AEGIS_XDP_CFG_ENABLED   0x00000001u
+/* Bloqueo automatico al detectar un barrido. DESACTIVADO por defecto: la IP
+ * origen de un SYN se falsifica trivialmente, asi que bloquear en automatico es
+ * el mecanismo con el que un atacante consigue que bloqueemos a un tercero. */
+#define AEGIS_XDP_CFG_AUTOBLOCK 0x00000002u
+
+/* Entrada de la lista de bloqueo. La escribe userland, la lee el programa XDP
+ * por cada paquete cuya IP origen aparezca en el mapa. */
+struct aegis_block_entry {
+    /* Instante de caducidad en la base de bpf_ktime_get_boot_ns.
+     * 0 = bloqueo permanente hasta que userland lo retire. */
+    __u64 until_ns;
+    /* Paquetes descartados por esta entrada. Lo lleva el kernel para que
+     * userland pueda medir el efecto de un bloqueo sin recibir un evento por
+     * cada paquete descartado. */
+    __u64 hits;
+    __u32 reason;
+    __u32 pad;
+};
+
+struct aegis_xdp_config {
+    __u32 flags;
+    /* Ventana de observacion del detector de barridos. */
+    __u64 scan_window_ns;
+    /* Puertos distintos (cota inferior) que definen un barrido. */
+    __u32 scan_port_threshold;
+    /* SYN minimos en la ventana. Exigir ambos umbrales evita clasificar como
+     * barrido a un cliente que abre unas pocas conexiones a puertos dispersos. */
+    __u32 scan_syn_threshold;
+    /* Duracion del bloqueo automatico, si esta habilitado. */
+    __u64 autoblock_ns;
+    /* Uno de cada cuantos SYN se envia a userland. 0 = ninguno. */
+    __u32 syn_sample_rate;
+    __u32 reserved;
+};
+/* El espejo en Rust tiene que coincidir byte a byte: el mapa lo escribe
+ * userland y lo lee el kernel por cada paquete. */
+AEGIS_BPF_STATIC_ASSERT(sizeof(struct aegis_xdp_config) == 40, "aegis_xdp_config == 40");
+AEGIS_BPF_STATIC_ASSERT(sizeof(struct aegis_block_entry) == 24, "aegis_block_entry == 24");
+
+/* Motivos de bloqueo. */
+#define AEGIS_BLOCK_REASON_MANUAL     1u
+#define AEGIS_BLOCK_REASON_PORT_SCAN  2u
+#define AEGIS_BLOCK_REASON_C2         3u
+#define AEGIS_BLOCK_REASON_EXFIL      4u
+
+enum aegis_xdp_stat {
+    AEGIS_XDP_STAT_PACKETS = 0,
+    AEGIS_XDP_STAT_SYN = 1,
+    AEGIS_XDP_STAT_DROPPED = 2,
+    AEGIS_XDP_STAT_SCANS = 3,
+    AEGIS_XDP_STAT_EVENTS = 4,
+    AEGIS_XDP_STAT_EVENT_DROPPED = 5,
+    AEGIS_XDP_STAT_IPV6_UNINSPECTED = 6,
+    AEGIS_XDP_STAT__MAX = 7,
 };
 
 #endif /* AEGIS_BPF_COMMON_H */

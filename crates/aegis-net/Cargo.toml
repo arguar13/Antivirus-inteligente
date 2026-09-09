@@ -1,0 +1,28 @@
+[package]
+name = "aegis-net"
+description = "IDS de red y filtro XDP de AegisCore"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["xdp"]
+# Carga real del filtro XDP. Se desactiva para compilar y probar el analizador
+# de paquetes y el detector de barridos en maquinas sin privilegios: esa logica
+# no debe depender de poder cargar codigo en el kernel.
+xdp = ["dep:libbpf-rs", "dep:libc"]
+
+[dependencies]
+aegis-ipc = { path = "../aegis-ipc" }
+thiserror = "2"
+libbpf-rs = { version = "0.24", optional = true }
+libc = { version = "0.2", optional = true }
+
+[[bin]]
+name = "aegis-net"
+path = "src/main.rs"

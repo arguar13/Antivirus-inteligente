@@ -54,6 +54,10 @@ pub mod evt {
     pub const HANDLE_REQUEST: u16 = 0x0034;
     /// Conexion de red saliente.
     pub const NET_CONNECT: u16 = 0x0040;
+    /// Barrido de puertos detectado en XDP.
+    pub const NET_SCAN: u16 = 0x0041;
+    /// Paquete descartado antes de llegar al stack TCP/IP.
+    pub const NET_BLOCKED: u16 = 0x0042;
     /// Syscall ejecutado desde una region anomala.
     pub const SYSCALL_ANOMALY: u16 = 0x0050;
     /// Intento de manipulacion contra el propio EDR.
@@ -135,6 +139,14 @@ pub mod net_flags {
     pub const LOOPBACK: u32 = 0x0000_0004;
     /// El destino cae en un rango privado RFC1918.
     pub const PRIVATE_DST: u32 = 0x0000_0008;
+    /// Segmento TCP con SYN y sin ACK: intento de apertura.
+    pub const SYN: u32 = 0x0000_0010;
+    /// El paquete se descarto antes de entrar al stack TCP/IP.
+    pub const DROPPED: u32 = 0x0000_0020;
+    /// Atribuido a un barrido de puertos.
+    pub const SCAN_SYN: u32 = 0x0000_0040;
+    /// Observado en XDP, no en la capa de sockets.
+    pub const XDP: u32 = 0x0000_0080;
 }
 
 /// Flags de [`AegisSyscallAnomaly`].

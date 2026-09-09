@@ -69,6 +69,8 @@ typedef uint16_t aegis_evt_type_t;
 #define AEGIS_EVT_REMOTE_THREAD    0x0033u /* CreateRemoteThread / APC       */
 #define AEGIS_EVT_HANDLE_REQUEST   0x0034u /* ObRegisterCallbacks pre-op     */
 #define AEGIS_EVT_NET_CONNECT      0x0040u
+#define AEGIS_EVT_NET_SCAN         0x0041u /* barrido de puertos detectado  */
+#define AEGIS_EVT_NET_BLOCKED      0x0042u /* paquete descartado en XDP     */
 #define AEGIS_EVT_SYSCALL_ANOMALY  0x0050u /* syscall directo/indirecto      */
 #define AEGIS_EVT_TAMPER_ATTEMPT   0x0060u /* intento contra el propio EDR   */
 
@@ -241,6 +243,10 @@ AEGIS_STATIC_ASSERT(sizeof(aegis_syscall_anomaly_t) == 48, "aegis_syscall_anomal
 #define AEGIS_NET_F_INBOUND    0x00000002u
 #define AEGIS_NET_F_LOOPBACK   0x00000004u
 #define AEGIS_NET_F_PRIVATE_DST 0x00000008u /* destino en rango RFC1918        */
+#define AEGIS_NET_F_SYN         0x00000010u /* TCP SYN sin ACK                 */
+#define AEGIS_NET_F_DROPPED     0x00000020u /* descartado antes del stack TCP/IP */
+#define AEGIS_NET_F_SCAN_SYN    0x00000040u /* atribuido a un barrido SYN      */
+#define AEGIS_NET_F_XDP         0x00000080u /* observado en XDP, no en socket  */
 
 typedef struct {
     uint8_t  saddr[16];     /* 0  */

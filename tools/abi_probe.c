@@ -144,5 +144,11 @@ int main(void)
     printf("const AEGIS_EVT_PROCESS_EXIT %u\n", AEGIS_EVT_PROCESS_EXIT);
     printf("const AEGIS_EVT_FILE_PRE_CREATE %u\n", AEGIS_EVT_FILE_PRE_CREATE);
     printf("const AEGIS_NET_F_OUTBOUND %u\n", AEGIS_NET_F_OUTBOUND);
+    printf("const AEGIS_EVT_NET_SCAN %u\n", AEGIS_EVT_NET_SCAN);
+    printf("const AEGIS_EVT_NET_BLOCKED %u\n", AEGIS_EVT_NET_BLOCKED);
+    printf("const AEGIS_NET_F_SYN %u\n", AEGIS_NET_F_SYN);
+    printf("const AEGIS_NET_F_DROPPED %u\n", AEGIS_NET_F_DROPPED);
+    printf("const AEGIS_NET_F_SCAN_SYN %u\n", AEGIS_NET_F_SCAN_SYN);
+    printf("const AEGIS_NET_F_XDP %u\n", AEGIS_NET_F_XDP);
     return 0;
 }
