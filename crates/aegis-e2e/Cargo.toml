@@ -1,0 +1,19 @@
+[package]
+name = "aegis-e2e"
+description = "Pruebas de integracion de extremo a extremo de AegisCore"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+aegis-agent = { path = "../aegis-agent" }
+aegis-net = { path = "../aegis-net" }
+aegis-resp = { path = "../aegis-resp" }
+aegis-vuln = { path = "../aegis-vuln" }
+aegis-ipc = { path = "../aegis-ipc" }

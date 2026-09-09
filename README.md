@@ -4,10 +4,22 @@ EDR (Endpoint Detection and Response) de nueva generación para Windows y Linux.
 Motor de defensa en Ring 0 + Ring 3, sin bloatware: solo detección, aislamiento
 y respuesta.
 
-> **Estado: fase de diseño e implementación temprana.** El contrato ABI entre
-> kernel y agente está implementado y verificado (`crates/aegis-ipc`). El resto
-> de este repositorio es el blueprint arquitectónico que guía la construcción.
-> Ver [Hoja de ruta](docs/06-stack-y-roadmap.md).
+> **Estado: la línea Linux está implementada y verificada contra un kernel
+> real.** Telemetría eBPF, correlación, escáner de postura y CVE, IDS de red con
+> XDP, y motor de respuesta (terminación, cuarentena cifrada, aislamiento). La
+> línea Windows sigue siendo blueprint. Ver
+> [Hoja de ruta](docs/06-stack-y-roadmap.md) y [Estado del CI](docs/07-estado-ci.md).
+
+| Componente | Estado | Verificación |
+|---|---|---|
+| Contrato ABI Ring 0 ↔ Ring 3 | Implementado | 126 entradas de layout contrastadas entre C y Rust, con gcc y clang |
+| Sondas eBPF (proceso, fichero, ptrace, red) | Implementado | 5 programas cargados y aceptados por el verificador de kernel 6.18 |
+| Agente: grafo de linaje y triaje | Implementado | 25 pruebas; 4 escalados de 170 eventos reales |
+| Escáner de postura y CVE | Implementado | 45 pruebas; 690 paquetes inventariados en el host real |
+| IDS de red con XDP | Implementado | 29 pruebas vía `BPF_PROG_TEST_RUN` contra el kernel |
+| Respuesta: kill, cuarentena, aislamiento | Implementado | 22 pruebas con procesos y ficheros reales |
+| Integración de extremo a extremo | Implementado | Malware simulado detectado, terminado y revertido |
+| Driver de Windows, ELAM, PPL | Blueprint | Bloqueado por certificación (ver módulo 6) |
 
 ---
 
@@ -174,11 +186,19 @@ docs/                         Blueprint arquitectónico
 ## Desarrollo
 
 ```bash
-make ci        # todas las comprobaciones (formato, clippy, tests, ABI, eBPF, docs)
+make ci        # todas las comprobaciones: formato, clippy, tests, ABI, eBPF,
+               # docs y presupuesto de memoria
 make test      # solo cargo test
 make bpf       # compila los programas eBPF
+make bpf-verify# los carga y los pasa por el verificador del kernel
 make abi       # el layout de C y el de Rust deben coincidir
 ```
+
+Las partes que tocan el kernel (sondas eBPF, filtro XDP, terminación de
+procesos) necesitan `CAP_BPF`, `CAP_PERFMON` y `CAP_NET_ADMIN`, un kernel con
+`CONFIG_DEBUG_INFO_BTF=y` y `tracefs` montado. Cuando falta algo, las pruebas
+correspondientes **se saltan con un aviso** en lugar de fallar: una prueba que
+falla por el entorno enseña al equipo a ignorar el rojo del CI.
 
 > **GitHub Actions esta bloqueado a nivel de repositorio o cuenta en este
 > proyecto.** El workflow es correcto y esta verificado, pero no arranca. Ver

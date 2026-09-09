@@ -25,6 +25,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-e2e"
+version = "0.1.0"
+dependencies = [
+ "aegis-agent",
+ "aegis-ipc",
+ "aegis-net",
+ "aegis-resp",
+ "aegis-vuln",
+]
+
+[[package]]
 name = "aegis-ipc"
 version = "0.1.0"
 
