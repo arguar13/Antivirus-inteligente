@@ -9,6 +9,7 @@ members = [
     "crates/aegis-scan",
     "crates/aegis-ml",
     "crates/aegis-ransom",
+    "crates/aegis-evasion",
     "crates/aegis-e2e",
 ]
 

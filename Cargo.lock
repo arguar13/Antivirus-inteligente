@@ -43,6 +43,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-evasion"
+version = "0.1.0"
+dependencies = [
+ "aegis-scan",
+ "goblin",
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-ipc"
 version = "0.1.0"
 
