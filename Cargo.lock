@@ -271,6 +271,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-unpacker"
+version = "0.1.0"
+dependencies = [
+ "aegis-ml",
+ "aegis-scal",
+ "aegis-scan",
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-update"
 version = "0.1.0"
 dependencies = [

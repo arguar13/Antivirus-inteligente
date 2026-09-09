@@ -5,6 +5,7 @@ members = [
     "crates/aegis-behavior",
     "crates/aegis-kintegrity",
     "crates/aegis-firmware",
+    "crates/aegis-unpacker",
     "crates/aegis-sandbox",
     "crates/aegis-deception",
     "crates/aegis-mesh",

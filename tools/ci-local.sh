@@ -76,6 +76,18 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "firmware" ]; then
     fi
 fi
 
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "unpacker" ]; then
+    printf '%s==>%s Unpacker · capacidades de desempaquetado dinamico\n' "$GRIS" "$FIN"
+    if cargo run -q -p aegis-unpacker --example unpacker_support > /tmp/aegis-unpacker.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-unpacker.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-unpacker.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 paso docs  "Docs · enlaces relativos"   ./tools/check-links.sh
 # El fichero de cadenas cifradas (FASE 13) tiene que estar al dia respecto al
 # manifiesto: si alguien cambia una cadena critica y no regenera, el binario
@@ -127,6 +139,7 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
         cargo build -q -p aegis-mesh --example mesh_node 2>/dev/null
         cargo build -q -p aegis-kintegrity --example dkom_probe 2>/dev/null
         cargo build -q -p aegis-firmware --example bootkit_probe 2>/dev/null
+        cargo build -q -p aegis-unpacker --example unpack_probe 2>/dev/null
         make -C drivers/linux/aegis-bpf build sign >/dev/null 2>&1 || true
         if python3 tests/red_team_sim.py > /tmp/aegis-redteam.log 2>&1; then
             printf '    %sOK%s\n' "$VERDE" "$FIN"

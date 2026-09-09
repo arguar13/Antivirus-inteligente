@@ -1,0 +1,19 @@
+[package]
+name = "aegis-unpacker"
+description = "Desempaquetado dinamico en memoria: detecta el OEP de un binario empaquetado y extrae el codigo real"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+
+[dependencies]
+aegis-ml = { path = "../aegis-ml" }
+aegis-scal = { path = "../aegis-scal" }
+aegis-scan = { path = "../aegis-scan" }
+thiserror = "2"
+libc = "0.2"

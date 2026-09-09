@@ -570,6 +570,29 @@ def escenario_bootkit():
         fallo(f"el mecanismo de arranque medido fallo: {r.stdout.strip()} {r.stderr.strip()}")
 
 
+# ---------------------------------------------------------------------------
+# 12. Empaquetador: el codigo cifrado en disco se desempaqueta en memoria (FASE 32)
+# ---------------------------------------------------------------------------
+
+
+def escenario_empaquetador():
+    titulo(12, "un binario empaquetado esconde su codigo y el desempaquetador lo saca")
+
+    binario = ejemplo("aegis-unpacker", "unpack_probe")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar la sonda de desempaquetado")
+        return
+
+    r = run([binario])
+    if r.returncode == 2:
+        ok("OMITIDO en esta maquina: " + (r.stderr.strip() or r.stdout.strip()))
+        return
+    if r.returncode == 0 and "DESEMPAQUETADO" in r.stdout:
+        ok("el codigo cifrado en disco quedo al descubierto en memoria y YARA lo detecto")
+    else:
+        fallo(f"el desempaquetado no expuso el codigo: {r.stdout.strip()} {r.stderr.strip()}")
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -583,9 +606,10 @@ def main():
     escenario_malla()
     escenario_rootkit()
     escenario_bootkit()
+    escenario_empaquetador()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({11} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({12} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1
