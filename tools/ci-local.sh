@@ -110,6 +110,7 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
         cargo build -q -p aegis-evasion --example scan_pid 2>/dev/null
         cargo build -q -p aegis-ransom --example honeypot_probe 2>/dev/null
         cargo build -q -p aegis-sandbox --example escape_attempt 2>/dev/null
+        cargo build -q -p aegis-deception --example decoy_sting 2>/dev/null
         make -C drivers/linux/aegis-bpf build sign >/dev/null 2>&1 || true
         if python3 tests/red_team_sim.py > /tmp/aegis-redteam.log 2>&1; then
             printf '    %sOK%s\n' "$VERDE" "$FIN"

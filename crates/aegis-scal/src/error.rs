@@ -68,6 +68,20 @@ pub enum ScalError {
         purpose: &'static str,
     },
 
+    /// Fallo propio del backend, con su texto original.
+    ///
+    /// Es la valvula para los errores que solo tienen sentido dentro de un
+    /// backend concreto —un mapa de eBPF que no se pudo actualizar, una
+    /// extension del sistema que rechazo la regla— y que traducir a una variante
+    /// generica solo serviria para perder la causa.
+    #[error("el backend '{backend}' fallo: {detail}")]
+    Backend {
+        /// Backend que fallo.
+        backend: &'static str,
+        /// Causa, tal y como la dio.
+        detail: String,
+    },
+
     /// La herramienta externa corrio pero devolvio error.
     #[error("'{tool}' fallo con codigo {code}: {stderr}")]
     ToolFailed {

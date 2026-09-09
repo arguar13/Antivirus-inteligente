@@ -66,6 +66,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-deception"
+version = "0.1.0"
+dependencies = [
+ "aegis-net",
+ "aegis-scal",
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-e2e"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,24 @@
+[package]
+name = "aegis-deception"
+description = "Servicios senuelo de red y deteccion de reconocimiento sin falsos positivos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Aplicacion del bloqueo en XDP, antes de que el paquete toque el stack TCP/IP.
+# Necesita libbpf y un objeto XDP compilado, asi que es opcional: sin ella el
+# bloqueo se aplica igualmente en nftables, una capa mas arriba.
+xdp = ["dep:aegis-net"]
+
+[dependencies]
+aegis-scal = { path = "../aegis-scal" }
+aegis-net = { path = "../aegis-net", features = ["xdp"], optional = true }
+thiserror = "2"
+libc = "0.2"

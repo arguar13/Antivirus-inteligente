@@ -24,6 +24,7 @@ Devuelve codigo 0 si todos los escenarios pasan, 1 si alguno falla.
 """
 import os
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -370,6 +371,69 @@ def escenario_sandbox():
         )
 
 
+# ---------------------------------------------------------------------------
+# 7. Reconocimiento contra los senuelos de red (FASE 27)
+# ---------------------------------------------------------------------------
+
+
+def escenario_decepcion():
+    titulo(7, "un atacante barre los puertos y toca los senuelos de red")
+
+    binario = ejemplo("aegis-deception", "decoy_sting")
+    if not os.path.exists(binario):
+        fallo("no se pudo compilar la red de senuelos")
+        return
+
+    proc = subprocess.Popen(
+        [binario, "--seconds", "6"],
+        cwd=RAIZ,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        cabecera = proc.stdout.readline().strip()
+        if not cabecera.startswith("PUERTOS "):
+            fallo(f"la red de senuelos no arranco: {cabecera!r}")
+            return
+        puertos = [int(p) for p in cabecera.split()[1:]]
+
+        # El atacante: conecta a los tres senuelos y en uno manda una peticion,
+        # que es exactamente lo que hace una herramienta de reconocimiento.
+        for i, p in enumerate(puertos):
+            with socket.create_connection(("127.0.0.1", p), timeout=2) as s:
+                s.settimeout(1.0)
+                if i == 0:
+                    try:
+                        s.recv(64)          # el saludo del senuelo
+                        s.sendall(b"SSH-2.0-Nmap-SSH-Probe\r\n")
+                    except OSError:
+                        pass
+            time.sleep(0.2)
+
+        salida, _ = proc.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        fallo("la red de senuelos no termino a tiempo")
+        return
+
+    lineas = salida.splitlines()
+    alertas = [l for l in lineas if l.startswith("ALERTA")]
+    rechazos = [l for l in lineas if l.startswith("RECHAZO")]
+
+    if any("movimiento-lateral" in l for l in alertas):
+        ok("el barrido de SSH/SMB/RDP se detecto como movimiento lateral")
+    else:
+        fallo(f"el barrido de los senuelos no se detecto: {alertas}")
+
+    # Y la barandilla: la conexion viene de la propia maquina, que jamas puede
+    # bloquearse. Que el motor lo intente y sea rechazado es la proteccion.
+    if any("propia maquina" in l for l in rechazos):
+        ok("la barandilla impidio bloquear la direccion de la propia maquina")
+    else:
+        fallo(f"la barandilla no rechazo el bloqueo de la propia maquina: {rechazos}")
+
+
 def main():
     print(f"{GRIS}Simulacion de Red Team defensiva de AegisCore{FIN}\n")
     escenario_autodefensa()
@@ -378,9 +442,10 @@ def main():
     escenario_bytecode()
     escenario_watchdog()
     escenario_sandbox()
+    escenario_decepcion()
     print()
     if fallos == 0:
-        print(f"{VERDE}Todas las defensas resistieron ({6} escenarios).{FIN}")
+        print(f"{VERDE}Todas las defensas resistieron ({7} escenarios).{FIN}")
         return 0
     print(f"{ROJO}{fallos} escenario(s) encontraron una brecha.{FIN}")
     return 1
