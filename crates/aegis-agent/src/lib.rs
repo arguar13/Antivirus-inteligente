@@ -14,6 +14,7 @@
 
 #![deny(missing_docs)]
 
+pub mod behavior;
 pub mod decode;
 pub mod error;
 pub mod graph;

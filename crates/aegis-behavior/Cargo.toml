@@ -1,0 +1,15 @@
+[package]
+name = "aegis-behavior"
+description = "Motor conductual de AegisCore: grafo dirigido de procesos, tecnicas MITRE ATT&CK y puntuacion de riesgo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+aegis-scal = { path = "../aegis-scal" }
+thiserror = "2"

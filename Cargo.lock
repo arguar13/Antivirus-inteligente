@@ -22,6 +22,7 @@ dependencies = [
 name = "aegis-agent"
 version = "0.1.0"
 dependencies = [
+ "aegis-behavior",
  "aegis-ctl",
  "aegis-harden",
  "aegis-ipc",
@@ -44,6 +45,14 @@ dependencies = [
  "rusqlite",
  "thiserror 2.0.20",
  "zeroize",
+]
+
+[[package]]
+name = "aegis-behavior"
+version = "0.1.0"
+dependencies = [
+ "aegis-scal",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

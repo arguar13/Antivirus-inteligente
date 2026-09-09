@@ -20,6 +20,7 @@ bpf = ["dep:libbpf-rs", "dep:libc"]
 
 [dependencies]
 aegis-scal = { path = "../aegis-scal" }
+aegis-behavior = { path = "../aegis-behavior" }
 aegis-ipc = { path = "../aegis-ipc" }
 aegis-ransom = { path = "../aegis-ransom" }
 aegis-harden = { path = "../aegis-harden" }

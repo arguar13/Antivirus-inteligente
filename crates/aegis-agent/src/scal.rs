@@ -112,6 +112,16 @@ mod linux {
             self.identidades.len()
         }
 
+        /// Identidad de la capa correspondiente a un actor del ABI.
+        ///
+        /// Es lo que permite que otros consumidores —el motor conductual— hablen
+        /// de procesos con la MISMA identidad que el puente, en vez de cada uno
+        /// con la suya. Dos vocabularios de identidad sobre los mismos procesos
+        /// es como se acaban atribuyendo acciones al proceso equivocado.
+        pub fn identidad(&self, actor: ProcKey) -> Option<ProcessKey> {
+            self.identidades.get(&actor).copied()
+        }
+
         /// Convierte un evento de telemetria en un evento de la capa.
         ///
         /// Devuelve `true` si el evento produjo un cambio de ciclo de vida.
