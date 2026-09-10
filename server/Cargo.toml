@@ -22,6 +22,27 @@ repository = "https://github.com/arguar13/Antivirus-inteligente"
 missing_docs = "warn"
 unsafe_code = "forbid"
 
+# El perfil de desarrollo lleva `line-tables-only` y no informacion de
+# depuracion completa.
+#
+# POR QUE
+# -------
+# `debug = true` genera DWARF completo para CADA dependencia del arbol. En este
+# proyecto —dos espacios de trabajo, mas de treinta crates propios y un arbol de
+# dependencias que incluye rustls, sqlx, tokio y librdkafka— eso son mas de
+# quince gigas en `target/`, y la puerta de calidad dejo de caber en el disco de
+# la maquina de integracion: `make ci` fallaba por ENOSPC, que se parece mucho a
+# un fallo del producto y no lo es.
+#
+# `line-tables-only` conserva lo unico que se usa de verdad al depurar un fallo
+# de prueba —fichero y linea en el backtrace— y quita el resto. Un fallo de CI
+# se reproduce en local, donde quien lo investiga puede subir el nivel.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
 [profile.release]
 opt-level = 3
 lto = "thin"

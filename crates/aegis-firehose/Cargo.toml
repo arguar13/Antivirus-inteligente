@@ -1,0 +1,36 @@
+[package]
+name = "aegis-firehose"
+description = "Entrega sin perdida de auditoria hacia SIEM y SOAR: WAL en disco, Kafka y Syslog sobre TLS"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+rustls-pki-types = "1"
+rustls-pemfile = "2"
+# Kafka con la biblioteca de referencia, enlazada contra la librdkafka del
+# sistema. POR QUE NO SE COMPILA LA VENDIDA: el productor vive en el PLANO DE
+# CONTROL, que se despliega como servicio con sus dependencias gestionadas, no
+# en el agente. El artefacto hermetico y estatico de la FASE 42 —agente,
+# aegisctl, watchdog, aegis-fleet— no incluye este crate y sigue sin depender de
+# nada del anfitrion.
+tokio = { version = "1", default-features = false, features = ["rt", "time"], optional = true }
+rdkafka = { version = "0.37", default-features = false, features = ["libz", "tokio"], optional = true }
+
+[features]
+default = []
+# El destino Kafka. Se separa en una caracteristica porque arrastra una
+# biblioteca en C: quien solo use syslog no deberia pagarla ni auditarla.
+kafka = ["dep:rdkafka", "dep:tokio"]
+
+[dev-dependencies]
+# Para levantar un servidor de syslog REAL en las pruebas: un extremo TLS de
+# verdad, con su certificado, no una imitacion del protocolo.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }

@@ -23,6 +23,8 @@ pub struct ServicioFlota {
     intervalo_latido_seg: u64,
     /// Bus por el que los sucesos llegan al panel en tiempo real.
     bus: BusEventos,
+    /// Salida de auditoria hacia el SIEM del cliente. `None` = no configurada.
+    firehose: Option<std::sync::Arc<crate::firehose::Firehose>>,
 }
 
 /// Clasificacion MITRE ATT&CK de una categoria de evento.
@@ -134,7 +136,23 @@ impl ServicioFlota {
             almacen,
             intervalo_latido_seg,
             bus: BusEventos::nuevo(),
+            firehose: None,
         }
+    }
+
+    /// Conecta la salida de auditoria hacia el SIEM del cliente (FASE 46).
+    ///
+    /// Es OPCIONAL a proposito. Un despliegue sin SIEM tiene que funcionar
+    /// igual: el producto no puede dejar de detectar porque el cliente aun no
+    /// haya integrado su plataforma de eventos.
+    pub fn con_firehose(mut self, f: std::sync::Arc<crate::firehose::Firehose>) -> ServicioFlota {
+        self.firehose = Some(f);
+        self
+    }
+
+    /// Salida de auditoria, si esta configurada.
+    pub fn firehose(&self) -> Option<&std::sync::Arc<crate::firehose::Firehose>> {
+        self.firehose.as_ref()
     }
 
     /// Crea el servicio compartiendo un bus de eventos ya existente.
@@ -143,6 +161,7 @@ impl ServicioFlota {
             almacen,
             intervalo_latido_seg,
             bus,
+            firehose: None,
         }
     }
 
@@ -238,6 +257,22 @@ impl ServicioFlota {
             detalles,
         };
         let id = self.almacen.registrar_alerta(cn, &alerta).await?;
+
+        // La auditoria se anota DESPUES de persistir y ANTES de publicar en el
+        // panel: si se anotara antes de persistir, el SIEM del cliente podria
+        // tener un evento que la base de datos del producto no tiene, y
+        // reconciliarlos despues es imposible.
+        if let Some(f) = &self.firehose {
+            f.anotar(&crate::firehose::Auditoria {
+                id: id.to_string(),
+                tipo: "alerta",
+                severidad: alerta.severidad,
+                cn: Some(cn.to_string()),
+                resumen: descripcion.chars().take(512).collect(),
+                tecnica_mitre: clase.map(|c| c.tecnica.to_string()),
+                momento: alerta.ocurrido_en.to_rfc3339(),
+            });
+        }
         // Una alerta critica que espera al siguiente sondeo del panel es una
         // alerta que llega tarde.
         self.bus.publicar(EventoPanel::AlertaNueva {

@@ -28,6 +28,7 @@ pub mod correlador;
 pub mod dominio;
 pub mod error;
 pub mod eventos;
+pub mod firehose;
 pub mod flota;
 pub mod grpc;
 pub mod heuristicas;

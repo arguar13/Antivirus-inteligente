@@ -119,6 +119,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // --- Salida de auditoria hacia el SIEM del cliente (FASE 46) -----------
+    //
+    // El diario se abre ANTES de que nada empiece a producir evidencia. Si el
+    // directorio no se puede usar, se arranca SIN firehose y se deja constancia
+    // con nivel de error: un plano de control que no arranca porque el SIEM del
+    // cliente no esta configurado amplifica la averia en vez de contenerla,
+    // pero uno que exporta cero registros en silencio es peor todavia, porque
+    // nadie lo descubre hasta que busca la evidencia y no esta.
+    let servicio = match montar_firehose(&cfg, servicio.clone()) {
+        Some(s) => s,
+        None => servicio,
+    };
+
     // --- Correlacion de APT distribuida (FASE 45) --------------------------
     //
     // Un temporizador y no un disparo por alerta: una flota de diez mil
@@ -218,4 +231,82 @@ async fn esperar_senal() {
         _ = ctrl_c => {}
         _ = term => {}
     }
+}
+
+/// Abre el diario de auditoria y arranca la exportacion, si esta configurada.
+///
+/// Devuelve `None` —y el plano de control sigue sin firehose— cuando falta
+/// configuracion o el diario no se puede abrir. El motivo se registra siempre.
+fn montar_firehose(cfg: &Config, servicio: Arc<ServicioFlota>) -> Option<Arc<ServicioFlota>> {
+    use aegis_firehose::diario::Config as ConfigDiario;
+    use aegis_firehose::reintento::Politica;
+    use aegis_firehose::syslog_tls::{ConfigSyslog, DestinoSyslog};
+
+    let dir = cfg.firehose_dir.as_ref()?;
+    let servidor = cfg.syslog_servidor.as_ref()?;
+    let nombre = cfg.syslog_nombre.clone().unwrap_or_else(|| {
+        // Sin nombre explicito, el del propio servidor: es lo correcto cuando se
+        // conecta por DNS, y falla ruidosamente cuando no lo es.
+        servidor.split(':').next().unwrap_or(servidor).to_string()
+    });
+    let Some(ruta_ca) = cfg.syslog_ca.as_ref() else {
+        tracing::error!(
+            "AEGIS_SYSLOG_CA no esta puesta: sin ancla de confianza no se puede \
+             verificar al colector, y la telemetria de seguridad no sale sin verificar"
+        );
+        return None;
+    };
+    let ca = match std::fs::read(ruta_ca) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(error = %e, ruta = %ruta_ca.display(),
+                "no se pudo leer la CA del colector syslog; AUDITORIA NO EXPORTADA");
+            return None;
+        }
+    };
+
+    let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "control-plane".to_string());
+    let mut config_diario = ConfigDiario::nueva(dir);
+    config_diario.presupuesto_bytes = cfg.firehose_presupuesto_bytes;
+
+    let firehose = match aegis_server::firehose::Firehose::abrir(config_diario, &hostname) {
+        Ok(f) => Arc::new(f),
+        Err(e) => {
+            tracing::error!(error = %e, directorio = %dir.display(),
+                "no se pudo abrir el diario de auditoria; AUDITORIA NO EXPORTADA");
+            return None;
+        }
+    };
+
+    let destino = match DestinoSyslog::nuevo(ConfigSyslog {
+        servidor: servidor.clone(),
+        nombre_esperado: nombre,
+        ca_pem: ca,
+        plazo: std::time::Duration::from_secs(10),
+    }) {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!(error = %e, "colector syslog mal configurado; AUDITORIA NO EXPORTADA");
+            return None;
+        }
+    };
+
+    // En un HILO propio y no en el runtime: la exportacion bloquea en E/S de
+    // disco y de red, y hacerlo en un worker de tokio castigaria a todo lo
+    // demas —los latidos de diez mil agentes, entre otras cosas—.
+    let exportador = firehose.clone();
+    std::thread::Builder::new()
+        .name("aegis-firehose".to_string())
+        .spawn(move || exportador.exportar(destino, Politica::default()))
+        .ok()?;
+
+    tracing::info!(
+        directorio = %dir.display(), colector = %servidor,
+        "salida de auditoria hacia el SIEM activa"
+    );
+    // Se clona el servicio y se le anade la salida: el bus de eventos va dentro
+    // y es un emisor de difusion, asi que el clon publica en el MISMO bus. Si
+    // no fuera asi, la consola dejaria de recibir avisos en cuanto el firehose
+    // estuviera activo, que es un fallo silencioso de los peores.
+    Some(Arc::new((*servicio).clone().con_firehose(firehose)))
 }

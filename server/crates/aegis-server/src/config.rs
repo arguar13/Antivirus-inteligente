@@ -29,6 +29,31 @@ pub struct Config {
     pub pg_max_conexiones: u32,
     /// Directorio donde vive el material de la CA de la flota.
     pub ca_dir: std::path::PathBuf,
+
+    // --- Salida de auditoria hacia el SIEM del cliente (FASE 46) ------------
+    //
+    // Las cuatro van juntas: sin diario no hay donde acumular mientras el SIEM
+    // no esta, y sin destino no hay adonde exportar. Un diario que nadie vacia
+    // solo consume disco, asi que el firehose se activa cuando estan las dos
+    // cosas y no antes.
+    /// Directorio del diario de auditoria.
+    pub firehose_dir: Option<std::path::PathBuf>,
+    /// `host:puerto` del colector syslog TLS.
+    pub syslog_servidor: Option<String>,
+    /// Nombre esperado en el certificado del colector.
+    ///
+    /// Separado del servidor porque en produccion se conecta a una IP o a un
+    /// balanceador y el certificado lleva el nombre del servicio. Sin este
+    /// campo, la unica salida seria desactivar la verificacion.
+    pub syslog_nombre: Option<String>,
+    /// Fichero PEM con la CA que firma al colector.
+    pub syslog_ca: Option<std::path::PathBuf>,
+    /// Presupuesto en disco del diario.
+    ///
+    /// Es lo que el cliente acepta ceder a la auditoria pendiente. Sin techo,
+    /// un SIEM caido un fin de semana llena el disco del servidor y el plano de
+    /// control deja de funcionar por intentar no perder un registro.
+    pub firehose_presupuesto_bytes: u64,
 }
 
 /// Lee una variable de entorno o devuelve el valor por defecto.
@@ -77,6 +102,16 @@ impl Config {
             // todos los certificados emitidos dejarian de validar y la flota
             // entera quedaria fuera al primer reinicio del servicio.
             ca_dir: std::path::PathBuf::from(var("AEGIS_CA_DIR", "/var/lib/aegis/ca")),
+            // FASE 46. El firehose se activa cuando hay directorio de diario Y
+            // destino: sin las dos cosas no hay adonde exportar, y arrancar un
+            // diario que nadie vacia solo consume disco.
+            firehose_dir: std::env::var("AEGIS_FIREHOSE_DIR").ok().map(Into::into),
+            syslog_servidor: std::env::var("AEGIS_SYSLOG_SERVIDOR").ok(),
+            syslog_nombre: std::env::var("AEGIS_SYSLOG_NOMBRE").ok(),
+            syslog_ca: std::env::var("AEGIS_SYSLOG_CA").ok().map(Into::into),
+            firehose_presupuesto_bytes: var("AEGIS_FIREHOSE_PRESUPUESTO", "4294967296")
+                .parse()
+                .unwrap_or(4 * 1024 * 1024 * 1024),
         })
     }
 }

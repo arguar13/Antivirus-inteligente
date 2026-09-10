@@ -54,6 +54,22 @@ else
     printf '%s==>%s Servidor · %somitido (no esta en este arbol)%s\n' "$GRIS" "$FIN" "$GRIS" "$FIN"
 fi
 
+# El destino Kafka del firehose (FASE 46). El grupo INFORMA siempre de si se
+# pudo ejercer o no: la diferencia entre "probado contra un corredor" y "no
+# habia corredor aqui" tiene que verse en la puerta de calidad, no quedarse en
+# un comentario del codigo.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "kafka" ]; then
+    printf '%s==>%s Firehose · destino Kafka de extremo a extremo\n' "$GRIS" "$FIN"
+    if ./tools/verificar-kafka.sh > /tmp/aegis-kafka.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-kafka.log | tail -5
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        sed 's/^/    | /' /tmp/aegis-kafka.log | tail -20
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 paso abi   "ABI · layout C vs Rust (gcc)"   env CC=gcc   ./tools/abi-check.sh
 paso abi   "ABI · layout C vs Rust (clang)" env CC=clang ./tools/abi-check.sh
 # Los pasos de eBPF solo aplican en Linux y solo si el subproyecto existe ya.

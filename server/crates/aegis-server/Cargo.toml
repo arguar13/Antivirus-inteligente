@@ -19,6 +19,10 @@ workspace = true
 aegis-fleet = { path = "../../../crates/aegis-fleet" }
 # Valida AegisQL ANTES de difundir: ver la nota en `lanzar_caza` de api.rs.
 aegis-parser = { path = "../../../crates/aegis-parser" }
+# Entrega de auditoria al SIEM del cliente sin perdida (FASE 46). El destino
+# Kafka queda tras una caracteristica porque arrastra una biblioteca en C: quien
+# solo integre por syslog no deberia pagarla ni auditarla.
+aegis-firehose = { path = "../../../crates/aegis-firehose" }
 
 # --- Runtime asincrono ------------------------------------------------------
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }
@@ -57,6 +61,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 tonic-build = "0.13"
 
 [dev-dependencies]
+rustls-pemfile = "2"
+# Certificado real para el colector syslog de las pruebas de auditoria.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 # Las pruebas de integracion hablan con PostgreSQL, Redis y mTLS reales.
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
