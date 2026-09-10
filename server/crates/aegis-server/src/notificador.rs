@@ -34,11 +34,40 @@ use crate::error::Resultado;
 ///
 /// La generacion se incrementa con CUALQUIER aviso y solo sirve para despertar.
 /// La version de politica sigue significando exactamente lo que significaba.
+///
+/// Ademas hay una generacion POR TIPO. No es contabilidad decorativa: es lo que
+/// permite que un canal sepa POR QUE le despertaron y consulte solo lo que hace
+/// falta. Sin ellas, difundir una cuarentena a diez mil endpoints hacia que los
+/// diez mil canales preguntaran a la base de datos por su politica, sus comandos
+/// y sus cacerias —418.162 transacciones medidas— y la orden de contencion
+/// tardaba segundos en llegar en vez de milisegundos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Aviso {
     /// Ultima version de politica anunciada.
     pub version_politica: i64,
     /// Contador que cambia con cada aviso, sea del tipo que sea.
+    pub generacion: u64,
+    /// Sube con cada aviso de POLITICA (o de comando nuevo).
+    pub gen_politica: u64,
+    /// Sube con cada aviso de CACERIA.
+    pub gen_caza: u64,
+}
+
+/// POR QUE LA CUARENTENA NO VIAJA EN `Aviso`
+/// -----------------------------------------
+/// Los avisos los esperan los DIEZ MIL canales de suscripcion. Meter ahi la
+/// cuarentena significaba despertarlos a todos dos veces por orden: una por el
+/// aviso —que no pueden atender todavia, porque la lista aun no esta en la
+/// cache— y otra por la publicacion de la cache. Veinte mil despertares y diez
+/// mil reinscripciones en las esperas para difundir una sola orden, con el
+/// agravante de que la mitad no servia para nada.
+///
+/// El aviso de cuarentena tiene UN suscriptor —la tarea que refresca la cache—
+/// y son los canales los que esperan la publicacion de esa cache, que es lo
+/// unico que pueden atender.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AvisoCuarentena {
+    /// Sube con cada aviso de CUARENTENA.
     pub generacion: u64,
 }
 
@@ -46,6 +75,7 @@ pub struct Aviso {
 #[derive(Clone)]
 pub struct Notificador {
     rx: watch::Receiver<Aviso>,
+    rx_cuarentena: watch::Receiver<AvisoCuarentena>,
 }
 
 impl Notificador {
@@ -59,8 +89,9 @@ impl Notificador {
     pub async fn iniciar(pg_url: &str, version_inicial: i64) -> Resultado<Notificador> {
         let (tx, rx) = watch::channel(Aviso {
             version_politica: version_inicial,
-            generacion: 0,
+            ..Default::default()
         });
+        let (tx_cua, rx_cuarentena) = watch::channel(AvisoCuarentena::default());
         let mut escucha = PgListener::connect(pg_url).await?;
         escucha
             .listen_all([CANAL_POLITICA, CANAL_CAZA, CANAL_CUARENTENA])
@@ -68,17 +99,30 @@ impl Notificador {
 
         tokio::spawn(async move {
             let mut generacion = 0u64;
+            let (mut g_pol, mut g_caza, mut g_cua) = (0u64, 0u64, 0u64);
             loop {
                 match escucha.recv().await {
                     Ok(aviso) => {
                         generacion = generacion.wrapping_add(1);
                         let anterior = tx.borrow().version_politica;
-                        // Ni una caceria ni una cuarentena cambian la version de
-                        // politica: el aviso solo sirve para despertar el canal,
-                        // que despues averigua que le toca a ese agente.
+                        // Un aviso de cuarentena NO pasa por el canal de los
+                        // diez mil: va por el suyo, a la tarea que refresca la
+                        // cache. Ver `AvisoCuarentena`.
+                        if aviso.channel() == CANAL_CUARENTENA {
+                            g_cua = g_cua.wrapping_add(1);
+                            if tx_cua.send(AvisoCuarentena { generacion: g_cua }).is_err() {
+                                break; // el proceso cierra
+                            }
+                            continue;
+                        }
+                        // Una caceria no cambia la version de politica: el aviso
+                        // solo sirve para despertar el canal, que despues
+                        // averigua que le toca a ese agente.
                         let version_politica = if aviso.channel() == CANAL_POLITICA {
+                            g_pol = g_pol.wrapping_add(1);
                             aviso.payload().parse::<i64>().unwrap_or(anterior)
                         } else {
+                            g_caza = g_caza.wrapping_add(1);
                             anterior
                         };
                         // `send` despierta a los receptores aunque el valor no
@@ -89,6 +133,8 @@ impl Notificador {
                             .send(Aviso {
                                 version_politica,
                                 generacion,
+                                gen_politica: g_pol,
+                                gen_caza: g_caza,
                             })
                             .is_err()
                         {
@@ -108,12 +154,20 @@ impl Notificador {
             }
         });
 
-        Ok(Notificador { rx })
+        Ok(Notificador { rx, rx_cuarentena })
     }
 
     /// Crea un receptor para un canal de suscripcion.
     pub fn suscriptor(&self) -> watch::Receiver<Aviso> {
         self.rx.clone()
+    }
+
+    /// Crea un receptor de avisos de cuarentena.
+    ///
+    /// Lo consume UNA sola tarea —la que refresca la cache—, no los canales.
+    /// Ver [`AvisoCuarentena`].
+    pub fn suscriptor_cuarentena(&self) -> watch::Receiver<AvisoCuarentena> {
+        self.rx_cuarentena.clone()
     }
 
     /// Ultima version de politica anunciada.

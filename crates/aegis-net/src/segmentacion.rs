@@ -80,6 +80,23 @@ pub struct Segmentador<E, S> {
     saliente: S,
     /// Lo que se cree aplicado ahora mismo.
     aplicadas: BTreeSet<IpAddr>,
+    /// Direcciones de ESTA maquina, que nunca se bloquean.
+    ///
+    /// POR QUE LA AUTO-EXCLUSION SE HACE AQUI Y NO EN EL SERVIDOR
+    /// ----------------------------------------------------------
+    /// Un endpoint que se bloquea a si mismo se queda sin plano de control:
+    /// deja de poder recibir incluso la orden de que la cuarentena se levanto,
+    /// y a partir de ahi solo se recupera yendo fisicamente a la maquina.
+    ///
+    /// El servidor podria quitarle su direccion a cada agente, pero solo conoce
+    /// UNA: la que vio en el handshake. Una maquina tiene varias —dos
+    /// interfaces, una VPN, una IP flotante— y la cuarentena podria caer sobre
+    /// cualquiera de las otras. Quien las conoce todas es la maquina.
+    ///
+    /// Ademas, hacerlo aqui permite que la lista que envia el servidor sea
+    /// IDENTICA para toda la flota, y por tanto se lea una sola vez por cambio
+    /// en vez de una vez por endpoint.
+    propias: BTreeSet<IpAddr>,
 }
 
 /// Capa que descarta trafico ENTRANTE de una direccion.
@@ -127,7 +144,14 @@ impl<E: BloqueoEntrante, S: BloqueoSaliente> Segmentador<E, S> {
             entrante,
             saliente,
             aplicadas: BTreeSet::new(),
+            propias: BTreeSet::new(),
         }
+    }
+
+    /// Declara las direcciones de esta maquina, que nunca se bloquearan.
+    pub fn con_propias(mut self, propias: &[IpAddr]) -> Segmentador<E, S> {
+        self.propias = propias.iter().copied().collect();
+        self
     }
 
     /// Direcciones que este endpoint cree tener en cuarentena.
@@ -143,7 +167,13 @@ impl<E: BloqueoEntrante, S: BloqueoSaliente> Segmentador<E, S> {
     /// seria auditar maquina por maquina. Con el conjunto completo, cada empuje
     /// deja al endpoint en un estado conocido.
     pub fn reconciliar(&mut self, deseadas: &[IpAddr], ttl: Option<Duration>) -> Reconciliacion {
-        let deseadas: BTreeSet<IpAddr> = deseadas.iter().copied().collect();
+        // Las propias se descartan ANTES de nada. Ni se aplican, ni cuentan
+        // como fallo: no aplicarlas es la conducta correcta, no un problema.
+        let deseadas: BTreeSet<IpAddr> = deseadas
+            .iter()
+            .copied()
+            .filter(|d| !self.propias.contains(d))
+            .collect();
         let mut r = Reconciliacion::default();
 
         // --- Retirar lo que ya no esta en la orden ---
@@ -420,6 +450,38 @@ mod pruebas {
         assert!(r.anadidas.is_empty());
         assert_eq!(r.solo_saliente, vec![ip("2001:db8::5")]);
         assert!(!r.completa());
+    }
+
+    #[test]
+    fn un_endpoint_nunca_se_bloquea_a_si_mismo() {
+        // Bloquearse a si mismo deja al endpoint sin plano de control: sin poder
+        // recibir siquiera la orden de que la cuarentena se levanto. A partir de
+        // ahi solo se recupera yendo fisicamente a la maquina.
+        let mut seg = Segmentador::nuevo(Capa::default(), Capa::default())
+            .con_propias(&[ip("10.0.0.5"), ip("192.168.1.5")]);
+
+        let r = seg.reconciliar(&[ip("10.0.0.5"), ip("10.0.0.9")], None);
+
+        assert_eq!(r.anadidas, vec![ip("10.0.0.9")], "solo la ajena");
+        assert!(r.fallidas.is_empty(), "saltarse la propia no es un fallo");
+        assert!(!seg.entrante.puestas.borrow().contains(&ip("10.0.0.5")));
+        assert!(!seg.saliente.puestas.borrow().contains(&ip("10.0.0.5")));
+    }
+
+    #[test]
+    fn se_protegen_todas_las_direcciones_de_la_maquina_no_solo_una() {
+        // El servidor solo conoce la direccion que vio en el handshake. Una
+        // maquina tiene varias —dos interfaces, una VPN, una IP flotante— y la
+        // cuarentena puede caer sobre cualquiera de las otras.
+        let mut seg = Segmentador::nuevo(Capa::default(), Capa::default()).con_propias(&[
+            ip("10.0.0.5"),
+            ip("172.16.0.5"),
+            ip("192.168.1.5"),
+        ]);
+
+        let r = seg.reconciliar(&[ip("172.16.0.5"), ip("192.168.1.5")], None);
+        assert!(r.anadidas.is_empty());
+        assert!(seg.aplicadas().is_empty());
     }
 
     #[test]

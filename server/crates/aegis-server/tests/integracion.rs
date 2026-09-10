@@ -894,7 +894,7 @@ async fn una_regla_global_llega_al_agente_real_por_empuje_sin_esperar_su_latido(
     let id_srv = ca.emitir("control-plane", 3600).unwrap();
     let manejador = Arc::new(
         ManejadorPersistente::nuevo(servicio.clone(), tokio::runtime::Handle::current())
-            .con_avisos(notificador.suscriptor()),
+            .con_avisos(&notificador),
     );
     let servidor = ServidorFlota::nuevo(&id_srv, &ca.cert_der(), manejador)
         .unwrap()
@@ -1424,4 +1424,136 @@ async fn el_objetivo_se_congela_al_lanzar_la_caceria() {
     assert_eq!(caza.lanzada_por, "op");
     assert_eq!(caza.tabla, "processes");
     assert!(caza.cerrada_en.is_none());
+}
+
+/// La cuarentena de enjambre llega al agente REAL por el canal, y la difusion
+/// queda contabilizada.
+///
+/// LO QUE ESTA PRUEBA IMPIDE QUE VUELVA
+/// -----------------------------------
+/// El aviso de cuarentena lo reciben a la vez la tarea que refresca la cache en
+/// memoria y los canales de los agentes. Cuando el canal despertaba del aviso y
+/// leia la cache, podia leerla ANTES de que la tarea la hubiera actualizado: le
+/// enviaba al agente la lista anterior —que ya tenia— y, como el aviso ya habia
+/// pasado, no habia un segundo despertar. La orden de contencion se perdia en
+/// silencio para ese endpoint, que es el peor fallo posible aqui: el operador ve
+/// la cuarentena puesta y la maquina comprometida sigue teniendo por donde
+/// moverse.
+///
+/// El canal despierta ahora de la PUBLICACION de la cache, no del aviso, asi que
+/// el valor esta garantizado antes de leerlo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn una_cuarentena_de_enjambre_llega_al_agente_real_y_queda_contabilizada() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+
+    let (version_inicial, _) = almacen.politica_activa().await.unwrap();
+    let notificador = Notificador::iniciar(&url_pg(), version_inicial)
+        .await
+        .expect("la escucha de avisos debe arrancar");
+
+    let ca = Arc::new(AutoridadCertificadora::nueva("CA de pruebas").unwrap());
+    let id_srv = ca.emitir("control-plane", 3600).unwrap();
+    let manejador = Arc::new(
+        ManejadorPersistente::nuevo(servicio.clone(), tokio::runtime::Handle::current())
+            .con_avisos(&notificador),
+    );
+    let difusion = manejador.difusion();
+    let servidor = ServidorFlota::nuevo(&id_srv, &ca.cert_der(), manejador)
+        .unwrap()
+        .escuchar("127.0.0.1:0")
+        .unwrap();
+    let dir = servidor.direccion();
+
+    // Una direccion irrepetible por ejecucion: la tabla es global y dos pruebas
+    // en paralelo no pueden pisarse la lista.
+    let octetos = uuid::Uuid::new_v4().as_bytes()[..4].to_vec();
+    let ip = std::net::IpAddr::from([203, 0, 113, octetos[0].max(1)]);
+    let ip_txt = ip.to_string();
+
+    let cn = cn_unico("cuarentena");
+    let ca_cliente = ca.clone();
+    let cn_hilo = cn.clone();
+    let canal = tokio::task::spawn_blocking(move || {
+        let agente = agente_real(dir, &ca_cliente, ca_cliente.clone(), &cn_hilo).unwrap();
+        let mut s = agente.abrir_sesion().unwrap();
+        s.enrolar(&agente.solicitud_enrolamiento().unwrap())
+            .unwrap();
+        let sesion = agente.abrir_sesion().unwrap();
+        sesion
+            .suscribir_politica(version_inicial.max(0) as u64)
+            .unwrap()
+    })
+    .await
+    .expect("el agente debe suscribirse");
+
+    // El canal ya esta abierto y al dia; la orden llega DESPUES, que es el caso
+    // que importa: un endpoint que estaba conectado cuando el SOC contuvo la
+    // amenaza.
+    let alm = almacen.clone();
+    let operador = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        alm.poner_en_cuarentena(ip, None, "prueba de propagacion", "operador@empresa", None)
+            .await
+            .unwrap();
+    });
+
+    let ip_esperada = ip_txt.clone();
+    let empuje = tokio::task::spawn_blocking(move || {
+        let mut canal = canal;
+        let limite = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < limite {
+            let marco = canal.siguiente()?;
+            if marco.cuarentena_valida && marco.cuarentena.contains(&ip_esperada) {
+                return Ok(marco);
+            }
+        }
+        Err(aegis_fleet::FleetError::Protocolo(
+            "el canal no entrego la cuarentena en 20 s".to_string(),
+        ))
+    })
+    .await
+    .expect("hilo del canal")
+    .expect("el canal debe entregar la cuarentena");
+
+    operador.await.unwrap();
+    assert!(empuje.cuarentena.contains(&ip_txt));
+
+    // La difusion la cierra la ESCRITURA en el socket, no la composicion del
+    // empuje: por eso, en cuanto el agente lo ha leido, ya esta contabilizada.
+    //
+    // Se deja pasar un segundo antes de mirar. No es para dar tiempo a que
+    // llegue —ya llego—, sino para que un canal que se hubiera quedado girando
+    // en vacio tenga tiempo de delatarse: el contador solo sube cuando se
+    // escribe la lista VIGENTE, asi que un reenvio repetido de la misma orden se
+    // ve aqui y en ningun otro sitio.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    let (generacion, canales, _) = difusion.instantanea();
+    assert!(
+        generacion > 0,
+        "la orden tenia que abrir una generacion de difusion"
+    );
+    // EXACTAMENTE una. Un agente, una orden, una escritura.
+    //
+    // LO QUE ESTE NUMERO IMPIDE QUE VUELVA
+    // -----------------------------------
+    // Los receptores de aviso se clonaban por vuelta del bucle y heredaban la
+    // version del original, que no consume nada: en cuanto habia habido un solo
+    // aviso, la espera dejaba de esperar y el canal reenviaba la misma orden a
+    // toda velocidad. Medido con diez mil canales: SIETE MILLONES de empujes en
+    // veinticinco segundos, provocados por una sola orden de contencion. Es una
+    // denegacion de servicio que se causa el propio producto justo cuando esta
+    // conteniendo un incidente, que es el peor momento posible.
+    assert_eq!(
+        canales, 1,
+        "una sola orden y un solo agente son UNA escritura; \
+         mas de una significa que el canal esta reenviando en bucle"
+    );
+
+    // Se levanta: la tabla es global y dejarla puesta afectaria a otras pruebas.
+    almacen.levantar_cuarentena(ip, "prueba").await.unwrap();
+    servidor.parar();
 }

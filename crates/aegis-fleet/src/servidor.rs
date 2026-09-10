@@ -48,6 +48,23 @@ pub struct EstadoCanal {
     pub version_entregada: u64,
     /// Identificador de la ultima caceria entregada, o vacio si ninguna.
     pub caza_entregada: String,
+    /// Si este canal ya le puso al dia al conectar.
+    ///
+    /// POR QUE HACE FALTA
+    /// ------------------
+    /// Un canal recien abierto tiene que ponerse al dia: entregar la politica
+    /// que el agente no tiene, sus comandos pendientes, la caceria abierta y la
+    /// cuarentena en vigor. Eso cuesta varias consultas a la base de datos, y
+    /// esta bien: ocurre UNA vez, cuando el endpoint conecta.
+    ///
+    /// Lo que no puede ocurrir es repetirlo en cada vuelta del bucle. Medido:
+    /// con diez mil canales dando doce vueltas cada uno, eran 426.084
+    /// transacciones para difundir una sola orden de contencion, y el ultimo
+    /// endpoint la aplicaba casi cuatro segundos despues del primero.
+    ///
+    /// Con esta marca, el bucle se pone al dia una vez y a partir de ahi solo
+    /// trabaja cuando algo cambia de verdad.
+    pub al_dia: bool,
     /// Cuarentena que este canal ya entrego, si entrego alguna.
     ///
     /// `None` significa "todavia no se le ha dicho nada de cuarentena a este
@@ -57,6 +74,22 @@ pub struct EstadoCanal {
     /// cuarentena en vigor; con vacio tratado como desconocido, cada latido del
     /// canal reenviaria la lista completa a diez mil endpoints.
     pub cuarentena_entregada: Option<String>,
+    /// Generacion de aviso de POLITICA que este canal ya atendio.
+    ///
+    /// POR QUE ESTA CUENTA LA LLEVA EL CANAL Y NO EL RECEPTOR DE AVISOS
+    /// ---------------------------------------------------------------
+    /// Lo evidente seria dejar que el propio canal de notificacion recuerde por
+    /// donde va. No sirve: el aviso llega mientras este canal esta ESCRIBIENDO
+    /// el empuje anterior, y para cuando vuelve a esperar, el aviso ya paso. Un
+    /// canal que se fiara de "no me han avisado" se quedaria sin la politica
+    /// nueva hasta que alguien publicara otra, que puede no ocurrir nunca.
+    ///
+    /// Con estas dos cuentas, la pregunta deja de ser "¿me han avisado?" —que
+    /// depende de si estaba mirando— y pasa a ser "¿hay algo posterior a lo
+    /// ultimo que atendi?", que no depende de nada.
+    pub gen_politica_vista: u64,
+    /// Generacion de aviso de CACERIA que este canal ya atendio.
+    pub gen_caza_vista: u64,
 }
 
 /// Logica de negocio del plano de control.
@@ -103,14 +136,32 @@ pub trait ManejadorFlota: Send + Sync {
     /// - `None` para cerrar el canal de forma ordenada. Es lo que hace el
     ///   defecto: un manejador sin soporte de empuje cierra en vez de dejar al
     ///   agente esperando algo que no va a llegar nunca.
+    ///
+    /// El estado del canal llega POR REFERENCIA MUTABLE: el manejador es quien
+    /// decide que se envia, asi que es tambien quien tiene que anotar hasta
+    /// donde ha atendido. Dejar esa cuenta fuera obligaria a deducirla del
+    /// empuje, y hay cosas que el empuje no dice —como que se miro una caceria
+    /// y no habia ninguna pendiente—.
     fn esperar_empuje(
         &self,
         _cn: &str,
-        _estado: &EstadoCanal,
+        _estado: &mut EstadoCanal,
         _plazo: Duration,
     ) -> Option<EmpujePolitica> {
         None
     }
+
+    /// Avisa de que un empuje ACABA DE SALIR por el socket de un agente.
+    ///
+    /// Se llama despues de una escritura con exito, nunca antes: es el unico
+    /// instante en que se puede afirmar que la orden salio del plano de control
+    /// hacia ESE endpoint. Componer el empuje no basta —un canal puede componer
+    /// y morir al escribir—, y contar ahi de mas seria decir que una contencion
+    /// se difundio a maquinas que nunca la recibieron.
+    ///
+    /// El defecto no hace nada: la instrumentacion es opcional para el
+    /// manejador.
+    fn empuje_escrito(&self, _cn: &str, _empuje: &EmpujePolitica) {}
 
     /// Informa de la direccion de red desde la que se conecto un agente.
     ///
@@ -360,7 +411,7 @@ impl ManejadorFlota for PlanoDeControl {
     fn esperar_empuje(
         &self,
         _cn: &str,
-        estado: &EstadoCanal,
+        estado: &mut EstadoCanal,
         plazo: Duration,
     ) -> Option<EmpujePolitica> {
         let version_conocida = estado.version_entregada;
@@ -601,12 +652,15 @@ fn atender_suscripcion(
     let mut estado = EstadoCanal {
         version_entregada: req.version_conocida,
         caza_entregada: String::new(),
+        al_dia: false,
         // Nada entregado todavia: el primer empuje llevara la cuarentena en
         // vigor, que es lo que necesita un endpoint que acaba de reconectar.
         cuarentena_entregada: None,
+        gen_politica_vista: 0,
+        gen_caza_vista: 0,
     };
     loop {
-        let Some(empuje) = manejador.esperar_empuje(cn, &estado, PLAZO_KEEPALIVE) else {
+        let Some(empuje) = manejador.esperar_empuje(cn, &mut estado, PLAZO_KEEPALIVE) else {
             // El manejador cierra el canal de forma ordenada.
             return Ok(());
         };
@@ -619,11 +673,13 @@ fn atender_suscripcion(
         if empuje.cuarentena_valida {
             estado.cuarentena_entregada = Some(empuje.cuarentena.clone());
         }
+        estado.al_dia = true;
         // Un fallo de escritura significa que el agente se fue: se termina sin
         // ruido, que es lo normal cuando un endpoint se apaga.
         if escribir_marco(tls, ESTADO_OK, &empuje.codificar()).is_err() {
             return Ok(());
         }
+        manejador.empuje_escrito(cn, &empuje);
     }
 }
 

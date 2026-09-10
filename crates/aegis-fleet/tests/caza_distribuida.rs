@@ -45,7 +45,7 @@ impl ManejadorFlota for PlanoDeCaza {
     fn esperar_empuje(
         &self,
         _cn: &str,
-        estado: &aegis_fleet::servidor::EstadoCanal,
+        estado: &mut aegis_fleet::servidor::EstadoCanal,
         _plazo: Duration,
     ) -> Option<EmpujePolitica> {
         // Si este canal ya le entrego la caceria, NO se repite: el agente

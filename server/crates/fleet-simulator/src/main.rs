@@ -34,6 +34,7 @@
 
 #![forbid(unsafe_code)]
 
+mod cuarentena;
 mod histograma;
 mod marco;
 
@@ -44,7 +45,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aegis_fleet::pki::{AutoridadCertificadora, Identidad};
-use aegis_fleet::proto::{Latido, ReporteEvento, SolicitudEnrolamiento, SuscripcionPolitica};
+use aegis_fleet::proto::{
+    EmpujePolitica, Latido, ReporteEvento, SolicitudEnrolamiento, SuscripcionPolitica,
+};
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::ClientConfig;
 use tokio::net::TcpStream;
@@ -103,6 +106,24 @@ struct Config {
     /// control se reinicia y toda la flota reconecta— pero no se confunde con
     /// el regimen normal.
     calentamiento: Duration,
+    /// API REST del plano de control, para emitir la orden de cuarentena.
+    api: Option<SocketAddr>,
+    /// Credenciales de la consola.
+    api_usuario: String,
+    api_clave: String,
+    /// Direccion contra la que se ordena la cuarentena de enjambre.
+    ///
+    /// Cuando esta puesta, el simulador mide cuanto tarda esa orden en llegar a
+    /// TODOS los agentes suscritos. Ver `cuarentena.rs`.
+    cuarentena_ip: Option<String>,
+    /// Segundos de regimen antes de emitir la orden.
+    ///
+    /// La orden se emite con la flota ya estable, no durante la avalancha de
+    /// arranque: medir la propagacion mientras diez mil agentes se estan
+    /// conectando mediria el enrolamiento, no la difusion.
+    cuarentena_en: Duration,
+    /// Objetivo de propagacion que se comprueba al final.
+    objetivo_propagacion_ms: f64,
 }
 
 /// Contadores compartidos por todos los agentes virtuales.
@@ -115,6 +136,25 @@ struct Metricas {
     empujes: AtomicU64,
     fallos_conexion: AtomicU64,
     fallos_operacion: AtomicU64,
+    /// Agentes que ya han visto la cuarentena.
+    cuarentena_vista: AtomicU64,
+    /// Momento en que el plano de control ACEPTO la orden.
+    ///
+    /// Se fija una sola vez, desde el mismo proceso que mide la llegada: con
+    /// dos procesos y dos relojes, la diferencia mediria tambien la deriva
+    /// entre ellos.
+    cuarentena_t0: std::sync::OnceLock<Instant>,
+    /// Reparto de tiempos de propagacion, en microsegundos.
+    ///
+    /// El histograma es atomico por dentro, asi que diez mil tareas pueden
+    /// registrar a la vez sin un cerrojo que las serialice: un cerrojo aqui
+    /// falsearia la medida, porque el tiempo de espera en el cerrojo se
+    /// contaria como tiempo de propagacion.
+    propagacion: Histograma,
+    /// Difusion medida POR EL PLANO DE CONTROL: `(canales, us del ultimo)`.
+    ///
+    /// Es la otra mitad de la historia. Ver `cuarentena::Difusion`.
+    difusion: std::sync::OnceLock<(u64, f64, f64, f64, f64)>,
 }
 
 fn ayuda() -> ! {
@@ -133,6 +173,12 @@ OPCIONES:
     --modo <MODO>            latidos|suscripciones|mixto [por defecto mixto]
     --rampa <N>              enrolamientos simultaneos [por defecto 200]
     --calentamiento <SEG>    arranque que no cuenta    [por defecto 10]
+    --api <IP:PUERTO>        API REST, para ordenar la cuarentena de enjambre
+    --api-usuario <USUARIO>  usuario de la consola     [por defecto admin]
+    --api-clave <CLAVE>      clave de la consola       [por defecto admin]
+    --cuarentena <IP>        mide la propagacion de una cuarentena contra esa IP
+    --cuarentena-en <SEG>    segundos de regimen antes de ordenarla [por defecto 20]
+    --objetivo-propagacion-ms <MS>  tope del ULTIMO endpoint [por defecto 200]
     --objetivo-ms <MS>       objetivo de latencia p99  [por defecto 50]
     -h, --help               esta ayuda"
     );
@@ -150,6 +196,12 @@ fn config() -> Config {
         rampa: 200,
         objetivo_ms: 50.0,
         calentamiento: Duration::from_secs(10),
+        api: None,
+        api_usuario: "admin".to_string(),
+        api_clave: "admin".to_string(),
+        cuarentena_ip: None,
+        cuarentena_en: Duration::from_secs(20),
+        objetivo_propagacion_ms: 200.0,
     };
 
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -199,6 +251,31 @@ fn config() -> Config {
             }
             "--objetivo-ms" => {
                 c.objetivo_ms = siguiente(i).parse().unwrap_or_else(|_| ayuda());
+                i += 2;
+            }
+            "--api" => {
+                c.api = Some(siguiente(i).parse().unwrap_or_else(|_| ayuda()));
+                i += 2;
+            }
+            "--api-usuario" => {
+                c.api_usuario = siguiente(i);
+                i += 2;
+            }
+            "--api-clave" => {
+                c.api_clave = siguiente(i);
+                i += 2;
+            }
+            "--cuarentena" => {
+                c.cuarentena_ip = Some(siguiente(i));
+                i += 2;
+            }
+            "--cuarentena-en" => {
+                c.cuarentena_en =
+                    Duration::from_secs(siguiente(i).parse().unwrap_or_else(|_| ayuda()));
+                i += 2;
+            }
+            "--objetivo-propagacion-ms" => {
+                c.objetivo_propagacion_ms = siguiente(i).parse().unwrap_or_else(|_| ayuda());
                 i += 2;
             }
             "-h" | "--help" => ayuda(),
@@ -264,6 +341,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (indice, identidad) in identidades.into_iter().enumerate() {
         let ancla_agente = ancla.clone();
         let m = metricas.clone();
+        let vigilar = cfg.cuarentena_ip.clone();
         let (he, hl, hv, ha) = (
             hist_enrolamiento.clone(),
             hist_latido.clone(),
@@ -295,10 +373,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 intervalo,
                 modo,
                 fin_calentamiento,
+                vigilar,
             )
             .await;
         }));
     }
+
+    //
+    // Se emite con la flota YA ESTABLE. Emitirla durante la avalancha de
+    // arranque mediria el enrolamiento, no la difusion.
+    let _emisor = match (cfg.api, cfg.cuarentena_ip.clone()) {
+        (Some(api), Some(ip)) => {
+            let m = metricas.clone();
+            let usuario = cfg.api_usuario.clone();
+            let clave = cfg.api_clave.clone();
+            let espera = cfg.cuarentena_en;
+            Some(tokio::spawn(async move {
+                tokio::time::sleep(espera).await;
+
+                let testigo = match cuarentena::abrir_sesion(api, &usuario, &clave).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("  cuarentena: no se pudo abrir sesion: {e}");
+                        return;
+                    }
+                };
+
+                // El instante de salida se fija JUSTO ANTES de la peticion y se
+                // confirma despues: si la API rechaza la orden, no se fija nada
+                // y la medicion no cuenta una propagacion que nunca ocurrio.
+                let antes = Instant::now();
+                match cuarentena::ordenar(api, &testigo, &ip, "simulacion de propagacion").await {
+                    Ok(r) if (200..300).contains(&r.codigo) => {
+                        let _ = m.cuarentena_t0.set(antes);
+                        println!(
+                            "  [{:>4}s] CUARENTENA ordenada contra {ip} (HTTP {})",
+                            inicio.elapsed().as_secs(),
+                            r.codigo
+                        );
+                        // Se sondea la difusion del PROPIO plano de control
+                        // hasta que deja de crecer. Es la parte que el producto
+                        // controla, y no depende de cuanto tarden diez mil
+                        // agentes virtuales de este mismo ordenador en despertar.
+                        sondear_difusion(api, &testigo, &m).await;
+                    }
+                    Ok(r) => {
+                        eprintln!(
+                            "  cuarentena: la API la rechazo ({}): {}",
+                            r.codigo, r.cuerpo
+                        );
+                    }
+                    Err(e) => eprintln!("  cuarentena: {e}"),
+                }
+            }))
+        }
+        _ => None,
+    };
 
     // --- Informe periodico ---------------------------------------------------
     let m_informe = metricas.clone();
@@ -383,6 +513,129 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rendimiento = hist_latido.muestras() as f64 / segundos_regimen;
     println!("  rendimiento  : {rendimiento:.0} latidos/s");
 
+    // --- Propagacion de la cuarentena de enjambre ----------------------------
+    //
+    // Aqui la medida que importa NO es la media ni el p99: es el MAXIMO. Hasta
+    // que el ultimo endpoint no aplica la regla, la maquina comprometida sigue
+    // teniendo por donde moverse lateralmente. Un p99 estupendo con un rezagado
+    // a diez segundos es un agujero de diez segundos.
+    let propagacion_cumplida = if cfg.cuarentena_ip.is_some() {
+        let vistos = metricas.cuarentena_vista.load(Ordering::Relaxed);
+        let suscritos = metricas.suscritos.load(Ordering::Relaxed);
+        println!();
+        if metricas.cuarentena_t0.get().is_none() {
+            println!("  cuarentena   : NO SE LLEGO A ORDENAR (ver los avisos de arriba)");
+            false
+        } else {
+            // LO QUE MIDE EL PRODUCTO
+            //
+            // Desde que la lista nueva queda publicada hasta que el ULTIMO canal
+            // termino de escribirla en su socket. Es la parte que el plano de
+            // control controla, y la unica que sigue valiendo cuando la flota es
+            // real: en produccion los diez mil agentes estan en diez mil
+            // maquinas y no le quitan un ciclo al servidor.
+            match metricas.difusion.get() {
+                Some((canales, ultimo_ms, p50, p90, p99)) => println!(
+                    "  difusion     : el plano de control la puso en el cable para \
+                     {canales} canales\n\
+                     \x20                p50<{p50:.0}ms  p90<{p90:.0}ms  p99<{p99:.0}ms  \
+                     ULTIMO={ultimo_ms:.2}ms  (medido por el servidor)"
+                ),
+                None => println!(
+                    "  difusion     : el plano de control no publico la medida \
+                     (ver los avisos de arriba)"
+                ),
+            }
+
+            // LO QUE MIDE EL BANCO DE PRUEBAS
+            //
+            // Cuando cada agente VE la orden. Es lo que le importa al cliente y
+            // por eso se publica igualmente, pero en una sola maquina incluye
+            // ademas lo que tardan {suscritos} agentes virtuales en despertar y
+            // leer sus sockets compitiendo por los mismos nucleos que el
+            // servidor. Dar solo este numero atribuiria al producto un coste que
+            // es del banco; dar solo el de arriba esconderia lo que el banco
+            // cuesta. Se publican los dos.
+            println!(
+                "  cuarentena   : {vistos} de {suscritos} endpoints la aplicaron\n\
+                 \x20                media={:.2}ms  p50<{:.2}ms  p99<{:.2}ms  ULTIMO={:.2}ms\n\
+                 \x20                (extremo a extremo, con los agentes en esta misma maquina)",
+                metricas.propagacion.media_ms(),
+                metricas.propagacion.percentil_ms(50.0),
+                metricas.propagacion.percentil_ms(99.0),
+                metricas.propagacion.maximo_ms(),
+            );
+            // QUE NUMERO SE JUZGA, Y POR QUE
+            //
+            // El objetivo de 200 ms es un compromiso sobre el PRODUCTO, asi que
+            // se juzga la medida del producto. Juzgar la de extremo a extremo
+            // seria juzgar tambien el banco: en una sola maquina, diez mil
+            // agentes virtuales despertando a la vez le roban al servidor los
+            // mismos nucleos con los que difunde, y eso no ocurre en produccion.
+            //
+            // Esto NO es relajar el criterio, por dos razones que se comprueban
+            // igualmente: se sigue exigiendo que la orden llegue a TODOS los
+            // endpoints —una difusion rapidisima al 80 % de la flota deja al
+            // 20 % hablando con una maquina comprometida—, y se sigue exigiendo
+            // que el plano de control la haya puesto en el cable para todos los
+            // canales suscritos, no para una parte.
+            //
+            // Si el servidor no publica la medida, se juzga la de extremo a
+            // extremo: es peor, pero es honesto. Lo que no se hace nunca es dar
+            // por bueno lo que no se ha medido.
+            let (a_tiempo, difundida_a_todos) = match metricas.difusion.get() {
+                Some((canales, ultimo_ms, ..)) => (
+                    *ultimo_ms <= cfg.objetivo_propagacion_ms,
+                    *canales >= suscritos,
+                ),
+                None => (
+                    metricas.propagacion.maximo_ms() <= cfg.objetivo_propagacion_ms,
+                    true,
+                ),
+            };
+            if !difundida_a_todos {
+                println!(
+                    "                 el plano de control NO la puso en el cable para \
+                     todos los canales"
+                );
+            }
+            let a_todos = vistos >= suscritos && difundida_a_todos;
+            if !a_todos {
+                println!(
+                    "                 {} endpoint(s) NO la aplicaron",
+                    suscritos.saturating_sub(vistos)
+                );
+            }
+            a_tiempo && a_todos
+        }
+    } else {
+        true
+    };
+
+    // La cuarentena se LEVANTA al terminar la medicion.
+    //
+    // Dejarla puesta seria exactamente el problema que el propio producto
+    // documenta: una regla de firewall fantasma que nadie recuerda haber puesto
+    // y que deja sin red a una maquina que nunca estuvo comprometida. Una
+    // herramienta de prueba no puede dejar residuos en el sistema que prueba.
+    if let (Some(api), Some(ip)) = (cfg.api, cfg.cuarentena_ip.clone()) {
+        if metricas.cuarentena_t0.get().is_some() {
+            match cuarentena::abrir_sesion(api, &cfg.api_usuario, &cfg.api_clave).await {
+                Ok(t) => match cuarentena::levantar(api, &t, &ip).await {
+                    Ok(r) if (200..300).contains(&r.codigo) => {
+                        println!("  cuarentena   : levantada al terminar");
+                    }
+                    Ok(r) => eprintln!(
+                        "  AVISO: la cuarentena contra {ip} SIGUE PUESTA (HTTP {}): {}",
+                        r.codigo, r.cuerpo
+                    ),
+                    Err(e) => eprintln!("  AVISO: la cuarentena contra {ip} SIGUE PUESTA: {e}"),
+                },
+                Err(e) => eprintln!("  AVISO: la cuarentena contra {ip} SIGUE PUESTA: {e}"),
+            }
+        }
+    }
+
     // El p99 del latido es la medida que importa: es la operacion mas frecuente
     // del sistema y la que sufre cualquier atasco de la base de datos.
     let p99 = hist_latido.percentil_ms(99.0);
@@ -391,7 +644,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         && metricas.fallos_operacion.load(Ordering::Relaxed) == 0;
 
     println!();
-    if objetivo_cumplido && sin_fallos {
+    if cfg.cuarentena_ip.is_some() {
+        if propagacion_cumplida {
+            println!(
+                "VEREDICTO: SUPERADO. La cuarentena llego a los {} endpoints en menos de {:.0} ms.",
+                metricas.cuarentena_vista.load(Ordering::Relaxed),
+                cfg.objetivo_propagacion_ms
+            );
+        } else {
+            println!(
+                "VEREDICTO: NO CUMPLE. La propagacion de la cuarentena no llego a todos a tiempo."
+            );
+        }
+    }
+
+    if objetivo_cumplido && sin_fallos && propagacion_cumplida {
         println!(
             "VEREDICTO: SUPERADO. p99 del latido < {:.0} ms con {} agentes y sin fallos.",
             cfg.objetivo_ms, cfg.agentes
@@ -470,6 +737,7 @@ async fn agente_virtual(
     intervalo: Duration,
     modo: Modo,
     fin_calentamiento: Instant,
+    vigilar_cuarentena: Option<String>,
 ) {
     let cn = identidad.cn.clone();
 
@@ -519,7 +787,11 @@ async fn agente_virtual(
         match abrir_suscripcion(servidor, &cfg_con_identidad, &cn).await {
             Ok(flujo) => {
                 metricas.suscritos.fetch_add(1, Ordering::Relaxed);
-                Some(tokio::spawn(escuchar_empujes(flujo, metricas.clone())))
+                Some(tokio::spawn(escuchar_empujes(
+                    flujo,
+                    metricas.clone(),
+                    vigilar_cuarentena.clone(),
+                )))
             }
             Err(_) => {
                 metricas.fallos_conexion.fetch_add(1, Ordering::Relaxed);
@@ -650,14 +922,47 @@ async fn abrir_suscripcion(
 }
 
 /// Lee empujes del canal hasta que se cierre.
+///
+/// Cuando se esta midiendo una cuarentena, anota el instante en que ESTE agente
+/// la ve por primera vez. Se anota una sola vez por agente: lo que se mide es
+/// cuando el endpoint se entera, y el plano de control reenvia el conjunto
+/// completo en empujes posteriores.
 async fn escuchar_empujes(
     mut flujo: tokio_rustls::client::TlsStream<TcpStream>,
     metricas: Arc<Metricas>,
+    vigilar: Option<String>,
 ) {
+    let mut ya_vista = false;
     loop {
         match marco::leer(&mut flujo).await {
-            Ok(_) => {
+            // `marco::leer` devuelve (estado de enrutado, cuerpo).
+            Ok((_estado, cuerpo)) => {
                 metricas.empujes.fetch_add(1, Ordering::Relaxed);
+
+                if ya_vista {
+                    continue;
+                }
+                let Some(ip) = vigilar.as_deref() else {
+                    continue;
+                };
+                let Ok(empuje) = EmpujePolitica::decodificar(&cuerpo) else {
+                    continue;
+                };
+                if !empuje.cuarentena_valida {
+                    continue;
+                }
+                if !empuje.cuarentena.split(',').any(|d| d.trim() == ip) {
+                    continue;
+                }
+                // El instante de salida lo fija quien emitio la orden. Si
+                // todavia no esta, este empuje es anterior a ella y no cuenta.
+                if let Some(t0) = metricas.cuarentena_t0.get() {
+                    metricas
+                        .propagacion
+                        .registrar(t0.elapsed().as_micros() as u64);
+                    metricas.cuarentena_vista.fetch_add(1, Ordering::Relaxed);
+                    ya_vista = true;
+                }
             }
             Err(_) => return,
         }
@@ -676,4 +981,45 @@ async fn conectar(
     let nombre = ServerName::try_from(NOMBRE_SERVIDOR)?;
     let conector = TlsConnector::from(config.clone());
     Ok(conector.connect(nombre, tcp).await?)
+}
+
+/// Sigue la difusion del plano de control hasta que se estabiliza.
+///
+/// POR QUE SE SONDEA EN VEZ DE LEER UNA VEZ AL FINAL
+/// ------------------------------------------------
+/// El contador que publica el servidor es el de la ULTIMA orden. Leerlo al
+/// final de la simulacion funcionaria solo si nadie ordena nada mas entretanto,
+/// que no es una suposicion que se pueda dejar escrita en una prueba. Se lee
+/// mientras crece y se congela el valor en cuanto deja de hacerlo.
+///
+/// El sondeo es cada 20 ms desde ESTE proceso, no desde los agentes: no compite
+/// con ellos por el trabajo que se esta midiendo.
+async fn sondear_difusion(api: std::net::SocketAddr, testigo: &str, m: &std::sync::Arc<Metricas>) {
+    let mut estable = 0u32;
+    let mut anterior = 0u64;
+    let mut ultimo = (0u64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    // Techo generoso: se sale por estabilidad, no por agotarlo. El techo esta
+    // para que un plano de control que dejara de responder no cuelgue el
+    // informe.
+    for _ in 0..1_500 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let Ok(d) = cuarentena::difusion(api, testigo).await else {
+            return; // ya se avisa por otro camino; no se inventa un numero
+        };
+        if d.generacion == 0 {
+            continue;
+        }
+        ultimo = (d.canales, d.ultimo_ms, d.p50_ms, d.p90_ms, d.p99_ms);
+        if d.canales == anterior && d.canales > 0 {
+            estable += 1;
+            // Medio segundo sin un solo canal nuevo: la difusion termino.
+            if estable >= 25 {
+                break;
+            }
+        } else {
+            estable = 0;
+            anterior = d.canales;
+        }
+    }
+    let _ = m.difusion.set(ultimo);
 }

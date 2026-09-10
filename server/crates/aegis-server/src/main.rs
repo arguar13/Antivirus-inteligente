@@ -98,8 +98,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let id_servidor = ca.emitir("control-plane", VALIDEZ_CERT_SERVIDOR_SEG)?;
     let manejador = Arc::new(
         flota::ManejadorPersistente::nuevo(servicio.clone(), tokio::runtime::Handle::current())
-            .con_avisos(notificador.suscriptor()),
+            .con_avisos(&notificador),
     );
+    let difusion_cuarentena = manejador.difusion();
     let servidor_flota = ServidorFlota::nuevo(&id_servidor, &ca.cert_der(), manejador)?;
     let flota_en_ejecucion = servidor_flota.escuchar(&cfg.flota_addr)?;
     tracing::info!(direccion = %flota_en_ejecucion.direccion(), "transporte nativo de flota escuchando (mTLS)");
@@ -123,6 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         servicio: servicio.clone(),
         cache: cache.clone(),
         margen_desconexion_seg: cfg.margen_desconexion.as_secs() as i64,
+        difusion: Some(difusion_cuarentena),
         // Las direcciones por las que este plano de control escucha. Poner
         // cualquiera de ellas en cuarentena dejaria a la flota entera sin poder
         // recibir ordenes, asi que se rechaza. Ver `negar_si_es_intocable`.

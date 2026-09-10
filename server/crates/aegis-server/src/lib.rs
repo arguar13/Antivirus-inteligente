@@ -31,6 +31,7 @@ pub mod flota;
 pub mod grpc;
 pub mod notificador;
 pub mod panel;
+pub mod pizarra;
 pub mod reglas;
 
 /// Codigo generado por tonic a partir de `proto/aegis_fleet.proto`.

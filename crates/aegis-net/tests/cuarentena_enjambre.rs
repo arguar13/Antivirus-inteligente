@@ -75,7 +75,10 @@ fn la_orden_del_plano_de_control_acaba_descartando_paquetes_reales() {
     // Antes de la orden, la maquina comprometida habla con nosotros con
     // normalidad: es el estado del que se parte en un incidente real.
     let mut f = filtro;
-    assert_eq!(f.test_packet(&desde(comprometida)).unwrap(), XdpAction::Pass);
+    assert_eq!(
+        f.test_packet(&desde(comprometida)).unwrap(),
+        XdpAction::Pass
+    );
 
     // El plano de control ordena la cuarentena. Llega como texto en el empuje,
     // exactamente igual que por el cable.
@@ -88,7 +91,10 @@ fn la_orden_del_plano_de_control_acaba_descartando_paquetes_reales() {
         let mut seg = Segmentador::nuevo(entrada, &salida);
         let r = seg.reconciliar(&direcciones, None);
         assert_eq!(r.anadidas, vec![IpAddr::V4(comprometida)]);
-        assert!(r.completa(), "la cuarentena tiene que quedar en los dos sentidos");
+        assert!(
+            r.completa(),
+            "la cuarentena tiene que quedar en los dos sentidos"
+        );
     }
 
     // Y el kernel descarta sus paquetes.

@@ -26,13 +26,176 @@ use aegis_fleet::servidor::ManejadorFlota;
 use tokio::runtime::Handle;
 
 use crate::dominio::ServicioFlota;
+use crate::pizarra::{Atendido, ListaCuarentena, Pizarra};
 
 /// Manejador de flota respaldado por PostgreSQL.
 pub struct ManejadorPersistente {
     servicio: Arc<ServicioFlota>,
     handle: Handle,
-    /// Receptor de avisos (politica y cacerias); `None` desactiva el empuje.
-    avisos: Option<tokio::sync::watch::Receiver<crate::notificador::Aviso>>,
+    /// Estado que se difunde a los canales de suscripcion.
+    ///
+    /// POR QUE LA CUARENTENA NO SE CONSULTA POR AGENTE
+    /// ----------------------------------------------
+    /// La cuarentena es IGUAL para toda la flota, y difundirla despierta los
+    /// diez mil canales a la vez. Consultarla por canal convertia una orden de
+    /// contencion en diez mil consultas sobre un pool de treinta y dos
+    /// conexiones: medido, 418.162 transacciones y 5,3 segundos hasta el ultimo
+    /// endpoint, cuando el objetivo son 200 ms. Durante esos segundos la maquina
+    /// comprometida sigue teniendo por donde moverse.
+    ///
+    /// Con la pizarra, un cambio de cuarentena es UNA lectura de base de datos y
+    /// diez mil escrituras en sockets. Ver [`crate::pizarra`] para por que la
+    /// espera es de hilo y no de tokio.
+    pizarra: Arc<Pizarra>,
+    /// Si este plano de control difunde de verdad.
+    ///
+    /// Sin notificador no hay nadie que publique en la pizarra, asi que el canal
+    /// de suscripcion se cierra de forma ordenada en vez de dejar al agente
+    /// esperando algo que no llegaria.
+    difunde: bool,
+    /// Instrumentacion de la difusion. Ver [`DifusionCuarentena`].
+    difusion: Arc<DifusionCuarentena>,
+}
+
+/// Cuanto tarda el plano de control en poner una orden de contencion EN EL CABLE
+/// para toda la flota.
+///
+/// QUE MIDE ESTO Y QUE NO
+/// ----------------------
+/// El simulador mide cuando cada agente RECIBE la orden, que es lo que le
+/// importa al cliente. Pero en un banco de pruebas de UNA SOLA MAQUINA ese
+/// numero incluye tambien lo que tardan diez mil agentes virtuales en despertar
+/// y leer sus sockets, compitiendo por los mismos nucleos que el servidor. En
+/// produccion esos diez mil agentes estan en diez mil maquinas distintas y no le
+/// quitan un solo ciclo al plano de control.
+///
+/// Esta medida es la del PRODUCTO: desde que la lista nueva se publica hasta que
+/// el ultimo de los canales ha escrito el empuje. Es lo unico que el plano de
+/// control controla, y es lo que sigue valiendo cuando la flota es real.
+///
+/// Las dos se publican juntas. Dar solo una de ellas seria enganoso en las dos
+/// direcciones: solo la del producto esconde el coste real del banco, y solo la
+/// del banco atribuye al producto un coste que es del banco.
+#[derive(Debug)]
+pub struct DifusionCuarentena {
+    /// Origen comun de todos los tiempos. Inmutable: se lee sin cerrojo desde
+    /// los diez mil hilos de canal.
+    origen: std::time::Instant,
+    /// Generacion que se esta midiendo.
+    gen: std::sync::atomic::AtomicU64,
+    /// Instante de publicacion de esa generacion, en us desde `origen`.
+    inicio_us: std::sync::atomic::AtomicU64,
+    /// Canales que ya la han escrito.
+    escritos: std::sync::atomic::AtomicU64,
+    /// Retraso del ULTIMO de ellos, en us.
+    ///
+    /// El maximo y no la media: hasta que el ultimo endpoint no aplica la regla,
+    /// la maquina comprometida todavia tiene por donde moverse.
+    ultimo_us: std::sync::atomic::AtomicU64,
+    /// Reparto de retrasos en cubos de [`MS_POR_CUBO`] ms; el ultimo desborda.
+    ///
+    /// POR QUE UN REPARTO Y NO SOLO EL MAXIMO
+    /// -------------------------------------
+    /// El maximo dice SI se cumple el objetivo; el reparto dice POR QUE no. Son
+    /// dos diagnosticos opuestos con el mismo maximo: si la mediana esta cerca
+    /// del maximo, la difusion va al ritmo que da la maquina y el cuello esta en
+    /// el coste por canal; si la mediana esta muy por debajo, la difusion es
+    /// rapida y hay un punado de rezagados, que es otro problema y tiene otra
+    /// solucion. Sin esto, elegir entre las dos seria adivinar.
+    reparto: [std::sync::atomic::AtomicU32; CUBOS],
+}
+
+/// Anchura de cada cubo del reparto, en milisegundos.
+const MS_POR_CUBO: u64 = 2;
+/// Numero de cubos. Los 254 primeros cubren medio segundo; el ultimo desborda.
+const CUBOS: usize = 256;
+
+impl Default for DifusionCuarentena {
+    fn default() -> DifusionCuarentena {
+        DifusionCuarentena {
+            origen: std::time::Instant::now(),
+            gen: std::sync::atomic::AtomicU64::new(0),
+            inicio_us: std::sync::atomic::AtomicU64::new(0),
+            escritos: std::sync::atomic::AtomicU64::new(0),
+            ultimo_us: std::sync::atomic::AtomicU64::new(0),
+            reparto: std::array::from_fn(|_| std::sync::atomic::AtomicU32::new(0)),
+        }
+    }
+}
+
+impl DifusionCuarentena {
+    /// Marca el instante en que la lista `gen` queda publicada.
+    ///
+    /// Se llama ANTES de publicarla: si se llamara despues, un canal rapido
+    /// podria anotarse contra un instante de salida que aun no existe y su
+    /// retraso saldria absurdo.
+    fn abrir(&self, gen: u64) {
+        let ahora = self.origen.elapsed().as_micros() as u64;
+        self.inicio_us
+            .store(ahora, std::sync::atomic::Ordering::Relaxed);
+        self.escritos.store(0, std::sync::atomic::Ordering::Relaxed);
+        self.ultimo_us
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        for c in &self.reparto {
+            c.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+        // La generacion se publica la ULTIMA, con `Release`, para que ningun
+        // canal se anote antes de que los contadores esten a cero.
+        self.gen.store(gen, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Anota que un canal acaba de escribir el empuje de la generacion `gen`.
+    ///
+    /// Sin cerrojo a proposito: lo ejecutan diez mil hilos a la vez y un mutex
+    /// aqui convertiria la medicion en el cuello de botella que pretende medir.
+    fn anotar(&self, gen: u64) {
+        if gen == 0 || self.gen.load(std::sync::atomic::Ordering::Acquire) != gen {
+            return; // de una orden anterior: no se mezcla
+        }
+        let inicio = self.inicio_us.load(std::sync::atomic::Ordering::Relaxed);
+        let ahora = self.origen.elapsed().as_micros() as u64;
+        let retraso = ahora.saturating_sub(inicio);
+        self.escritos
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.ultimo_us
+            .fetch_max(retraso, std::sync::atomic::Ordering::Relaxed);
+        let cubo = ((retraso / 1_000) / MS_POR_CUBO) as usize;
+        self.reparto[cubo.min(CUBOS - 1)].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Cota superior del percentil `p`, en ms, o `None` si no hay muestras.
+    ///
+    /// Es una COTA SUPERIOR, nunca una estimacion optimista: se devuelve el
+    /// techo del cubo en que cae la muestra. Un percentil que se quedara corto
+    /// aqui haria pasar por bueno un objetivo que no se cumple.
+    pub fn percentil_ms(&self, p: f64) -> Option<f64> {
+        let total: u64 = self
+            .reparto
+            .iter()
+            .map(|c| c.load(std::sync::atomic::Ordering::Relaxed) as u64)
+            .sum();
+        if total == 0 {
+            return None;
+        }
+        let objetivo = ((p / 100.0) * total as f64).ceil().max(1.0) as u64;
+        let mut acumulado = 0u64;
+        for (i, c) in self.reparto.iter().enumerate() {
+            acumulado += c.load(std::sync::atomic::Ordering::Relaxed) as u64;
+            if acumulado >= objetivo {
+                return Some(((i + 1) as u64 * MS_POR_CUBO) as f64);
+            }
+        }
+        None
+    }
+
+    /// Lectura de la difusion en curso: `(generacion, canales, us del ultimo)`.
+    pub fn instantanea(&self) -> (u64, u64, u64) {
+        (
+            self.gen.load(std::sync::atomic::Ordering::Acquire),
+            self.escritos.load(std::sync::atomic::Ordering::Relaxed),
+            self.ultimo_us.load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
 }
 
 impl ManejadorPersistente {
@@ -44,16 +207,87 @@ impl ManejadorPersistente {
         ManejadorPersistente {
             servicio,
             handle,
-            avisos: None,
+            pizarra: Arc::new(Pizarra::default()),
+            difunde: false,
+            difusion: Arc::new(DifusionCuarentena::default()),
         }
     }
 
-    /// Habilita el empuje de politica con el notificador dado.
+    /// Instrumentacion de la difusion de cuarentena, para exponerla por la API.
+    pub fn difusion(&self) -> Arc<DifusionCuarentena> {
+        self.difusion.clone()
+    }
+
+    /// Habilita el empuje con el notificador dado.
+    ///
+    /// Arranca DOS tareas, y ninguna de las dos vive en los canales:
+    ///
+    /// - la que traslada a la pizarra los avisos de politica y caceria;
+    /// - la que mantiene al dia la lista de cuarentena. Es UNA tarea para todo
+    ///   el proceso: lee la lista cuando cambia y la publica de una vez a los
+    ///   diez mil canales, en vez de que cada canal la consulte por su cuenta.
     pub fn con_avisos(
         mut self,
-        avisos: tokio::sync::watch::Receiver<crate::notificador::Aviso>,
+        notificador: &crate::notificador::Notificador,
     ) -> ManejadorPersistente {
-        self.avisos = Some(avisos);
+        let mut avisos = notificador.suscriptor();
+        let mut avisos_cuarentena = notificador.suscriptor_cuarentena();
+        let servicio = self.servicio.clone();
+        let difusion = self.difusion.clone();
+
+        let pizarra = self.pizarra.clone();
+        self.handle.spawn(async move {
+            // El estado inicial, antes de esperar ningun aviso: un agente que
+            // conecta al arrancar el servicio tiene que ver la politica vigente.
+            pizarra.publicar_aviso(*avisos.borrow_and_update());
+            while avisos.changed().await.is_ok() {
+                let aviso = *avisos.borrow_and_update();
+                pizarra.publicar_aviso(aviso);
+            }
+        });
+
+        let pizarra = self.pizarra.clone();
+        self.handle.spawn(async move {
+            let leer = |servicio: Arc<ServicioFlota>| async move {
+                match servicio.almacen().cuarentena_vigente().await {
+                    Ok(v) => Some(
+                        v.iter()
+                            .map(|c| c.direccion.to_string())
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    ),
+                    Err(e) => {
+                        tracing::error!(error = %e, "no se pudo leer la cuarentena vigente");
+                        None
+                    }
+                }
+            };
+
+            // Se publica antes de esperar ningun aviso: un agente que conecta al
+            // arrancar el servicio tiene que recibir la cuarentena que ya estaba
+            // en vigor. La generacion cero es ese estado inicial: no la provoco
+            // ninguna orden, asi que no se mide.
+            if let Some(lista) = leer(servicio.clone()).await {
+                pizarra.publicar_cuarentena(Arc::new(ListaCuarentena { lista, gen: 0 }));
+            }
+
+            let mut secuencia: u64 = 0;
+            while avisos_cuarentena.changed().await.is_ok() {
+                if let Some(lista) = leer(servicio.clone()).await {
+                    secuencia += 1;
+                    // El cronometro arranca ANTES de publicar: la lectura de la
+                    // base de datos ya termino, y lo que queda por medir es
+                    // exactamente la difusion.
+                    difusion.abrir(secuencia);
+                    pizarra.publicar_cuarentena(Arc::new(ListaCuarentena {
+                        lista,
+                        gen: secuencia,
+                    }));
+                }
+            }
+        });
+
+        self.difunde = true;
         self
     }
 }
@@ -196,67 +430,150 @@ impl ManejadorFlota for ManejadorPersistente {
     fn esperar_empuje(
         &self,
         cn: &str,
-        estado: &aegis_fleet::servidor::EstadoCanal,
+        estado: &mut aegis_fleet::servidor::EstadoCanal,
         plazo: Duration,
     ) -> Option<EmpujePolitica> {
-        let version_conocida = estado.version_entregada;
-        let caza_entregada = estado.caza_entregada.clone();
-        let cuarentena_entregada = estado.cuarentena_entregada.clone();
         // Sin notificador no hay empuje: se cierra el canal en vez de dejar al
         // agente esperando indefinidamente algo que no va a llegar.
-        let mut rx = self.avisos.as_ref()?.clone();
-        let cn = cn.to_string();
+        if !self.difunde {
+            return None;
+        }
+        let version_conocida = estado.version_entregada;
 
-        self.handle.block_on(async move {
-            let version_anunciada = rx.borrow().version_politica;
+        // EL CAMINO RAPIDO NO ENTRA EN EL RUNTIME
+        //
+        // Este hilo es uno de los diez mil que atienden un canal. Entrar en
+        // tokio para dormir obliga a inscribirse en las esperas y a dar de alta
+        // un temporizador en cada vuelta del bucle; con diez mil hilos, ese
+        // trabajo lo paga en serie quien publica, mientras los endpoints
+        // esperan. Aqui se duerme con la primitiva que corresponde a un hilo
+        // bloqueado, y solo se entra en el runtime si hay que consultar la base
+        // de datos. Ver el modulo `pizarra`.
+        let atendido = Atendido {
+            gen_politica: estado.gen_politica_vista,
+            gen_caza: estado.gen_caza_vista,
+            cuarentena: estado.cuarentena_entregada.as_deref(),
+        };
 
-            // Un agente que reconecta atrasado se pone al dia sin esperar al
-            // siguiente cambio.
-            if version_anunciada > version_conocida as i64 {
-                return Some(
-                    self.componer_empuje(&cn, version_anunciada, version_conocida, &caza_entregada)
-                        .await,
-                );
-            }
-
-            // Tambien puede haber comandos suyos, o una caceria que aun no ha
-            // contestado, aunque la politica no haya cambiado. El caso de la
-            // caceria es el que cubre al endpoint que estaba apagado: al
-            // reconectar la recibe sin esperar a que se lance ninguna otra.
-            let empuje = self
-                .componer_empuje(&cn, version_anunciada, version_conocida, &caza_entregada)
-                .await;
-
-            // La cuarentena se empuja cuando CAMBIA respecto a lo que este canal
-            // ya entrego, y tambien la primera vez —cuando no se le ha entregado
-            // nada—. Eso es lo que hace que un endpoint que reconecta reciba la
-            // contencion en vigor sin esperar a que ocurra nada mas.
-            let cuarentena_cambio = empuje.cuarentena_valida
-                && cuarentena_entregada.as_deref() != Some(empuje.cuarentena.as_str());
-
-            if !empuje.comandos_json.is_empty() || !empuje.caza_ql.is_empty() || cuarentena_cambio {
-                return Some(empuje);
-            }
-
-            match tokio::time::timeout(plazo, rx.changed()).await {
-                Ok(Ok(())) => {
-                    let v = rx.borrow().version_politica;
-                    Some(
-                        self.componer_empuje(&cn, v, version_conocida, &caza_entregada)
-                            .await,
-                    )
-                }
-                // El emisor desaparecio: el servicio esta cerrando.
-                Ok(Err(_)) => None,
+        // Un canal recien abierto se pone al dia SIEMPRE: tiene que recibir la
+        // politica que el agente no tiene, sus comandos pendientes, la caceria
+        // abierta y la cuarentena en vigor. Eso cuesta varias consultas, y esta
+        // bien: ocurre UNA vez, cuando el endpoint conecta.
+        //
+        // Lo que no puede ocurrir es repetirlo en cada vuelta. Medido: con diez
+        // mil canales dando doce vueltas cada uno eran 426.084 transacciones
+        // para difundir una sola orden de contencion.
+        let difundido = if estado.al_dia {
+            match self.pizarra.esperar(atendido, plazo) {
+                Some(d) => d,
                 // Vencio el plazo: latido de canal. Sin el, un canal sano y uno
                 // muerto son indistinguibles para los dos extremos.
-                Err(_) => Some(EmpujePolitica {
-                    version: version_anunciada.max(0) as u64,
-                    es_keepalive: true,
-                    ..Default::default()
-                }),
+                None => {
+                    return Some(EmpujePolitica {
+                        version: version_conocida,
+                        es_keepalive: true,
+                        ..Default::default()
+                    })
+                }
             }
-        })
+        } else {
+            self.pizarra.leer()
+        };
+
+        // UNA CUARENTENA NUEVA NO TOCA LA BASE DE DATOS
+        //
+        // La lista esta en la pizarra y es identica para toda la flota. Es la
+        // diferencia entre difundir una orden de contencion con una consulta o
+        // con diez mil.
+        if estado.al_dia
+            && estado.cuarentena_entregada.as_deref() != Some(&difundido.cuarentena.lista)
+        {
+            estado.cuarentena_entregada = Some(difundido.cuarentena.lista.clone());
+            return Some(EmpujePolitica {
+                // La version que el agente YA tiene: este empuje no trae
+                // politica, y decir otra cosa le haria creer que se perdio una.
+                version: version_conocida,
+                cuarentena: difundido.cuarentena.lista.clone(),
+                cuarentena_valida: true,
+                ..Default::default()
+            });
+        }
+
+        // Lo demas —politica, comandos, cacerias— si necesita la base de datos,
+        // y por eso este es el unico tramo que entra en el runtime.
+        let caza_entregada = estado.caza_entregada.clone();
+        let cn_owned = cn.to_string();
+        let empuje = self.handle.block_on(self.componer_empuje(
+            &cn_owned,
+            difundido.aviso.version_politica,
+            version_conocida,
+            &caza_entregada,
+        ));
+
+        // Se anota hasta donde se ha atendido ANTES de decidir si hay algo que
+        // enviar: la consulta ya se hizo, y repetirla en la vuelta siguiente
+        // seria pagarla dos veces por nada.
+        estado.gen_politica_vista = difundido.aviso.gen_politica;
+        estado.gen_caza_vista = difundido.aviso.gen_caza;
+
+        let cuarentena_cambio = empuje.cuarentena_valida
+            && estado.cuarentena_entregada.as_deref() != Some(empuje.cuarentena.as_str());
+        if !empuje.politica_json.is_empty()
+            || !empuje.comandos_json.is_empty()
+            || !empuje.caza_ql.is_empty()
+            || cuarentena_cambio
+        {
+            return Some(empuje);
+        }
+
+        // No habia nada. Se vuelve a esperar en vez de devolver un latido de
+        // inmediato: un canal que contestara aqui giraria en vacio.
+        let atendido = Atendido {
+            gen_politica: estado.gen_politica_vista,
+            gen_caza: estado.gen_caza_vista,
+            cuarentena: Some(empuje.cuarentena.as_str()),
+        };
+        match self.pizarra.esperar(atendido, plazo) {
+            Some(d) if estado.cuarentena_entregada.as_deref() != Some(&d.cuarentena.lista) => {
+                estado.cuarentena_entregada = Some(d.cuarentena.lista.clone());
+                Some(EmpujePolitica {
+                    version: version_conocida,
+                    cuarentena: d.cuarentena.lista.clone(),
+                    cuarentena_valida: true,
+                    ..Default::default()
+                })
+            }
+            // Hubo aviso de politica o caceria: se atiende en la vuelta
+            // siguiente, que ya no tomara el camino de puesta al dia.
+            Some(_) => Some(EmpujePolitica {
+                version: version_conocida,
+                es_keepalive: true,
+                ..Default::default()
+            }),
+            None => Some(EmpujePolitica {
+                version: version_conocida,
+                es_keepalive: true,
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// Un empuje ya escrito en el socket de un agente.
+    ///
+    /// Es el punto en que la orden de contencion sale de verdad del plano de
+    /// control, y por eso es aqui —y no cuando se compone— donde se cierra el
+    /// cronometro de la difusion.
+    fn empuje_escrito(&self, _cn: &str, empuje: &EmpujePolitica) {
+        if !empuje.cuarentena_valida {
+            return;
+        }
+        // Se anota contra la generacion vigente solo si lo escrito ES esa
+        // generacion. Un empuje que llevaba una lista anterior —un canal lento
+        // que la compuso antes de la orden— no puede contar como difundido.
+        let vigente = self.pizarra.leer().cuarentena;
+        if empuje.cuarentena == vigente.lista {
+            self.difusion.anotar(vigente.gen);
+        }
     }
 
     fn visto_en(&self, cn: &str, direccion: std::net::SocketAddr) {
@@ -433,26 +750,17 @@ impl ManejadorPersistente {
             _ => (String::new(), String::new()),
         };
 
-        // El conjunto COMPLETO de direcciones vigentes, menos la propia del
-        // agente. Ver `cuarentena_para`: un endpoint que se bloquea a si mismo
-        // se queda sin plano de control y solo se recupera yendo a la maquina.
-        let (cuarentena, cuarentena_valida) = match almacen.cuarentena_para(cn).await {
-            Ok(v) => (
-                v.iter()
-                    .map(|d| d.to_string())
-                    .collect::<Vec<_>>()
-                    .join(","),
-                true,
-            ),
-            // Si no se pudo consultar, se marca como NO VALIDA en vez de enviar
-            // una lista vacia: una lista vacia significa "no hay ninguna" y
-            // levantaria todas las cuarentenas del endpoint por un fallo
-            // transitorio de la base de datos.
-            Err(e) => {
-                tracing::warn!(error = %e, cn = %cn, "no se pudo leer la cuarentena vigente");
-                (String::new(), false)
-            }
-        };
+        // El conjunto COMPLETO de direcciones vigentes, leido de la cache en
+        // memoria: es identico para toda la flota, asi que consultarlo por
+        // agente convertiria una orden de contencion en diez mil consultas.
+        //
+        // La lista va ENTERA, incluida la direccion del propio agente si la
+        // tuviera. Excluirla aqui obligaria a saber cual es —otra consulta por
+        // agente, y ademas solo conoceriamos la que vimos en el handshake—.
+        // Quien sabe TODAS las direcciones de una maquina es la maquina: el
+        // segmentador del endpoint se salta las suyas antes de aplicar nada.
+        let cuarentena = self.pizarra.leer().cuarentena.lista.clone();
+        let cuarentena_valida = self.difunde;
 
         let hay_politica_nueva = v.max(0) as u64 > version_conocida;
         EmpujePolitica {
@@ -479,4 +787,72 @@ impl ManejadorPersistente {
 /// Evita volcar en el log un CN de longitud arbitraria controlado por el par.
 fn cn_seguro(cn: &str) -> String {
     cn.chars().take(64).collect()
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    #[test]
+    fn el_cn_del_log_queda_acotado() {
+        assert_eq!(cn_seguro(&"a".repeat(500)).chars().count(), 64);
+    }
+
+    #[test]
+    fn una_difusion_cuenta_solo_los_canales_de_su_generacion() {
+        let d = DifusionCuarentena::default();
+        d.abrir(1);
+        d.anotar(1);
+        d.anotar(1);
+        // Un canal lento que aun llevaba la lista anterior: no es esta difusion.
+        d.anotar(0);
+        // Una generacion futura tampoco: si contara, el recuento de la orden en
+        // curso incluiria endpoints que recibieron OTRA orden.
+        d.anotar(2);
+        let (gen, canales, _) = d.instantanea();
+        assert_eq!((gen, canales), (1, 2));
+    }
+
+    #[test]
+    fn una_orden_nueva_no_hereda_el_recuento_de_la_anterior() {
+        // Sin esto, la segunda orden empezaria con diez mil canales ya contados
+        // y pareceria instantanea.
+        let d = DifusionCuarentena::default();
+        d.abrir(1);
+        d.anotar(1);
+        d.anotar(1);
+        d.abrir(2);
+        assert_eq!(d.instantanea(), (2, 0, 0));
+        d.anotar(2);
+        assert_eq!(d.instantanea().1, 1);
+    }
+
+    #[test]
+    fn el_tiempo_publicado_es_el_del_ultimo_canal_y_no_el_de_ninguno_antes() {
+        // El maximo y no la media: hasta que el ultimo endpoint no aplica la
+        // regla, la maquina comprometida todavia tiene por donde moverse.
+        let d = DifusionCuarentena::default();
+        d.abrir(1);
+        d.anotar(1);
+        let primero = d.instantanea().2;
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        d.anotar(1);
+        let ultimo = d.instantanea().2;
+        assert!(
+            ultimo >= primero + 15_000,
+            "el ultimo ({ultimo} us) tenia que reflejar la espera, no el primero ({primero} us)"
+        );
+    }
+
+    #[test]
+    fn una_difusion_recien_abierta_no_afirma_haber_llegado_a_nadie() {
+        // Un cero en `canales` con `generacion` puesta significa "ordenada y
+        // todavia sin difundir". Confundirlo con "difundida a cero endpoints en
+        // cero milisegundos" haria pasar la prueba de propagacion sin haber
+        // propagado nada.
+        let d = DifusionCuarentena::default();
+        assert_eq!(d.instantanea(), (0, 0, 0));
+        d.abrir(7);
+        assert_eq!(d.instantanea(), (7, 0, 0));
+    }
 }

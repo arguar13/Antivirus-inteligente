@@ -37,6 +37,12 @@ pub struct EstadoApi {
     /// hablar con el —incluido para recibir la orden de levantar esa misma
     /// cuarentena—, y la recuperacion seria ir maquina por maquina.
     pub direcciones_propias: Vec<std::net::IpAddr>,
+    /// Instrumentacion de la difusion de cuarentena del transporte de flota.
+    ///
+    /// `None` cuando el transporte nativo no esta en pie (p. ej. en pruebas de
+    /// la API sola): el endpoint responde 503 en vez de inventar un cero, que
+    /// se leeria como "se difundio al instante".
+    pub difusion: Option<Arc<crate::flota::DifusionCuarentena>>,
 }
 
 /// Construye el enrutador de la API.
@@ -75,6 +81,7 @@ pub fn enrutador(estado: EstadoApi) -> Router {
             get(listar_cuarentena).post(ordenar_cuarentena),
         )
         .route("/api/agentes/{cn}/cuarentena", post(cuarentena_de_enjambre))
+        .route("/api/cuarentena/difusion", get(difusion_cuarentena))
         // Tiempo real
         .route("/api/ws", get(websocket))
         // Reputacion k-anonima
@@ -1316,6 +1323,45 @@ async fn negar_si_es_intocable(
         }
     }
     None
+}
+
+/// Cuanto ha tardado el plano de control en poner la ultima orden EN EL CABLE.
+///
+/// POR QUE ESTE NUMERO EXISTE APARTE DEL QUE MIDE EL SIMULADOR
+/// ----------------------------------------------------------
+/// El simulador mide cuando cada agente RECIBE la orden, que es lo que le
+/// importa al cliente y lo que hay que seguir publicando. Pero en un banco de
+/// pruebas de UNA SOLA MAQUINA ese numero incluye ademas lo que tardan diez mil
+/// agentes virtuales en despertar y leer sus sockets, compitiendo por los mismos
+/// nucleos que el servidor. En produccion esos diez mil agentes estan en diez
+/// mil maquinas distintas y no le quitan un ciclo al plano de control.
+///
+/// Este endpoint da la parte que el producto SI controla: desde que la lista
+/// nueva queda publicada hasta que el ultimo canal termino de escribirla en su
+/// socket. Las dos medidas se publican juntas; dar solo una enganaria en una
+/// direccion o en la otra.
+async fn difusion_cuarentena(State(estado): State<EstadoApi>) -> axum::response::Response {
+    let Some(d) = estado.difusion.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "este proceso no atiende el transporte nativo de flota"
+            })),
+        )
+            .into_response();
+    };
+    let (gen, escritos, ultimo_us) = d.instantanea();
+    Json(serde_json::json!({
+        "generacion": gen,
+        "canales": escritos,
+        "ultimo_ms": ultimo_us as f64 / 1000.0,
+        // El reparto: es lo que distingue "va al ritmo que da la maquina" de
+        // "va rapido y hay unos pocos rezagados". Ver `DifusionCuarentena`.
+        "p50_ms": d.percentil_ms(50.0),
+        "p90_ms": d.percentil_ms(90.0),
+        "p99_ms": d.percentil_ms(99.0),
+    }))
+    .into_response()
 }
 
 async fn listar_cuarentena(
