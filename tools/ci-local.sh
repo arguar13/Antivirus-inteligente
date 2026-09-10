@@ -54,10 +54,14 @@ else
     printf '%s==>%s Servidor · %somitido (no esta en este arbol)%s\n' "$GRIS" "$FIN" "$GRIS" "$FIN"
 fi
 
-# El destino Kafka del firehose (FASE 46). El grupo INFORMA siempre de si se
-# pudo ejercer o no: la diferencia entre "probado contra un corredor" y "no
-# habia corredor aqui" tiene que verse en la puerta de calidad, no quedarse en
-# un comentario del codigo.
+# El destino Kafka del firehose (FASE 46), verificado contra un corredor REAL
+# (FASE 48). Si no se pasa AEGIS_KAFKA, verificar-kafka.sh levanta un Apache
+# Kafka de un solo nodo (KRaft) de verdad —proceso Java, sin Docker, sin mocks—
+# corre la verificacion de extremo a extremo, y lo apaga. El grupo INFORMA
+# siempre de si se pudo ejercer o no: la diferencia entre "probado contra un
+# corredor real" y "no se pudo levantar aqui" tiene que verse en la puerta de
+# calidad, no quedarse en un comentario del codigo. Cuando no hay Java o salida a
+# la red, OMITE con aviso (exit 0) en vez de volver fragil la puerta obligatoria.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "kafka" ]; then
     printf '%s==>%s Firehose · destino Kafka de extremo a extremo\n' "$GRIS" "$FIN"
     if ./tools/verificar-kafka.sh > /tmp/aegis-kafka.log 2>&1; then
@@ -76,6 +80,16 @@ fi
 if [ -f tools/verificar-windows.sh ]; then
     paso windows "Windows · politica de auto-defensa y clasificacion ETW-Ti" \
         ./tools/verificar-windows.sh
+fi
+
+# Compilacion cruzada del driver de Windows desde Linux (FASE 48). Cierra el
+# segundo hueco de FASE 47: la politica real se compila a un objeto Windows x64
+# y se enlaza en un .sys PE real con clang -> lld-link, aqui mismo. El .sys de
+# PRODUCCION completo queda condicionado a $WDK_ROOT (headers licenciados), y el
+# script lo DECLARA en vez de esconderlo.
+if [ -f tools/cross-windows.sh ]; then
+    paso windows "Windows · cross-compilacion del driver (clang/lld-link)" \
+        ./tools/cross-windows.sh
 fi
 
 paso abi   "ABI · layout C vs Rust (gcc)"   env CC=gcc   ./tools/abi-check.sh
