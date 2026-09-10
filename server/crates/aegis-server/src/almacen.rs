@@ -105,7 +105,7 @@ pub struct Resumen {
 /// Se agrupan en una estructura en vez de pasarlos sueltos porque, con siete
 /// campos, el orden de los argumentos se convierte en una trampa: intercambiar
 /// `categoria` y `descripcion` compilaria igual y falsearia todo el historico.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct NuevaAlerta<'a> {
     /// Severidad ya acotada al rango del esquema (0..4).
     pub severidad: i16,
@@ -119,6 +119,9 @@ pub struct NuevaAlerta<'a> {
     pub tactica: Option<&'a str>,
     /// Momento en que ocurrio en el endpoint.
     pub ocurrido_en: DateTime<Utc>,
+    /// Atributos estructurados, ya normalizados. Es por lo que agrupan las
+    /// heuristicas globales (FASE 45); ver `crate::heuristicas`.
+    pub detalles: serde_json::Value,
 }
 
 /// Comando pendiente de entrega a un agente.
@@ -263,7 +266,8 @@ impl Almacen {
             tecnica,
             tactica,
             ocurrido_en,
-        } = *a;
+            detalles,
+        } = a;
         let id = Uuid::new_v4();
         let mut tx = self.pool.begin().await?;
 
@@ -271,18 +275,19 @@ impl Almacen {
             r#"
             INSERT INTO alertas
                 (id, cn_agente, severidad, categoria, descripcion,
-                 tecnica_mitre, tactica_mitre, ocurrido_en)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                 tecnica_mitre, tactica_mitre, ocurrido_en, detalles)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#,
         )
         .bind(id)
         .bind(cn)
-        .bind(severidad)
+        .bind(*severidad)
         .bind(categoria)
         .bind(descripcion)
-        .bind(tecnica)
-        .bind(tactica)
-        .bind(ocurrido_en)
+        .bind(*tecnica)
+        .bind(*tactica)
+        .bind(*ocurrido_en)
+        .bind(detalles)
         .execute(&mut *tx)
         .await?;
 
@@ -1667,5 +1672,523 @@ impl Almacen {
             .fetch_optional(&self.pool)
             .await?;
         Ok(f.and_then(|f| f.try_get("direccion_vista").ok().flatten()))
+    }
+
+    // -----------------------------------------------------------------------
+    // FASE 45: heuristicas globales y correlaciones distribuidas
+    // -----------------------------------------------------------------------
+
+    /// Crea una regla de correlacion ya validada.
+    pub async fn crear_heuristica(
+        &self,
+        h: &crate::heuristicas::Heuristica,
+        creada_por: &str,
+    ) -> Resultado<Uuid> {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO heuristicas_globales
+                   (id, nombre, patron, tecnicas, categorias, clave_detalle,
+                    ventana_horas, minimo_endpoints, severidad,
+                    tecnica_mitre, tactica_mitre, creada_por)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)"#,
+        )
+        .bind(id)
+        .bind(&h.nombre)
+        .bind(&h.patron)
+        .bind(&h.tecnicas)
+        .bind(&h.categorias)
+        .bind(&h.clave_detalle)
+        .bind(h.ventana_horas)
+        .bind(h.minimo_endpoints)
+        .bind(h.severidad)
+        .bind(h.tecnica_mitre.as_deref())
+        .bind(h.tactica_mitre.as_deref())
+        .bind(creada_por)
+        .execute(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    /// Reglas activas, tal como las evalua el motor.
+    pub async fn heuristicas_activas(&self) -> Resultado<Vec<ReglaVigente>> {
+        let filas = sqlx::query(
+            r#"SELECT id, nombre, patron, tecnicas, categorias, clave_detalle,
+                      ventana_horas, minimo_endpoints, severidad,
+                      tecnica_mitre, tactica_mitre, claves_excluidas
+                 FROM heuristicas_globales
+                WHERE activa
+                ORDER BY nombre"#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas.iter().map(fila_a_regla).collect())
+    }
+
+    /// Todas las reglas, para el panel.
+    pub async fn listar_heuristicas(&self) -> Resultado<Vec<ReglaVigente>> {
+        let filas = sqlx::query(
+            r#"SELECT id, nombre, patron, tecnicas, categorias, clave_detalle,
+                      ventana_horas, minimo_endpoints, severidad,
+                      tecnica_mitre, tactica_mitre, claves_excluidas
+                 FROM heuristicas_globales
+                ORDER BY nombre"#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas.iter().map(fila_a_regla).collect())
+    }
+
+    /// Activa o desactiva una regla.
+    pub async fn fijar_heuristica_activa(&self, id: Uuid, activa: bool) -> Resultado<bool> {
+        let r = sqlx::query("UPDATE heuristicas_globales SET activa = $2 WHERE id = $1")
+            .bind(id)
+            .bind(activa)
+            .execute(&self.pool)
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    /// Grupos que hoy cumplen una regla, CON su evidencia.
+    ///
+    /// LO QUE ESTA CONSULTA HACE Y POR QUE ASI
+    /// --------------------------------------
+    /// - La ventana se recorre por `ocurrido_en` y NO por `recibido_en`. Un
+    ///   endpoint que estuvo apagado un dia entrega sus alertas al reconectar:
+    ///   con la hora de llegada, esas alertas caerian todas en el mismo instante
+    ///   y una campana repartida en dos dias pareceria un pico de un segundo.
+    ///
+    /// - Cuenta endpoints DISTINTOS, no alertas. Un endpoint ruidoso que
+    ///   ejecuta `whoami` quinientas veces no es movimiento lateral, y contar
+    ///   alertas lo convertiria en una campana de APT. Es tambien lo que impide
+    ///   que UN endpoint comprometido fabrique una correlacion el solo y
+    ///   dispare con ella una respuesta automatica contra la flota.
+    ///
+    /// - Las alertas sin el atributo de agrupacion NO participan (`detalles ?
+    ///   clave`). Agrupar por un valor ausente juntaria en un mismo grupo todo
+    ///   lo que no se pudo ver, y ese grupo dispararia siempre.
+    ///
+    /// POR QUE UNA SOLA CONSULTA Y NO TRES
+    /// ----------------------------------
+    /// La forma evidente son tres pasos: agregar para encontrar los grupos, y
+    /// despues preguntar la evidencia de cada uno. Se midio, con 200.000
+    /// alertas de 10.000 endpoints repartidas en 48 h:
+    ///
+    /// - una consulta por grupo (N+1): agregacion 298 ms + evidencia 6.771 ms;
+    /// - dos consultas (grupos, y evidencia de todos a la vez): 743 ms;
+    /// - una sola, la de aqui: ver la prueba `correlacion_escala`.
+    ///
+    /// Las dos versiones anteriores recorrian la MISMA ventana con el MISMO
+    /// predicado dos veces. Aqui el agrupamiento por (clave, endpoint) se hace
+    /// una vez y de el salen las dos cosas: los totales del grupo por un lado y
+    /// el reparto por endpoint por el otro. Importa porque esto lo ejecuta un
+    /// temporizador cada minuto contra la misma base de datos que atiende los
+    /// latidos de la flota.
+    ///
+    /// Los dos topes —grupos por regla y endpoints por grupo— se aplican DENTRO
+    /// de la consulta: traerse cuarenta mil filas para recortar despues seria
+    /// mover por la red lo que se va a tirar.
+    pub async fn evaluar_heuristica(
+        &self,
+        r: &ReglaVigente,
+    ) -> Resultado<Vec<(GrupoCorrelacion, Vec<AporteEndpoint>)>> {
+        let filas = sqlx::query(
+            r#"WITH por_endpoint AS (
+                   SELECT a.detalles ->> $3 AS clave,
+                          a.cn_agente,
+                          count(*)::int      AS alertas,
+                          min(a.ocurrido_en) AS primera_en,
+                          max(a.ocurrido_en) AS ultima_en
+                     FROM alertas a
+                    WHERE a.ocurrido_en > now() - make_interval(hours => $4)
+                      AND (a.tecnica_mitre = ANY($1) OR a.categoria = ANY($2))
+                      AND a.detalles ? $3
+                      AND (a.detalles ->> $3) <> ''
+                      AND NOT ((a.detalles ->> $3) = ANY($5))
+                    GROUP BY 1, 2
+               ), grupos AS (
+                   -- Agrupado ya por (clave, endpoint), `count(*)` por clave ES
+                   -- el numero de endpoints distintos.
+                   SELECT clave,
+                          count(*)::int     AS endpoints,
+                          sum(alertas)::int AS alertas,
+                          min(primera_en)   AS primera_en,
+                          max(ultima_en)    AS ultima_en
+                     FROM por_endpoint
+                    GROUP BY 1
+                   HAVING count(*) >= $6
+                    ORDER BY 2 DESC
+                    LIMIT $7
+               ), evidencia AS (
+                   SELECT p.*,
+                          row_number() OVER (
+                              PARTITION BY p.clave
+                              ORDER BY p.alertas DESC, p.cn_agente
+                          ) AS n
+                     FROM por_endpoint p
+                     JOIN grupos g USING (clave)
+               )
+               SELECT g.clave,
+                      g.endpoints,
+                      g.alertas    AS alertas_grupo,
+                      g.primera_en AS primera_grupo,
+                      g.ultima_en  AS ultima_grupo,
+                      e.cn_agente,
+                      e.alertas    AS alertas_endpoint,
+                      e.primera_en AS primera_endpoint,
+                      e.ultima_en  AS ultima_endpoint
+                 FROM grupos g
+                 JOIN evidencia e USING (clave)
+                WHERE e.n <= $8
+                ORDER BY g.endpoints DESC, g.clave, e.n"#,
+        )
+        .bind(&r.tecnicas)
+        .bind(&r.categorias)
+        .bind(&r.clave_detalle)
+        .bind(r.ventana_horas)
+        .bind(&r.claves_excluidas)
+        .bind(r.minimo_endpoints)
+        .bind(MAX_GRUPOS_POR_REGLA)
+        .bind(MAX_ENDPOINTS_POR_CORRELACION)
+        .fetch_all(&self.pool)
+        .await?;
+
+        // El `ORDER BY` deja las filas de cada grupo juntas, asi que el montaje
+        // es un recorrido lineal y no un mapa intermedio.
+        let mut salida: Vec<(GrupoCorrelacion, Vec<AporteEndpoint>)> = Vec::new();
+        for f in &filas {
+            let clave: String = f.get("clave");
+            if salida.last().map(|(g, _)| g.clave.as_str()) != Some(clave.as_str()) {
+                salida.push((
+                    GrupoCorrelacion {
+                        clave,
+                        endpoints: f.get("endpoints"),
+                        alertas: f.get("alertas_grupo"),
+                        primera_en: f.get("primera_grupo"),
+                        ultima_en: f.get("ultima_grupo"),
+                    },
+                    Vec::new(),
+                ));
+            }
+            if let Some((_, aportes)) = salida.last_mut() {
+                aportes.push(AporteEndpoint {
+                    cn_agente: f.get("cn_agente"),
+                    alertas: f.get("alertas_endpoint"),
+                    primera_en: f.get("primera_endpoint"),
+                    ultima_en: f.get("ultima_endpoint"),
+                });
+            }
+        }
+        Ok(salida)
+    }
+
+    /// Abre la correlacion, o actualiza la que ya estaba abierta.
+    ///
+    /// Devuelve `(id, es_nueva)`. La idempotencia NO es una comodidad: el motor
+    /// evalua cada minuto, y sin ella una campana que dura tres dias produciria
+    /// cuatro mil correlaciones identicas. El analista no veria una campana:
+    /// veria una tormenta, que es el ruido por el que se dejan de mirar las
+    /// alertas.
+    pub async fn abrir_o_actualizar_correlacion(
+        &self,
+        id_regla: Uuid,
+        g: &GrupoCorrelacion,
+        aportes: &[AporteEndpoint],
+    ) -> Resultado<(Uuid, bool)> {
+        let mut tx = self.pool.begin().await?;
+        let nuevo = Uuid::new_v4();
+        let fila = sqlx::query(
+            r#"INSERT INTO correlaciones
+                   (id, id_regla, clave, endpoints, alertas, primera_en, ultima_en)
+               VALUES ($1,$2,$3,$4,$5,$6,$7)
+               ON CONFLICT (id_regla, clave) WHERE cerrada_en IS NULL
+               DO UPDATE SET
+                   endpoints  = EXCLUDED.endpoints,
+                   alertas    = EXCLUDED.alertas,
+                   primera_en = LEAST(correlaciones.primera_en, EXCLUDED.primera_en),
+                   ultima_en  = GREATEST(correlaciones.ultima_en, EXCLUDED.ultima_en),
+                   -- `vista_en` solo avanza si la evidencia CRECIO. Una campana
+                   -- que sigue creciendo esta en curso; una que lleva dos dias
+                   -- igual es historia, y el analista tiene que poder
+                   -- distinguirlas de un vistazo.
+                   vista_en   = CASE
+                                    WHEN EXCLUDED.alertas > correlaciones.alertas
+                                    THEN now()
+                                    ELSE correlaciones.vista_en
+                                END
+               RETURNING id, (xmax = 0) AS es_nueva"#,
+        )
+        .bind(nuevo)
+        .bind(id_regla)
+        .bind(&g.clave)
+        .bind(g.endpoints)
+        .bind(g.alertas)
+        .bind(g.primera_en)
+        .bind(g.ultima_en)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let id: Uuid = fila.get("id");
+        let es_nueva: bool = fila.get("es_nueva");
+
+        // La evidencia se MATERIALIZA en vez de recalcularse. La ventana es
+        // deslizante: dentro de dos dias la consulta que encontro la
+        // correlacion ya no devolveria las mismas maquinas, y el analista que
+        // abre el caso el martes tiene que ver la evidencia que lo abrio el
+        // lunes.
+        for a in aportes {
+            sqlx::query(
+                r#"INSERT INTO correlacion_endpoints
+                       (id_correlacion, cn_agente, alertas, primera_en, ultima_en)
+                   VALUES ($1,$2,$3,$4,$5)
+                   ON CONFLICT (id_correlacion, cn_agente) DO UPDATE SET
+                       alertas    = EXCLUDED.alertas,
+                       primera_en = LEAST(correlacion_endpoints.primera_en, EXCLUDED.primera_en),
+                       ultima_en  = GREATEST(correlacion_endpoints.ultima_en, EXCLUDED.ultima_en)"#,
+            )
+            .bind(id)
+            .bind(&a.cn_agente)
+            .bind(a.alertas)
+            .bind(a.primera_en)
+            .bind(a.ultima_en)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok((id, es_nueva))
+    }
+
+    /// Correlaciones abiertas, de la que mas recientemente crecio a la que
+    /// menos.
+    pub async fn correlaciones_abiertas(&self, limite: i64) -> Resultado<Vec<VistaCorrelacion>> {
+        let filas = sqlx::query(
+            r#"SELECT c.id, c.clave, c.endpoints, c.alertas,
+                      c.primera_en, c.ultima_en, c.abierta_en, c.vista_en,
+                      h.nombre AS regla, h.patron, h.severidad,
+                      h.tecnica_mitre, h.tactica_mitre
+                 FROM correlaciones c
+                 JOIN heuristicas_globales h ON h.id = c.id_regla
+                WHERE c.cerrada_en IS NULL
+                ORDER BY c.vista_en DESC
+                LIMIT $1"#,
+        )
+        .bind(limite.clamp(1, 500))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas.iter().map(fila_a_correlacion).collect())
+    }
+
+    /// Endpoints que contribuyeron a una correlacion ya registrada.
+    pub async fn evidencia_de_correlacion(&self, id: Uuid) -> Resultado<Vec<AporteEndpoint>> {
+        let filas = sqlx::query(
+            r#"SELECT cn_agente, alertas, primera_en, ultima_en
+                 FROM correlacion_endpoints
+                WHERE id_correlacion = $1
+                ORDER BY alertas DESC"#,
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas
+            .iter()
+            .map(|f| AporteEndpoint {
+                cn_agente: f.get("cn_agente"),
+                alertas: f.get("alertas"),
+                primera_en: f.get("primera_en"),
+                ultima_en: f.get("ultima_en"),
+            })
+            .collect())
+    }
+
+    /// Cierra una correlacion con veredicto.
+    ///
+    /// POR QUE UN FALSO POSITIVO EXCLUYE LA CLAVE EN LA MISMA TRANSACCION
+    /// -----------------------------------------------------------------
+    /// La evidencia sigue en la ventana despues de cerrar. Sin excluir la clave,
+    /// el motor la vuelve a encontrar en la evaluacion siguiente —un minuto
+    /// despues— y reabre exactamente la misma correlacion que el analista acaba
+    /// de descartar. A la tercera vez, nadie mira las correlaciones.
+    ///
+    /// Y va en la MISMA transaccion que el cierre: si se cerrara y fallara la
+    /// exclusion, quedaria cerrada y reabriendose en bucle.
+    pub async fn cerrar_correlacion(
+        &self,
+        id: Uuid,
+        veredicto: &str,
+        por: &str,
+    ) -> Resultado<bool> {
+        if !matches!(veredicto, "confirmada" | "falso_positivo") {
+            return Err(crate::error::ErrorServidor::Config(format!(
+                "veredicto '{veredicto}' desconocido"
+            )));
+        }
+        let mut tx = self.pool.begin().await?;
+        let fila = sqlx::query(
+            r#"UPDATE correlaciones
+                  SET cerrada_en = now(), cerrada_por = $3, veredicto = $2
+                WHERE id = $1 AND cerrada_en IS NULL
+            RETURNING id_regla, clave"#,
+        )
+        .bind(id)
+        .bind(veredicto)
+        .bind(por)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(fila) = fila else {
+            tx.rollback().await?;
+            return Ok(false);
+        };
+
+        if veredicto == "falso_positivo" {
+            let id_regla: Uuid = fila.get("id_regla");
+            let clave: String = fila.get("clave");
+            sqlx::query(
+                r#"UPDATE heuristicas_globales
+                      SET claves_excluidas = array_append(claves_excluidas, $2)
+                    WHERE id = $1 AND NOT ($2 = ANY(claves_excluidas))"#,
+            )
+            .bind(id_regla)
+            .bind(&clave)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(true)
+    }
+}
+
+/// Techo de grupos que una sola regla puede abrir en una evaluacion.
+///
+/// Una regla mal escrita —o una campana masiva— puede producir miles de grupos.
+/// Sin techo, una evaluacion abriria miles de correlaciones y el panel del SOC
+/// se volveria inutilizable justo durante el incidente. Se toman los de mas
+/// endpoints, que son los que mas se parecen a una campana.
+const MAX_GRUPOS_POR_REGLA: i64 = 100;
+
+/// Techo de endpoints que se materializan como evidencia de una correlacion.
+const MAX_ENDPOINTS_POR_CORRELACION: i64 = 1_000;
+
+/// Regla de correlacion tal como la lee el motor.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReglaVigente {
+    /// Identificador.
+    pub id: Uuid,
+    /// Nombre unico.
+    pub nombre: String,
+    /// Patron legible que se le muestra al analista.
+    pub patron: String,
+    /// Tecnicas ATT&CK aceptadas.
+    pub tecnicas: Vec<String>,
+    /// Categorias aceptadas.
+    pub categorias: Vec<String>,
+    /// Atributo de `detalles` por el que se agrupa.
+    pub clave_detalle: String,
+    /// Ventana deslizante en horas.
+    pub ventana_horas: i32,
+    /// Endpoints distintos necesarios.
+    pub minimo_endpoints: i32,
+    /// Severidad de la correlacion.
+    pub severidad: i16,
+    /// Tecnica ATT&CK de la correlacion.
+    pub tecnica_mitre: Option<String>,
+    /// Tactica ATT&CK de la correlacion.
+    pub tactica_mitre: Option<String>,
+    /// Claves que el analista ya declaro benignas.
+    pub claves_excluidas: Vec<String>,
+}
+
+/// Un grupo que cumple una regla.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GrupoCorrelacion {
+    /// Valor del atributo de agrupacion.
+    pub clave: String,
+    /// Endpoints distintos que contribuyen.
+    pub endpoints: i32,
+    /// Alertas totales del grupo.
+    pub alertas: i32,
+    /// Alerta mas antigua de la ventana.
+    pub primera_en: DateTime<Utc>,
+    /// Alerta mas reciente.
+    pub ultima_en: DateTime<Utc>,
+}
+
+/// Lo que un endpoint concreto aporto a un grupo.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AporteEndpoint {
+    /// CN autenticado del endpoint.
+    pub cn_agente: String,
+    /// Alertas suyas en la ventana.
+    pub alertas: i32,
+    /// Su alerta mas antigua.
+    pub primera_en: DateTime<Utc>,
+    /// Su alerta mas reciente.
+    pub ultima_en: DateTime<Utc>,
+}
+
+/// Una correlacion como la ve el panel.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VistaCorrelacion {
+    /// Identificador.
+    pub id: Uuid,
+    /// Regla que la produjo.
+    pub regla: String,
+    /// Patron legible.
+    pub patron: String,
+    /// Valor agrupado.
+    pub clave: String,
+    /// Endpoints distintos.
+    pub endpoints: i32,
+    /// Alertas totales.
+    pub alertas: i32,
+    /// Severidad heredada de la regla.
+    pub severidad: i16,
+    /// Tecnica ATT&CK.
+    pub tecnica_mitre: Option<String>,
+    /// Tactica ATT&CK.
+    pub tactica_mitre: Option<String>,
+    /// Evidencia mas antigua.
+    pub primera_en: DateTime<Utc>,
+    /// Evidencia mas reciente.
+    pub ultima_en: DateTime<Utc>,
+    /// Cuando se abrio.
+    pub abierta_en: DateTime<Utc>,
+    /// Ultima vez que la evidencia crecio.
+    pub vista_en: DateTime<Utc>,
+}
+
+fn fila_a_regla(f: &sqlx::postgres::PgRow) -> ReglaVigente {
+    ReglaVigente {
+        id: f.get("id"),
+        nombre: f.get("nombre"),
+        patron: f.get("patron"),
+        tecnicas: f.get("tecnicas"),
+        categorias: f.get("categorias"),
+        clave_detalle: f.get("clave_detalle"),
+        ventana_horas: f.get("ventana_horas"),
+        minimo_endpoints: f.get("minimo_endpoints"),
+        severidad: f.get("severidad"),
+        tecnica_mitre: f.get("tecnica_mitre"),
+        tactica_mitre: f.get("tactica_mitre"),
+        claves_excluidas: f.get("claves_excluidas"),
+    }
+}
+
+fn fila_a_correlacion(f: &sqlx::postgres::PgRow) -> VistaCorrelacion {
+    VistaCorrelacion {
+        id: f.get("id"),
+        regla: f.get("regla"),
+        patron: f.get("patron"),
+        clave: f.get("clave"),
+        endpoints: f.get("endpoints"),
+        alertas: f.get("alertas"),
+        severidad: f.get("severidad"),
+        tecnica_mitre: f.get("tecnica_mitre"),
+        tactica_mitre: f.get("tactica_mitre"),
+        primera_en: f.get("primera_en"),
+        ultima_en: f.get("ultima_en"),
+        abierta_en: f.get("abierta_en"),
+        vista_en: f.get("vista_en"),
     }
 }

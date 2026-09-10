@@ -73,6 +73,28 @@ pub enum EventoPanel {
         /// Operador que lo ordeno.
         por: String,
     },
+    /// Una heuristica global ha encontrado una campana distribuida.
+    ///
+    /// Se publica SOLO cuando la correlacion se abre por primera vez, no en
+    /// cada evaluacion. El motor evalua cada minuto; avisar en cada vuelta
+    /// convertiria una campana de tres dias en cuatro mil avisos identicos, y
+    /// una consola que avisa cuatro mil veces de lo mismo deja de mirarse.
+    CorrelacionAbierta {
+        /// Identificador de la correlacion.
+        id: String,
+        /// Regla que la produjo.
+        regla: String,
+        /// Patron legible ("Movimiento Lateral Distribuido").
+        patron: String,
+        /// Valor agrupado (la cuenta, el hash...).
+        clave: String,
+        /// Endpoints DISTINTOS implicados.
+        endpoints: i32,
+        /// Severidad heredada de la regla.
+        severidad: i16,
+        /// Tecnica MITRE ATT&CK.
+        tecnica_mitre: Option<String>,
+    },
     /// Se ha publicado una politica nueva.
     PoliticaPublicada {
         /// Version publicada.

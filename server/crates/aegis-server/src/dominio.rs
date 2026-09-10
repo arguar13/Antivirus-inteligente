@@ -221,8 +221,13 @@ impl ServicioFlota {
         categoria: &str,
         descripcion: &str,
         momento_unix: u64,
+        detalles_json: &str,
     ) -> Resultado<uuid::Uuid> {
         let clase = clasificar_mitre(categoria);
+        // Los atributos se normalizan ANTES de tocar la base de datos. Un
+        // objeto anidado o desmesurado no llega a persistirse: ver
+        // `crate::heuristicas::normalizar_detalles` para por que cada limite.
+        let detalles = crate::heuristicas::normalizar_detalles(detalles_json)?;
         let alerta = NuevaAlerta {
             severidad: severidad_acotada(severidad),
             categoria,
@@ -230,6 +235,7 @@ impl ServicioFlota {
             tecnica: clase.map(|c| c.tecnica),
             tactica: clase.map(|c| c.tactica),
             ocurrido_en: momento_o_ahora(momento_unix),
+            detalles,
         };
         let id = self.almacen.registrar_alerta(cn, &alerta).await?;
         // Una alerta critica que espera al siguiente sondeo del panel es una

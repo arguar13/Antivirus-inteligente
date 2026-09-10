@@ -84,6 +84,7 @@ fn reporte_evento_ida_y_vuelta() {
         categoria: "ransomware".into(),
         descripcion: "cifrado masivo en /home".into(),
         momento_unix: 1_726_000_500,
+        detalles_json: String::new(),
     };
     assert_eq!(ReporteEvento::decodificar(&m.codificar()).unwrap(), m);
 }

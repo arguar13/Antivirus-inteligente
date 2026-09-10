@@ -859,6 +859,7 @@ async fn agente_virtual(
                     categoria: "inyeccion".into(),
                     descripcion: "deteccion sintetica del generador de carga".into(),
                     momento_unix: 0,
+                    detalles_json: String::new(),
                 };
                 match llamada(
                     servidor,

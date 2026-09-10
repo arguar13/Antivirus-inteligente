@@ -82,6 +82,18 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         )
         .route("/api/agentes/{cn}/cuarentena", post(cuarentena_de_enjambre))
         .route("/api/cuarentena/difusion", get(difusion_cuarentena))
+        // --- Heuristicas globales: APT distribuida (FASE 45) ---
+        .route(
+            "/api/heuristicas",
+            get(listar_heuristicas).post(crear_heuristica),
+        )
+        .route(
+            "/api/heuristicas/{id}/activa",
+            post(fijar_heuristica_activa),
+        )
+        .route("/api/correlaciones", get(listar_correlaciones))
+        .route("/api/correlaciones/{id}", get(obtener_correlacion))
+        .route("/api/correlaciones/{id}/cerrar", post(cerrar_correlacion))
         // Tiempo real
         .route("/api/ws", get(websocket))
         // Reputacion k-anonima
@@ -1145,6 +1157,177 @@ async fn esquema_aegisql(
         })),
     )
         .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// FASE 45: heuristicas globales y correlaciones distribuidas
+// ---------------------------------------------------------------------------
+
+async fn listar_heuristicas(State(estado): State<EstadoApi>) -> axum::response::Response {
+    match estado.servicio.almacen().listar_heuristicas().await {
+        Ok(v) => Json(serde_json::json!({"heuristicas": v})).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Crea una regla de correlacion.
+///
+/// La regla se valida ANTES de llegar a la base de datos, para que el analista
+/// reciba un motivo en castellano en vez de un error de restriccion. Ver
+/// `crate::heuristicas` para por que cada limite.
+async fn crear_heuristica(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Json(p): Json<crate::heuristicas::NuevaHeuristica>,
+) -> axum::response::Response {
+    let operador = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let regla = match p.validar() {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": e.to_string()})),
+            )
+                .into_response()
+        }
+    };
+    match estado
+        .servicio
+        .almacen()
+        .crear_heuristica(&regla, &operador)
+        .await
+    {
+        Ok(id) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({"id": id.to_string(), "nombre": regla.nombre})),
+        )
+            .into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct Activa {
+    activa: bool,
+}
+
+async fn fijar_heuristica_activa(
+    State(estado): State<EstadoApi>,
+    Path(id): Path<String>,
+    Json(p): Json<Activa>,
+) -> axum::response::Response {
+    let Ok(id) = id.parse::<uuid::Uuid>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "identificador invalido"})),
+        )
+            .into_response();
+    };
+    match estado
+        .servicio
+        .almacen()
+        .fijar_heuristica_activa(id, p.activa)
+        .await
+    {
+        Ok(true) => Json(serde_json::json!({"activa": p.activa})).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "no existe esa heuristica"})),
+        )
+            .into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+async fn listar_correlaciones(
+    State(estado): State<EstadoApi>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    let limite = q
+        .get("limite")
+        .and_then(|l| l.parse::<i64>().ok())
+        .unwrap_or(50);
+    match estado
+        .servicio
+        .almacen()
+        .correlaciones_abiertas(limite)
+        .await
+    {
+        Ok(v) => Json(serde_json::json!({"correlaciones": v})).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Devuelve la evidencia MATERIALIZADA de una correlacion.
+///
+/// No se recalcula: la ventana es deslizante, asi que dentro de dos dias la
+/// consulta que la encontro ya no devolveria las mismas maquinas, y el analista
+/// que abre el caso el martes tiene que ver la evidencia que lo abrio el lunes.
+async fn obtener_correlacion(
+    State(estado): State<EstadoApi>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    let Ok(id) = id.parse::<uuid::Uuid>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "identificador invalido"})),
+        )
+            .into_response();
+    };
+    match estado.servicio.almacen().evidencia_de_correlacion(id).await {
+        Ok(v) => Json(serde_json::json!({"endpoints": v})).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct Veredicto {
+    veredicto: String,
+}
+
+/// Cierra una correlacion.
+///
+/// Cerrarla como falso positivo EXCLUYE la clave de la regla en la misma
+/// transaccion. Sin eso, el motor la vuelve a encontrar un minuto despues y
+/// reabre exactamente lo que el analista acaba de descartar.
+async fn cerrar_correlacion(
+    State(estado): State<EstadoApi>,
+    Path(id): Path<String>,
+    cabeceras: header::HeaderMap,
+    Json(p): Json<Veredicto>,
+) -> axum::response::Response {
+    let operador = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let Ok(id) = id.parse::<uuid::Uuid>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "identificador invalido"})),
+        )
+            .into_response();
+    };
+    match estado
+        .servicio
+        .almacen()
+        .cerrar_correlacion(id, &p.veredicto, &operador)
+        .await
+    {
+        Ok(true) => Json(serde_json::json!({"cerrada": true})).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "no existe o ya estaba cerrada"})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------

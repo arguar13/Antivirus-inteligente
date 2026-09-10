@@ -49,6 +49,10 @@ message ReporteEvento {
   string categoria    = 3;
   string descripcion  = 4;
   uint64 momento_unix = 5;
+  // Atributos estructurados del hallazgo, como objeto JSON: la cuenta bajo la
+  // que se ejecuto, el hash, el destino. Es por lo que agrupan las heuristicas
+  // globales; la descripcion es para leerla una persona, no para correlacionar.
+  string detalles_json = 6;
 }
 
 // Acuse del evento, con el identificador de incidente asignado.

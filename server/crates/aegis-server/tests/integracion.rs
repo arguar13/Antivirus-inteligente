@@ -15,7 +15,7 @@ use std::sync::Arc;
 use aegis_fleet::pki::AutoridadCertificadora;
 use aegis_fleet::servidor::ServidorFlota;
 use aegis_fleet::{ClienteFlota, EmisorLocal, PoliticaRotacion, RotadorCertificados};
-use aegis_server::almacen::Almacen;
+use aegis_server::almacen::{Almacen, VistaCorrelacion};
 use aegis_server::cache::{Cache, Veredicto};
 use aegis_server::dominio::{clasificar_mitre, ServicioFlota};
 use aegis_server::flota::ManejadorPersistente;
@@ -94,7 +94,7 @@ async fn un_agente_se_enrola_late_y_reporta_contra_postgres_real() {
 
     // Reportar un evento: se persiste y devuelve identificador de incidente.
     let id = servicio
-        .evento(&cn, 4, "ransomware", "cifrado masivo detectado", 0)
+        .evento(&cn, 4, "ransomware", "cifrado masivo detectado", 0, "")
         .await
         .expect("evento");
     assert!(!id.is_nil());
@@ -122,7 +122,7 @@ async fn el_evento_se_guarda_clasificado_en_mitre_att_ck() {
         .unwrap();
 
     servicio
-        .evento(&cn, 3, "inyeccion", "inyeccion en proceso legitimo", 0)
+        .evento(&cn, 3, "inyeccion", "inyeccion en proceso legitimo", 0, "")
         .await
         .unwrap();
 
@@ -156,7 +156,7 @@ async fn una_severidad_fuera_de_rango_no_rompe_la_restriccion_del_esquema() {
     // El esquema restringe severidad a 0..4. Un agente comprometido que declare
     // 9999 no debe provocar un error de la base de datos: se acota antes.
     let r = servicio
-        .evento(&cn, 9999, "rootkit", "severidad absurda", 0)
+        .evento(&cn, 9999, "rootkit", "severidad absurda", 0, "")
         .await;
     assert!(r.is_ok(), "la severidad debe acotarse, no reventar: {r:?}");
 
@@ -439,6 +439,7 @@ async fn el_agente_autentico_habla_con_el_plano_de_control_sobre_mtls_y_queda_en
                 categoria: "rootkit".to_string(),
                 descripcion: "modulo oculto detectado por verificacion cruzada".to_string(),
                 momento_unix: 0,
+                detalles_json: String::new(),
             })?;
 
             Ok((enrolamiento.aceptado, ack.recibido, ev.id_incidente))
@@ -1556,4 +1557,406 @@ async fn una_cuarentena_de_enjambre_llega_al_agente_real_y_queda_contabilizada()
     // Se levanta: la tabla es global y dejarla puesta afectaria a otras pruebas.
     almacen.levantar_cuarentena(ip, "prueba").await.unwrap();
     servidor.parar();
+}
+
+// ---------------------------------------------------------------------------
+// FASE 45: heuristicas globales — deteccion de APT distribuida
+// ---------------------------------------------------------------------------
+
+/// Regla del ejemplo canonico, con umbral parametrizable para las pruebas.
+fn regla_reconocimiento(nombre: &str, minimo: i32) -> aegis_server::heuristicas::NuevaHeuristica {
+    aegis_server::heuristicas::NuevaHeuristica {
+        nombre: nombre.to_string(),
+        patron: "Movimiento Lateral Distribuido".to_string(),
+        tecnicas: vec![],
+        categorias: vec![nombre.to_string()],
+        clave_detalle: "cuenta".to_string(),
+        ventana_horas: 48,
+        minimo_endpoints: minimo,
+        severidad: 4,
+        tecnica_mitre: Some("T1087".to_string()),
+        tactica_mitre: Some("Descubrimiento".to_string()),
+    }
+}
+
+/// Enrola `n` endpoints y hace que cada uno reporte una alerta con `detalles`.
+///
+/// La categoria de cada prueba es su propio identificador unico: la tabla de
+/// alertas es global y dos pruebas en paralelo no pueden verse la evidencia.
+async fn sembrar(
+    servicio: &Arc<ServicioFlota>,
+    almacen: &Almacen,
+    categoria: &str,
+    cuenta: &str,
+    n: usize,
+) -> Vec<String> {
+    let mut cns = Vec::new();
+    for i in 0..n {
+        let cn = cn_unico(&format!("{categoria}-{i}"));
+        almacen
+            .enrolar(&cn, &cn, &format!("host-{i}"), "1.0", &[], "")
+            .await
+            .unwrap();
+        servicio
+            .evento(
+                &cn,
+                3,
+                categoria,
+                "enumeracion del dominio",
+                0,
+                &serde_json::json!({ "cuenta": cuenta }).to_string(),
+            )
+            .await
+            .unwrap();
+        cns.push(cn);
+    }
+    cns
+}
+
+/// Desactiva la regla de una prueba al terminar.
+///
+/// La tabla de reglas es global: una regla viva de una prueba pasada se
+/// evaluaria en cada vuelta de todas las siguientes, encareciendo la suite sin
+/// comprobar nada.
+async fn apagar_regla(almacen: &Almacen, nombre: &str) {
+    if let Some(r) = almacen
+        .listar_heuristicas()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.nombre == nombre)
+    {
+        let _ = almacen.fijar_heuristica_activa(r.id, false).await;
+    }
+}
+
+/// Correlacion abierta para una clave concreta, si la hay.
+///
+/// Las pruebas afirman sobre ESTO y no sobre el contador que devuelve la
+/// evaluacion. El contador es una estadistica de registro y cuenta TODAS las
+/// reglas activas de la base de datos, incluidas las que otras pruebas del
+/// mismo runner acaban de crear: afirmar sobre el haria que una prueba fallara
+/// por lo que hizo otra. Lo que el producto promete es la correlacion, y eso es
+/// lo que se comprueba.
+async fn abierta_para(almacen: &Almacen, clave: &str) -> Option<VistaCorrelacion> {
+    almacen
+        .correlaciones_abiertas(500)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|c| c.clave == clave)
+}
+
+/// El caso que justifica toda la fase: nada delata la campana en un endpoint.
+#[tokio::test]
+async fn una_campana_repartida_entre_endpoints_se_ve_solo_desde_el_plano_de_control() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let categoria = cn_unico("reconocimiento");
+    let cuenta = format!("CORP\\svc-{}", uuid::Uuid::new_v4().simple());
+
+    let regla = regla_reconocimiento(&categoria, 5).validar().unwrap();
+    almacen.crear_heuristica(&regla, "analista").await.unwrap();
+
+    // CUATRO endpoints: por debajo del umbral. Ninguno de ellos hizo nada
+    // sospechoso —enumerar el dominio es administracion legitima— y el motor
+    // tiene que estar de acuerdo.
+    sembrar(&servicio, &almacen, &categoria, &cuenta, 4).await;
+    let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
+    correlador.evaluar_una_vez().await.unwrap();
+    assert!(
+        abierta_para(&almacen, &cuenta).await.is_none(),
+        "cuatro endpoints bajo el umbral no son una campana"
+    );
+
+    // El quinto cruza el umbral. La quinta maquina no hizo nada distinto de las
+    // cuatro anteriores: lo que cambio es el CONJUNTO, y eso solo lo ve el
+    // plano de control.
+    sembrar(&servicio, &almacen, &categoria, &cuenta, 1).await;
+    correlador.evaluar_una_vez().await.unwrap();
+    let mia = abierta_para(&almacen, &cuenta)
+        .await
+        .expect("cinco endpoints ya son la campana");
+    assert_eq!(mia.endpoints, 5);
+    assert_eq!(mia.patron, "Movimiento Lateral Distribuido");
+
+    // La evidencia esta materializada: se puede responder "¿que maquinas?".
+    let evidencia = almacen.evidencia_de_correlacion(mia.id).await.unwrap();
+    assert_eq!(evidencia.len(), 5);
+
+    almacen
+        .cerrar_correlacion(mia.id, "confirmada", "analista")
+        .await
+        .unwrap();
+    // La regla se desactiva al terminar: la tabla es global y una regla viva de
+    // una prueba pasada seguiria evaluandose en cada vuelta de las siguientes.
+    apagar_regla(&almacen, &categoria).await;
+}
+
+/// Un endpoint ruidoso no es una campana, por muchas alertas que emita.
+#[tokio::test]
+async fn un_solo_endpoint_no_puede_fabricar_una_correlacion_distribuida() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let categoria = cn_unico("ruidoso");
+    let cuenta = format!("CORP\\uno-{}", uuid::Uuid::new_v4().simple());
+
+    let regla = regla_reconocimiento(&categoria, 3).validar().unwrap();
+    almacen.crear_heuristica(&regla, "analista").await.unwrap();
+
+    let cns = sembrar(&servicio, &almacen, &categoria, &cuenta, 1).await;
+    // Doscientas alertas mas del MISMO endpoint. Si el motor contara alertas en
+    // vez de endpoints distintos, esto seria una campana de APT de doscientas
+    // maquinas — y, peor, un endpoint comprometido podria fabricarla el solo
+    // para provocar una respuesta automatica contra la flota.
+    for _ in 0..200 {
+        servicio
+            .evento(
+                &cns[0],
+                3,
+                &categoria,
+                "enumeracion",
+                0,
+                &serde_json::json!({ "cuenta": cuenta }).to_string(),
+            )
+            .await
+            .unwrap();
+    }
+
+    let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
+    correlador.evaluar_una_vez().await.unwrap();
+    assert!(
+        abierta_para(&almacen, &cuenta).await.is_none(),
+        "doscientas alertas de UN endpoint no son movimiento lateral distribuido"
+    );
+    apagar_regla(&almacen, &categoria).await;
+}
+
+/// Una campana en curso es UNA correlacion, no una por evaluacion.
+#[tokio::test]
+async fn una_campana_que_dura_no_produce_una_tormenta_de_correlaciones() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let categoria = cn_unico("persistente");
+    let cuenta = format!("CORP\\dur-{}", uuid::Uuid::new_v4().simple());
+
+    let regla = regla_reconocimiento(&categoria, 3).validar().unwrap();
+    almacen.crear_heuristica(&regla, "analista").await.unwrap();
+    sembrar(&servicio, &almacen, &categoria, &cuenta, 3).await;
+
+    let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
+    correlador.evaluar_una_vez().await.unwrap();
+    let primera = abierta_para(&almacen, &cuenta)
+        .await
+        .expect("tiene que abrir");
+
+    // El motor evalua cada minuto y la evidencia sigue en la ventana de 48 h.
+    // Sin idempotencia, una campana de tres dias produciria cuatro mil
+    // correlaciones identicas: el analista no veria una campana, veria una
+    // tormenta, que es el ruido por el que se dejan de mirar las alertas.
+    for _ in 0..5 {
+        correlador.evaluar_una_vez().await.unwrap();
+    }
+    let abiertas = almacen.correlaciones_abiertas(500).await.unwrap();
+    let mias: Vec<_> = abiertas.iter().filter(|c| c.clave == cuenta).collect();
+    assert_eq!(
+        mias.len(),
+        1,
+        "seis evaluaciones sobre la misma evidencia son UNA correlacion, no seis"
+    );
+    assert_eq!(
+        mias[0].id, primera.id,
+        "la correlacion ya abierta se ACTUALIZA, no se sustituye"
+    );
+
+    // Y si la evidencia crece, la MISMA correlacion la refleja.
+    sembrar(&servicio, &almacen, &categoria, &cuenta, 2).await;
+    correlador.evaluar_una_vez().await.unwrap();
+    let mia = abierta_para(&almacen, &cuenta).await.unwrap();
+    assert_eq!(mia.id, primera.id);
+    assert_eq!(mia.endpoints, 5, "la correlacion abierta tiene que crecer");
+    assert_eq!(
+        almacen
+            .evidencia_de_correlacion(mia.id)
+            .await
+            .unwrap()
+            .len(),
+        5
+    );
+    apagar_regla(&almacen, &categoria).await;
+}
+
+/// Cerrar como falso positivo tiene que impedir que vuelva.
+#[tokio::test]
+async fn un_falso_positivo_cerrado_no_se_reabre_en_la_evaluacion_siguiente() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let categoria = cn_unico("inventario");
+    // La cuenta de servicio que inventaria el dominio cada noche: el falso
+    // positivo clasico de esta clase de deteccion.
+    let cuenta = format!("CORP\\inv-{}", uuid::Uuid::new_v4().simple());
+
+    let regla = regla_reconocimiento(&categoria, 3).validar().unwrap();
+    almacen.crear_heuristica(&regla, "analista").await.unwrap();
+    sembrar(&servicio, &almacen, &categoria, &cuenta, 4).await;
+
+    let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
+    correlador.evaluar_una_vez().await.unwrap();
+    let abierta = abierta_para(&almacen, &cuenta)
+        .await
+        .expect("tiene que abrir antes de poder cerrarse");
+    assert!(almacen
+        .cerrar_correlacion(abierta.id, "falso_positivo", "analista")
+        .await
+        .unwrap());
+
+    // La evidencia SIGUE en la ventana. Sin excluir la clave al cerrar, el
+    // motor la encuentra otra vez un minuto despues y reabre exactamente lo que
+    // el analista acaba de descartar. A la tercera vez, nadie mira nada.
+    correlador.evaluar_una_vez().await.unwrap();
+    assert!(
+        abierta_para(&almacen, &cuenta).await.is_none(),
+        "un falso positivo cerrado no puede reabrirse solo"
+    );
+
+    // Y una campana con OTRA cuenta sigue detectandose: excluir una clave no
+    // puede dejar la regla ciega.
+    let otra = format!("CORP-otra-{}", uuid::Uuid::new_v4().simple());
+    sembrar(&servicio, &almacen, &categoria, &otra, 4).await;
+    correlador.evaluar_una_vez().await.unwrap();
+    assert!(
+        abierta_para(&almacen, &otra).await.is_some(),
+        "excluir una clave no puede dejar la regla ciega para las demas"
+    );
+    apagar_regla(&almacen, &categoria).await;
+}
+
+/// Las alertas sin el atributo de agrupacion no participan.
+#[tokio::test]
+async fn lo_que_no_se_pudo_ver_no_forma_un_grupo_que_dispare_siempre() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let categoria = cn_unico("sinatributo");
+
+    let regla = regla_reconocimiento(&categoria, 3).validar().unwrap();
+    almacen.crear_heuristica(&regla, "analista").await.unwrap();
+
+    // Cinco endpoints que reportan la misma categoria pero NO saben bajo que
+    // cuenta. Agrupar por el valor ausente juntaria en un mismo grupo todo lo
+    // que no se pudo ver, y ese grupo —el mas grande de la flota— dispararia
+    // siempre y en cada evaluacion.
+    for i in 0..5 {
+        let cn = cn_unico(&format!("{categoria}-mudo-{i}"));
+        almacen
+            .enrolar(&cn, &cn, "mudo", "1.0", &[], "")
+            .await
+            .unwrap();
+        // Sin atributos, y con un atributo distinto del que agrupa la regla.
+        servicio
+            .evento(&cn, 3, &categoria, "sin cuenta", 0, "")
+            .await
+            .unwrap();
+        servicio
+            .evento(&cn, 3, &categoria, "otro atributo", 0, r#"{"pid":42}"#)
+            .await
+            .unwrap();
+    }
+
+    let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
+    correlador.evaluar_una_vez().await.unwrap();
+    // Ninguna correlacion de ESTA regla, sea cual sea la clave: no hay ninguna
+    // clave posible con la que agrupar.
+    let abiertas = almacen.correlaciones_abiertas(500).await.unwrap();
+    assert!(
+        !abiertas.iter().any(|c| c.regla == categoria),
+        "las alertas sin el atributo de agrupacion no pueden formar un grupo"
+    );
+    apagar_regla(&almacen, &categoria).await;
+}
+
+/// Una regla desactivada deja de evaluarse.
+#[tokio::test]
+async fn una_heuristica_desactivada_no_dispara() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let categoria = cn_unico("apagada");
+    let cuenta = format!("CORP\\off-{}", uuid::Uuid::new_v4().simple());
+
+    let regla = regla_reconocimiento(&categoria, 3).validar().unwrap();
+    let id = almacen.crear_heuristica(&regla, "analista").await.unwrap();
+    almacen.fijar_heuristica_activa(id, false).await.unwrap();
+    sembrar(&servicio, &almacen, &categoria, &cuenta, 5).await;
+
+    let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
+    correlador.evaluar_una_vez().await.unwrap();
+    assert!(abierta_para(&almacen, &cuenta).await.is_none());
+
+    almacen.fijar_heuristica_activa(id, true).await.unwrap();
+    correlador.evaluar_una_vez().await.unwrap();
+    assert!(
+        abierta_para(&almacen, &cuenta).await.is_some(),
+        "reactivar la regla tiene que volver a detectar la campana"
+    );
+    almacen.fijar_heuristica_activa(id, false).await.unwrap();
+}
+
+/// Unos atributos adversos no llegan a la base de datos.
+#[tokio::test]
+async fn unos_detalles_invalidos_del_endpoint_se_rechazan_antes_de_persistirse() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let cn = cn_unico("adverso");
+    almacen
+        .enrolar(&cn, &cn, "adverso", "1.0", &[], "")
+        .await
+        .unwrap();
+
+    // Son millones de alertas: sin techo, un agente comprometido convierte el
+    // historico de seguridad en su almacenamiento gratuito y el disco se llena
+    // justo cuando hace falta registrar el incidente.
+    let enorme = format!(r#"{{"x":"{}"}}"#, "a".repeat(64 * 1024));
+    assert!(servicio
+        .evento(&cn, 3, "prueba", "desmesurado", 0, &enorme)
+        .await
+        .is_err());
+
+    // Un valor anidado no sirve para agrupar y no se acepta.
+    assert!(servicio
+        .evento(
+            &cn,
+            3,
+            "prueba",
+            "anidado",
+            0,
+            r#"{"cuenta":{"n":"admin"}}"#
+        )
+        .await
+        .is_err());
+
+    // Uno valido si.
+    assert!(servicio
+        .evento(&cn, 3, "prueba", "correcto", 0, r#"{"cuenta":"admin"}"#)
+        .await
+        .is_ok());
 }

@@ -166,6 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 categoria: inc.categoria.to_string(),
                 descripcion: inc.descripcion.to_string(),
                 momento_unix: 0,
+                detalles_json: String::new(),
             })?;
 
             // El linaje que da contexto a la alerta: sin el, «python abrio un

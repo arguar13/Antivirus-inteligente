@@ -34,6 +34,26 @@ paso() {
 paso rust  "Rust · formato"            cargo fmt --all --check
 paso rust  "Rust · clippy (-D warnings)" cargo clippy --all-targets -- -D warnings
 paso rust  "Rust · tests"               cargo test --all
+
+# El plano de control es OTRO espacio de trabajo (server/), y `cargo test --all`
+# no lo alcanza. Hasta ahora quedaba fuera de la puerta obligatoria y se
+# ejecutaba a mano: es decir, se ejecutaba mientras alguien se acordara. Todo el
+# backend —politica, cacerias, cuarentena de enjambre, heuristicas globales—
+# vive ahi.
+#
+# Las pruebas de integracion del servidor hablan con un PostgreSQL y un Redis
+# reales y se omiten SOLAS, con un aviso, si no los hay. Por eso se pueden
+# ejecutar aqui sin condicionar el grupo a que la maquina tenga bases de datos:
+# donde las haya, se comprueban; donde no, se dice.
+if [ -d server ]; then
+    paso servidor "Servidor · formato"   sh -c 'cd server && cargo fmt --all --check'
+    paso servidor "Servidor · clippy (-D warnings)" \
+        sh -c 'cd server && cargo clippy --all-targets -- -D warnings'
+    paso servidor "Servidor · tests"     sh -c 'cd server && cargo test --all'
+else
+    printf '%s==>%s Servidor · %somitido (no esta en este arbol)%s\n' "$GRIS" "$FIN" "$GRIS" "$FIN"
+fi
+
 paso abi   "ABI · layout C vs Rust (gcc)"   env CC=gcc   ./tools/abi-check.sh
 paso abi   "ABI · layout C vs Rust (clang)" env CC=clang ./tools/abi-check.sh
 # Los pasos de eBPF solo aplican en Linux y solo si el subproyecto existe ya.

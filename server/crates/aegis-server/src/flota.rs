@@ -678,6 +678,7 @@ impl ManejadorFlota for ManejadorPersistente {
                     &req.categoria,
                     &req.descripcion,
                     req.momento_unix,
+                    &req.detalles_json,
                 )
                 .await
         });

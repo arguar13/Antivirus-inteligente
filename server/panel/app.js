@@ -210,6 +210,20 @@ function manejarEvento(m) {
       if (app.vista === 'caza') cargarCacerias();
       break;
 
+    case 'correlacion_abierta':
+      // Solo llega cuando la correlacion se ABRE por primera vez. El motor
+      // evalua cada minuto y la evidencia sigue en la ventana: avisar en cada
+      // vuelta convertiria una campana de tres dias en cuatro mil avisos
+      // identicos, y una consola que avisa cuatro mil veces de lo mismo deja
+      // de mirarse.
+      registrarActividad('campana',
+        `${m.patron}: ${m.endpoints} endpoints — ${m.clave}` +
+        (m.tecnica_mitre ? ` (${m.tecnica_mitre})` : ''));
+      pinCampanas += 1;
+      { const p = $('#pin-campanas'); p.textContent = pinCampanas; p.hidden = false; }
+      if (app.vista === 'campanas') cargarCampanas();
+      break;
+
     case 'caza_respuesta':
       // Se refresca por CADA respuesta y no al terminar: una caceria sobre diez
       // mil endpoints se ve llegar. Solo se toca la pantalla si el analista
@@ -249,6 +263,8 @@ function subirPin() {
   p.hidden = false;
 }
 
+let pinCampanas = 0;
+
 // ── Navegacion ──────────────────────────────────────────────────────────
 
 $('#pestanas').addEventListener('click', (e) => {
@@ -258,6 +274,7 @@ $('#pestanas').addEventListener('click', (e) => {
   $$('#pestanas button').forEach((x) => x.classList.toggle('activa', x === b));
   $$('.vista').forEach((v) => { v.hidden = v.id !== 'vista-' + app.vista; });
   if (app.vista === 'alertas') { pinAlertas = 0; $('#pin-alertas').hidden = true; }
+  if (app.vista === 'campanas') { pinCampanas = 0; $('#pin-campanas').hidden = true; }
   refrescarVista();
 });
 
@@ -273,6 +290,7 @@ function refrescarVista() {
   else if (app.vista === 'inteligencia') cargarStix();
   else if (app.vista === 'linaje') cargarGrafos();
   else if (app.vista === 'caza') cargarCacerias();
+  else if (app.vista === 'campanas') cargarCampanas();
 }
 
 // ── Indicadores ─────────────────────────────────────────────────────────
@@ -868,3 +886,83 @@ function th(texto) {
   e.textContent = texto;
   return e;
 }
+
+// ── Campanas distribuidas (FASE 45) ─────────────────────────────────────
+
+async function cargarCampanas() {
+  let lista = [];
+  try { lista = (await api('/api/correlaciones?limite=50')).correlaciones; }
+  catch { return; }
+
+  const tb = $('#tabla-campanas tbody');
+  tb.textContent = '';
+  $('#campanas-vacio').hidden = lista.length > 0;
+
+  for (const c of lista) {
+    const tr = document.createElement('tr');
+    if (c.severidad >= 4) tr.classList.add('critica');
+    tr.append(
+      celdaTexto(c.patron),
+      // La clave la escribe, indirectamente, un endpoint potencialmente
+      // comprometido: se pinta con textContent, nunca con innerHTML.
+      celdaTexto(c.clave, 'mono'),
+      celdaTexto(String(c.endpoints)),
+      celdaTexto(String(c.alertas)),
+      celdaTexto(c.tecnica_mitre || '—'),
+      celdaTexto(new Date(c.primera_en).toLocaleString('es-ES', { hour12: false })),
+    );
+    const td = document.createElement('td');
+    const b = document.createElement('button');
+    b.className = 'secundario';
+    b.textContent = 'Ver evidencia';
+    b.addEventListener('click', () => verCampana(c));
+    td.appendChild(b);
+    tr.appendChild(td);
+    tb.appendChild(tr);
+  }
+}
+
+/// Muestra la evidencia materializada de una campana.
+async function verCampana(c) {
+  app.campana = c.id;
+  $('#campana-detalle').hidden = false;
+  // textContent y no innerHTML: la clave viene de un endpoint.
+  $('#campana-titulo').textContent = `${c.patron} — ${c.clave}`;
+
+  let endpoints = [];
+  try { endpoints = (await api('/api/correlaciones/' + c.id)).endpoints; }
+  catch { return; }
+
+  const tb = $('#tabla-evidencia tbody');
+  tb.textContent = '';
+  for (const e of endpoints) {
+    const tr = document.createElement('tr');
+    tr.append(
+      celdaTexto(corto(e.cn_agente), 'mono'),
+      celdaTexto(String(e.alertas)),
+      celdaTexto(new Date(e.primera_en).toLocaleString('es-ES', { hour12: false })),
+      celdaTexto(new Date(e.ultima_en).toLocaleString('es-ES', { hour12: false })),
+    );
+    tb.appendChild(tr);
+  }
+}
+
+async function cerrarCampana(veredicto) {
+  if (!app.campana) return;
+  try {
+    await api('/api/correlaciones/' + app.campana + '/cerrar', {
+      method: 'POST',
+      body: JSON.stringify({ veredicto }),
+    });
+  } catch (e) {
+    registrarActividad('campana', 'no se pudo cerrar: ' + e.message);
+    return;
+  }
+  registrarActividad('campana', `campaña cerrada como ${veredicto}`);
+  app.campana = null;
+  $('#campana-detalle').hidden = true;
+  cargarCampanas();
+}
+
+$('#btn-confirmar').addEventListener('click', () => cerrarCampana('confirmada'));
+$('#btn-descartar').addEventListener('click', () => cerrarCampana('falso_positivo'));

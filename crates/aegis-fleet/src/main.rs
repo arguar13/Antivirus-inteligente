@@ -75,6 +75,7 @@ fn ejecutar() -> aegis_fleet::Resultado<()> {
         categoria: "syscall-directa".into(),
         descripcion: "evasion de enganches detectada".into(),
         momento_unix: ahora_unix(),
+        detalles_json: String::new(),
     })?;
     println!(
         "evento: recibido={} incidente={}",

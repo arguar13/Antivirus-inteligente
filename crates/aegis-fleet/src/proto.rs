@@ -330,6 +330,21 @@ pub struct ReporteEvento {
     pub descripcion: String,
     /// Instante Unix del evento.
     pub momento_unix: u64,
+    /// Atributos estructurados del hallazgo, como objeto JSON.
+    ///
+    /// POR QUE HACE FALTA ADEMAS DE LA DESCRIPCION
+    /// -------------------------------------------
+    /// La descripcion es para que la lea una persona. Correlacionar entre
+    /// endpoints necesita algo con lo que AGRUPAR: la cuenta bajo la que se
+    /// ejecuto, el hash del binario, la direccion de destino. Sacar eso de la
+    /// descripcion con expresiones regulares en el plano de control seria
+    /// convertir un texto libre —que cada detector escribe a su manera y que
+    /// cambia con cada version del agente— en el eje de una deteccion.
+    ///
+    /// Vacio es valido y significa "este detector no aporta atributos": una
+    /// heuristica que agrupe por un atributo que falta simplemente no ve esa
+    /// alerta, que es lo correcto. Lo que no puede pasar es que se la invente.
+    pub detalles_json: String,
 }
 
 impl ReporteEvento {
@@ -341,6 +356,7 @@ impl ReporteEvento {
         escribir_str(&mut b, 3, &self.categoria);
         escribir_str(&mut b, 4, &self.descripcion);
         escribir_u64(&mut b, 5, self.momento_unix);
+        escribir_str(&mut b, 6, &self.detalles_json);
         b
     }
 
@@ -355,6 +371,7 @@ impl ReporteEvento {
                 Campo::Bytes(3, v) => m.categoria = como_str(v)?,
                 Campo::Bytes(4, v) => m.descripcion = como_str(v)?,
                 Campo::Entero(5, v) => m.momento_unix = v,
+                Campo::Bytes(6, v) => m.detalles_json = como_str(v)?,
                 _ => {}
             }
         }

@@ -46,6 +46,7 @@
       <button data-vista="reglas">Reglas</button>
       <button data-vista="inteligencia">Inteligencia</button>
       <button data-vista="caza">Caza</button>
+      <button data-vista="campanas">Campañas <span id="pin-campanas" class="pin" hidden>0</span></button>
     </nav>
     <div class="estado">
       <span id="enlace" class="enlace desconectado" title="Estado del canal en tiempo real">
@@ -159,6 +160,51 @@
           <tbody></tbody>
         </table>
         <p id="stix-vacio" class="vacio" hidden>Sin inteligencia ingerida todavía.</p>
+      </section>
+
+      <section class="vista" id="vista-campanas" hidden>
+        <div class="barra-vista"><h2>Campañas distribuidas</h2></div>
+        <p class="nota">
+          Lo que no delata a ningún endpoint por separado. Cincuenta máquinas
+          enumerando el dominio bajo la misma cuenta en cuarenta y ocho horas no
+          es administración: es reconocimiento. Ese hecho solo existe aquí,
+          porque este es el único sitio que ve las cincuenta.
+        </p>
+
+        <table class="tabla" id="tabla-campanas">
+          <thead>
+            <tr><th>patrón</th><th>agrupado por</th><th>endpoints</th>
+                <th>alertas</th><th>ATT&amp;CK</th><th>desde</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <p id="campanas-vacio" class="vacio" hidden>
+          Ninguna campaña distribuida abierta.
+        </p>
+
+        <!-- La evidencia MATERIALIZADA: que maquinas, y cuanto aporto cada una.
+             No se recalcula, porque la ventana es deslizante y dentro de dos
+             dias la consulta que abrio el caso ya no devolveria lo mismo. -->
+        <div id="campana-detalle" hidden>
+          <h3 id="campana-titulo"></h3>
+          <div class="acciones-caza">
+            <button type="button" id="btn-confirmar">Confirmar amenaza</button>
+            <button type="button" id="btn-descartar" class="secundario">
+              Descartar como falso positivo
+            </button>
+          </div>
+          <p class="nota">
+            Descartarla excluye esa clave de la regla. Sin eso, el motor la
+            vuelve a encontrar en la evaluación siguiente y reabre exactamente
+            lo que acabas de descartar.
+          </p>
+          <table class="tabla" id="tabla-evidencia">
+            <thead>
+              <tr><th>endpoint</th><th>alertas</th><th>desde</th><th>hasta</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="vista" id="vista-caza" hidden>

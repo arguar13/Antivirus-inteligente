@@ -119,6 +119,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    // --- Correlacion de APT distribuida (FASE 45) --------------------------
+    //
+    // Un temporizador y no un disparo por alerta: una flota de diez mil
+    // endpoints entrega miles de alertas por minuto y cada evaluacion es una
+    // agregacion sobre la ventana entera. Evaluar por alerta multiplicaria ese
+    // coste para obtener la misma respuesta —una correlacion sobre cuarenta y
+    // ocho horas no cambia por una alerta mas—. Ver `correlador`.
+    let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
+    let tarea_correlador = tokio::spawn(correlador.correr());
+
     // --- API REST del panel -------------------------------------------------
     let estado_api = api::EstadoApi {
         servicio: servicio.clone(),
@@ -166,6 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --- Parada ordenada ----------------------------------------------------
     esperar_senal().await;
     tracing::info!("senal de parada recibida; cerrando");
+    tarea_correlador.abort();
     tarea_grpc.abort();
     tarea_api.abort();
     flota_en_ejecucion.parar();

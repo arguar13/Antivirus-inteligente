@@ -39,6 +39,7 @@ fn ciclo_completo_enrolar_latir_reportar() {
             categoria: "syscall-directa".into(),
             descripcion: "evasion detectada".into(),
             momento_unix: 1_726_000_100,
+            detalles_json: String::new(),
         })
         .unwrap();
     assert!(ack_ev.recibido);
