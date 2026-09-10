@@ -123,6 +123,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         servicio: servicio.clone(),
         cache: cache.clone(),
         margen_desconexion_seg: cfg.margen_desconexion.as_secs() as i64,
+        // Las direcciones por las que este plano de control escucha. Poner
+        // cualquiera de ellas en cuarentena dejaria a la flota entera sin poder
+        // recibir ordenes, asi que se rechaza. Ver `negar_si_es_intocable`.
+        direcciones_propias: vec![cfg.api_addr.ip(), cfg.grpc_addr.ip()]
+            .into_iter()
+            .chain(
+                cfg.flota_addr
+                    .split(':')
+                    .next()
+                    .and_then(|h| h.parse::<std::net::IpAddr>().ok()),
+            )
+            .collect(),
     };
     let app = api::enrutador(estado_api)
         // La consola se sirve desde el propio binario: un solo artefacto que

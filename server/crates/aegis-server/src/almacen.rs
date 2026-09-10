@@ -1479,3 +1479,193 @@ impl Almacen {
         Ok(r.rows_affected() > 0)
     }
 }
+
+// ---------------------------------------------------------------------------
+// FASE 44: cuarentena de enjambre (micro-segmentacion Zero-Trust)
+// ---------------------------------------------------------------------------
+
+/// Canal de PostgreSQL por el que se avisa de un cambio en la cuarentena.
+pub const CANAL_CUARENTENA: &str = "aegis_cuarentena";
+
+/// Una direccion en cuarentena, tal y como la ve la consola.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VistaCuarentena {
+    /// Direccion aislada por toda la flota.
+    pub direccion: std::net::IpAddr,
+    /// Endpoint por cuya causa se ordeno, si lo hay.
+    pub cn_origen: Option<String>,
+    /// Por que.
+    pub motivo: String,
+    /// Quien la ordeno.
+    pub ordenada_por: String,
+    /// Cuando.
+    pub ordenada_en: chrono::DateTime<chrono::Utc>,
+    /// Cuando caduca sola, si caduca.
+    pub expira_en: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl Almacen {
+    /// Pone una direccion en cuarentena en toda la flota.
+    ///
+    /// Es idempotente: volver a ordenarla sobre una direccion ya aislada
+    /// actualiza el motivo y la caducidad en vez de fallar. Durante un
+    /// incidente, la misma orden puede llegar por dos caminos —la deteccion
+    /// automatica y el operador— con segundos de diferencia, y que la segunda
+    /// falle no ayuda a nadie.
+    pub async fn poner_en_cuarentena(
+        &self,
+        direccion: std::net::IpAddr,
+        cn_origen: Option<&str>,
+        motivo: &str,
+        ordenada_por: &str,
+        duracion_horas: Option<i64>,
+    ) -> Resultado<()> {
+        sqlx::query(
+            r#"INSERT INTO cuarentena
+                   (direccion, cn_origen, motivo, ordenada_por, expira_en,
+                    levantada_en, levantada_por)
+               VALUES ($1, $2, $3, $4,
+                       CASE WHEN $5::bigint IS NULL THEN NULL
+                            ELSE now() + make_interval(hours => $5::int) END,
+                       NULL, NULL)
+               ON CONFLICT (direccion) DO UPDATE SET
+                   cn_origen     = EXCLUDED.cn_origen,
+                   motivo        = EXCLUDED.motivo,
+                   ordenada_por  = EXCLUDED.ordenada_por,
+                   ordenada_en   = now(),
+                   expira_en     = EXCLUDED.expira_en,
+                   -- Reordenarla la REACTIVA: si estaba levantada y vuelve a
+                   -- hacer falta, la orden nueva manda.
+                   levantada_en  = NULL,
+                   levantada_por = NULL"#,
+        )
+        .bind(direccion)
+        .bind(cn_origen)
+        .bind(motivo)
+        .bind(ordenada_por)
+        .bind(duracion_horas)
+        .execute(&self.pool)
+        .await?;
+
+        self.avisar_cuarentena().await
+    }
+
+    /// Levanta una cuarentena.
+    pub async fn levantar_cuarentena(
+        &self,
+        direccion: std::net::IpAddr,
+        por: &str,
+    ) -> Resultado<bool> {
+        let r = sqlx::query(
+            r#"UPDATE cuarentena
+                  SET levantada_en = now(), levantada_por = $2
+                WHERE direccion = $1 AND levantada_en IS NULL"#,
+        )
+        .bind(direccion)
+        .bind(por)
+        .execute(&self.pool)
+        .await?;
+
+        if r.rows_affected() > 0 {
+            self.avisar_cuarentena().await?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Avisa a las demas instancias de que la cuarentena cambio.
+    async fn avisar_cuarentena(&self) -> Resultado<()> {
+        sqlx::query("SELECT pg_notify($1, '')")
+            .bind(CANAL_CUARENTENA)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Direcciones en cuarentena AHORA MISMO.
+    ///
+    /// La caducidad se aplica en la consulta y no con una tarea de limpieza: una
+    /// cuarentena caducada tiene que dejar de aplicarse en el instante exacto en
+    /// que caduca, no cuando a un recolector le toque pasar. Si dependiera de
+    /// una tarea, un fallo de esa tarea dejaria a una maquina sin red durante
+    /// horas despues de que su cuarentena hubiera expirado.
+    pub async fn cuarentena_vigente(&self) -> Resultado<Vec<VistaCuarentena>> {
+        let filas = sqlx::query(
+            r#"SELECT direccion, cn_origen, motivo, ordenada_por, ordenada_en, expira_en
+                 FROM cuarentena
+                WHERE levantada_en IS NULL
+                  AND (expira_en IS NULL OR expira_en > now())
+                ORDER BY ordenada_en DESC"#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas
+            .iter()
+            .map(|f| VistaCuarentena {
+                direccion: f.get("direccion"),
+                cn_origen: f.try_get("cn_origen").ok().flatten(),
+                motivo: f.get("motivo"),
+                ordenada_por: f.get("ordenada_por"),
+                ordenada_en: f.get("ordenada_en"),
+                expira_en: f.try_get("expira_en").ok().flatten(),
+            })
+            .collect())
+    }
+
+    /// Cuarentena que se le entrega a UN agente.
+    ///
+    /// Se le quita SU PROPIA direccion. Un endpoint que se bloquea a si mismo
+    /// se queda sin plano de control —deja de poder recibir la orden de que la
+    /// cuarentena se levanto—, y a partir de ahi solo se recupera yendo
+    /// fisicamente a la maquina. El aislamiento del endpoint comprometido es
+    /// otra cosa distinta y tiene su propio mecanismo (`aislar`), que
+    /// deliberadamente deja abierto el canal con el plano de control.
+    pub async fn cuarentena_para(&self, cn: &str) -> Resultado<Vec<std::net::IpAddr>> {
+        let filas = sqlx::query(
+            r#"SELECT c.direccion
+                 FROM cuarentena c
+                WHERE c.levantada_en IS NULL
+                  AND (c.expira_en IS NULL OR c.expira_en > now())
+                  AND c.direccion IS DISTINCT FROM
+                      (SELECT a.direccion_vista FROM agentes a WHERE a.cn = $1)
+                ORDER BY c.direccion"#,
+        )
+        .bind(cn)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas.iter().map(|f| f.get("direccion")).collect())
+    }
+
+    /// Registra la direccion desde la que se conecto un agente.
+    ///
+    /// Solo escribe si CAMBIO. Un agente abre una conexion por cada llamada, y
+    /// escribir en la tabla de inventario en cada una convertiria el latido de
+    /// diez mil endpoints en diez mil escrituras por ciclo, para guardar
+    /// siempre el mismo valor.
+    pub async fn registrar_direccion(
+        &self,
+        cn: &str,
+        direccion: std::net::IpAddr,
+    ) -> Resultado<()> {
+        sqlx::query(
+            r#"UPDATE agentes
+                  SET direccion_vista = $2, direccion_vista_en = now()
+                WHERE cn = $1
+                  AND (direccion_vista IS DISTINCT FROM $2)"#,
+        )
+        .bind(cn)
+        .bind(direccion)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Direccion observada de un agente, si se conoce.
+    pub async fn direccion_de(&self, cn: &str) -> Resultado<Option<std::net::IpAddr>> {
+        let f = sqlx::query("SELECT direccion_vista FROM agentes WHERE cn = $1")
+            .bind(cn)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(f.and_then(|f| f.try_get("direccion_vista").ok().flatten()))
+    }
+}

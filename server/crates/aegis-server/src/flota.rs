@@ -201,6 +201,7 @@ impl ManejadorFlota for ManejadorPersistente {
     ) -> Option<EmpujePolitica> {
         let version_conocida = estado.version_entregada;
         let caza_entregada = estado.caza_entregada.clone();
+        let cuarentena_entregada = estado.cuarentena_entregada.clone();
         // Sin notificador no hay empuje: se cierra el canal en vez de dejar al
         // agente esperando indefinidamente algo que no va a llegar.
         let mut rx = self.avisos.as_ref()?.clone();
@@ -225,7 +226,15 @@ impl ManejadorFlota for ManejadorPersistente {
             let empuje = self
                 .componer_empuje(&cn, version_anunciada, version_conocida, &caza_entregada)
                 .await;
-            if !empuje.comandos_json.is_empty() || !empuje.caza_ql.is_empty() {
+
+            // La cuarentena se empuja cuando CAMBIA respecto a lo que este canal
+            // ya entrego, y tambien la primera vez —cuando no se le ha entregado
+            // nada—. Eso es lo que hace que un endpoint que reconecta reciba la
+            // contencion en vigor sin esperar a que ocurra nada mas.
+            let cuarentena_cambio = empuje.cuarentena_valida
+                && cuarentena_entregada.as_deref() != Some(empuje.cuarentena.as_str());
+
+            if !empuje.comandos_json.is_empty() || !empuje.caza_ql.is_empty() || cuarentena_cambio {
                 return Some(empuje);
             }
 
@@ -248,6 +257,20 @@ impl ManejadorFlota for ManejadorPersistente {
                 }),
             }
         })
+    }
+
+    fn visto_en(&self, cn: &str, direccion: std::net::SocketAddr) {
+        let servicio = self.servicio.clone();
+        let cn = cn.to_string();
+        let ip = direccion.ip();
+        // No se espera al resultado: registrar el inventario de red no puede
+        // retrasar el dialogo con el agente, y si falla se reintentara en la
+        // siguiente conexion, que llega en el proximo latido.
+        self.handle.spawn(async move {
+            if let Err(e) = servicio.almacen().registrar_direccion(&cn, ip).await {
+                tracing::debug!(error = %e, cn = %cn, "no se pudo registrar la direccion");
+            }
+        });
     }
 
     fn caza(&self, cn: &str, req: &ReporteCaza) -> AckCaza {
@@ -410,10 +433,33 @@ impl ManejadorPersistente {
             _ => (String::new(), String::new()),
         };
 
+        // El conjunto COMPLETO de direcciones vigentes, menos la propia del
+        // agente. Ver `cuarentena_para`: un endpoint que se bloquea a si mismo
+        // se queda sin plano de control y solo se recupera yendo a la maquina.
+        let (cuarentena, cuarentena_valida) = match almacen.cuarentena_para(cn).await {
+            Ok(v) => (
+                v.iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                true,
+            ),
+            // Si no se pudo consultar, se marca como NO VALIDA en vez de enviar
+            // una lista vacia: una lista vacia significa "no hay ninguna" y
+            // levantaria todas las cuarentenas del endpoint por un fallo
+            // transitorio de la base de datos.
+            Err(e) => {
+                tracing::warn!(error = %e, cn = %cn, "no se pudo leer la cuarentena vigente");
+                (String::new(), false)
+            }
+        };
+
         let hay_politica_nueva = v.max(0) as u64 > version_conocida;
         EmpujePolitica {
             caza_id,
             caza_ql,
+            cuarentena,
+            cuarentena_valida,
             version: v.max(0) as u64,
             politica_json: if politica.is_null() || !hay_politica_nueva {
                 String::new()

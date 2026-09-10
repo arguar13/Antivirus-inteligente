@@ -30,6 +30,13 @@ pub struct EstadoApi {
     pub cache: Cache,
     /// Margen en segundos para considerar conectado a un agente.
     pub margen_desconexion_seg: i64,
+    /// Direcciones por las que este plano de control es alcanzable.
+    ///
+    /// Se usan para RECHAZAR una cuarentena de enjambre contra el propio plano
+    /// de control. Si se aceptara, cada endpoint de la flota dejaria de poder
+    /// hablar con el —incluido para recibir la orden de levantar esa misma
+    /// cuarentena—, y la recuperacion seria ir maquina por maquina.
+    pub direcciones_propias: Vec<std::net::IpAddr>,
 }
 
 /// Construye el enrutador de la API.
@@ -62,6 +69,12 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         .route("/api/cacerias/{id}", get(obtener_caza))
         .route("/api/cacerias/{id}/cerrar", post(cerrar_caza))
         .route("/api/aegisql/esquema", get(esquema_aegisql))
+        // --- Micro-segmentacion Zero-Trust (FASE 44) ---
+        .route(
+            "/api/cuarentena",
+            get(listar_cuarentena).post(ordenar_cuarentena),
+        )
+        .route("/api/agentes/{cn}/cuarentena", post(cuarentena_de_enjambre))
         // Tiempo real
         .route("/api/ws", get(websocket))
         // Reputacion k-anonima
@@ -1125,4 +1138,237 @@ async fn esquema_aegisql(
         })),
     )
         .into_response()
+}
+
+// ---------------------------------------------------------------------------
+// FASE 44: cuarentena de enjambre
+// ---------------------------------------------------------------------------
+
+/// Orden de cuarentena escrita por un operador.
+#[derive(Deserialize)]
+struct NuevaCuarentena {
+    /// Direccion a aislar de toda la flota.
+    direccion: String,
+    /// Por que.
+    motivo: String,
+    /// Horas hasta que caduque sola. `None` = hasta que se levante a mano.
+    horas: Option<i64>,
+}
+
+/// Pone una direccion en cuarentena en toda la flota.
+async fn ordenar_cuarentena(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Json(p): Json<NuevaCuarentena>,
+) -> axum::response::Response {
+    let operador = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+
+    // La direccion se analiza aqui. Guardarla sin analizar dejaria que una
+    // cadena arbitraria llegara al campo INET y el error apareciera en la base
+    // de datos, no en la consola de quien la escribio.
+    let Ok(ip) = p.direccion.trim().parse::<std::net::IpAddr>() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "no es una direccion IP valida"})),
+        )
+            .into_response();
+    };
+
+    if let Some(r) = negar_si_es_intocable(&estado, ip).await {
+        return r;
+    }
+
+    match estado
+        .servicio
+        .almacen()
+        .poner_en_cuarentena(ip, None, &p.motivo, &operador, p.horas)
+        .await
+    {
+        Ok(()) => {
+            estado
+                .servicio
+                .bus()
+                .publicar(crate::eventos::EventoPanel::CuarentenaCambiada {
+                    direccion: ip.to_string(),
+                    activa: true,
+                    motivo: p.motivo.clone(),
+                    por: operador,
+                });
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({"direccion": ip})),
+            )
+                .into_response()
+        }
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Ordena la cuarentena de enjambre CONTRA UN ENDPOINT concreto.
+///
+/// Es el camino que se usa durante un incidente: el operador no sabe la IP del
+/// endpoint comprometido, sabe cual es la maquina. La direccion la pone el plano
+/// de control desde la que OBSERVO en el handshake mTLS, nunca desde lo que el
+/// agente declare: si viniera del agente, uno comprometido podria hacer que la
+/// flota aislara al controlador de dominio en su lugar.
+async fn cuarentena_de_enjambre(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(cn): Path<String>,
+    Json(p): Json<NuevaCuarentena>,
+) -> axum::response::Response {
+    let operador = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let almacen = estado.servicio.almacen();
+
+    let ip = match almacen.direccion_de(&cn).await {
+        Ok(Some(ip)) => ip,
+        Ok(None) => {
+            // No se puede aislar por red a un endpoint cuya direccion no se ha
+            // observado nunca. Decirlo es mejor que aislar una direccion que
+            // alguien haya escrito a mano y resulte ser la de otra maquina.
+            return (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "error": "no se ha observado ninguna direccion de ese endpoint",
+                    "ayuda": "la direccion se registra cuando el agente conecta por mTLS",
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => return error_500(e).into_response(),
+    };
+
+    if let Some(r) = negar_si_es_intocable(&estado, ip).await {
+        return r;
+    }
+
+    match almacen
+        .poner_en_cuarentena(ip, Some(&cn), &p.motivo, &operador, p.horas)
+        .await
+    {
+        Ok(()) => {
+            estado
+                .servicio
+                .bus()
+                .publicar(crate::eventos::EventoPanel::CuarentenaCambiada {
+                    direccion: ip.to_string(),
+                    activa: true,
+                    motivo: p.motivo.clone(),
+                    por: operador,
+                });
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({"cn": cn, "direccion": ip})),
+            )
+                .into_response()
+        }
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Rechaza poner en cuarentena una direccion que dejaria a la flota sin control.
+///
+/// POR QUE ESTA COMPROBACION EXISTE
+/// --------------------------------
+/// La cuarentena de enjambre corta la red de una direccion en TODA la flota. Si
+/// esa direccion fuera la del propio plano de control, cada endpoint dejaria de
+/// poder hablar con el —incluido para recibir la orden de que la cuarentena se
+/// levanto—. La flota entera quedaria fuera de control de golpe y solo se
+/// recuperaria yendo maquina por maquina.
+///
+/// Es exactamente la clase de orden que alguien teclea a las tres de la manana
+/// copiando una IP del sitio equivocado, y la clase de error que un producto de
+/// seguridad no puede permitirse ejecutar sin protestar.
+async fn negar_si_es_intocable(
+    estado: &EstadoApi,
+    ip: std::net::IpAddr,
+) -> Option<axum::response::Response> {
+    if ip.is_loopback() {
+        return Some(
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "no se pone en cuarentena una direccion de bucle local"
+                })),
+            )
+                .into_response(),
+        );
+    }
+    for propia in &estado.direcciones_propias {
+        if *propia == ip {
+            return Some(
+                (
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({
+                        "error": "esa es una direccion del propio plano de control",
+                        "ayuda": "aislarla dejaria a toda la flota sin poder recibir ordenes, \
+                                  incluida la de levantar esta cuarentena",
+                    })),
+                )
+                    .into_response(),
+            );
+        }
+    }
+    None
+}
+
+async fn listar_cuarentena(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Query(q): Query<serde_json::Value>,
+) -> axum::response::Response {
+    let operador = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+
+    // Un `levantar=<ip>` en la consulta retira la cuarentena. Se acepta aqui
+    // ademas de como POST porque levantar una contencion tiene que ser al menos
+    // tan facil como ponerla: si retirarla es dificil, el operador la deja
+    // puesta "por si acaso" y acaba habiendo maquinas sanas sin red.
+    if let Some(dir) = q.get("levantar").and_then(|v| v.as_str()) {
+        let Ok(ip) = dir.parse::<std::net::IpAddr>() else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "no es una direccion IP valida"})),
+            )
+                .into_response();
+        };
+        return match estado
+            .servicio
+            .almacen()
+            .levantar_cuarentena(ip, &operador)
+            .await
+        {
+            Ok(true) => {
+                estado
+                    .servicio
+                    .bus()
+                    .publicar(crate::eventos::EventoPanel::CuarentenaCambiada {
+                        direccion: ip.to_string(),
+                        activa: false,
+                        motivo: String::new(),
+                        por: operador,
+                    });
+                (StatusCode::OK, Json(serde_json::json!({"levantada": true}))).into_response()
+            }
+            Ok(false) => (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "no estaba en cuarentena"})),
+            )
+                .into_response(),
+            Err(e) => error_500(e).into_response(),
+        };
+    }
+
+    match estado.servicio.almacen().cuarentena_vigente().await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
 }

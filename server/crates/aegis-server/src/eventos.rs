@@ -110,6 +110,17 @@ pub enum EventoPanel {
         /// Error informado, si lo hubo.
         error: String,
     },
+    /// Ha cambiado la cuarentena de enjambre.
+    CuarentenaCambiada {
+        /// Direccion afectada.
+        direccion: String,
+        /// Si queda aislada de la flota.
+        activa: bool,
+        /// Por que.
+        motivo: String,
+        /// Operador que lo ordeno.
+        por: String,
+    },
     /// Ha llegado inteligencia nueva.
     InteligenciaNueva {
         /// Agente que la entrego.

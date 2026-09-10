@@ -19,7 +19,7 @@
 use sqlx::postgres::PgListener;
 use tokio::sync::watch;
 
-use crate::almacen::{CANAL_CAZA, CANAL_POLITICA};
+use crate::almacen::{CANAL_CAZA, CANAL_CUARENTENA, CANAL_POLITICA};
 use crate::error::Resultado;
 
 /// Lo que se reparte a los canales de suscripcion cuando algo cambia.
@@ -62,7 +62,9 @@ impl Notificador {
             generacion: 0,
         });
         let mut escucha = PgListener::connect(pg_url).await?;
-        escucha.listen_all([CANAL_POLITICA, CANAL_CAZA]).await?;
+        escucha
+            .listen_all([CANAL_POLITICA, CANAL_CAZA, CANAL_CUARENTENA])
+            .await?;
 
         tokio::spawn(async move {
             let mut generacion = 0u64;
@@ -71,9 +73,9 @@ impl Notificador {
                     Ok(aviso) => {
                         generacion = generacion.wrapping_add(1);
                         let anterior = tx.borrow().version_politica;
-                        // Una caceria NO cambia la version de politica: el aviso
-                        // solo sirve para despertar el canal, que despues
-                        // averigua si a ese agente le toca alguna.
+                        // Ni una caceria ni una cuarentena cambian la version de
+                        // politica: el aviso solo sirve para despertar el canal,
+                        // que despues averigua que le toca a ese agente.
                         let version_politica = if aviso.channel() == CANAL_POLITICA {
                             aviso.payload().parse::<i64>().unwrap_or(anterior)
                         } else {

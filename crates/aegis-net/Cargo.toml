@@ -19,6 +19,9 @@ xdp = ["dep:libbpf-rs", "dep:libc"]
 
 [dependencies]
 aegis-ipc = { path = "../aegis-ipc" }
+# La micro-segmentacion necesita las DOS capas: XDP para el ingreso (que vive
+# aqui) y nftables para el egreso (que vive en aegis-scal). Ver `segmentacion`.
+aegis-scal = { path = "../aegis-scal" }
 thiserror = "2"
 libbpf-rs = { version = "0.24", optional = true }
 libc = { version = "0.2", optional = true }

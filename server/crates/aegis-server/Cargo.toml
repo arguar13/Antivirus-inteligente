@@ -35,6 +35,11 @@ prost = "0.13"
 # --- Persistencia -----------------------------------------------------------
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls", "postgres", "macros", "migrate", "json", "chrono", "uuid",
+    # Tipo INET de PostgreSQL. Se usa para las direcciones de la cuarentena:
+    # con clave de texto, "10.0.0.5", "10.0.0.5 " y "010.0.0.5" serian tres
+    # cuarentenas distintas para el mismo host, y levantar una dejaria las
+    # otras dos puestas. Da soporte directo a std::net::IpAddr, sin envoltorio.
+    "ipnet",
 ] }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 

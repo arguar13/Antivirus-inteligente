@@ -28,3 +28,6 @@ pub mod xdp;
 pub use error::NetError;
 pub use packet::{Packet, PacketBuilder, ParseError, TcpFlags, Transport};
 pub use scan::{ScanConfig, ScanDetector, ScanKind, ScanVerdict};
+
+/// Micro-segmentacion Zero-Trust: cuarentena de enjambre en el endpoint.
+pub mod segmentacion;

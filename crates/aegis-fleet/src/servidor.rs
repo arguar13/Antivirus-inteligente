@@ -48,6 +48,15 @@ pub struct EstadoCanal {
     pub version_entregada: u64,
     /// Identificador de la ultima caceria entregada, o vacio si ninguna.
     pub caza_entregada: String,
+    /// Cuarentena que este canal ya entrego, si entrego alguna.
+    ///
+    /// `None` significa "todavia no se le ha dicho nada de cuarentena a este
+    /// agente", que NO es lo mismo que `Some("")` —"no hay ninguna vigente"—.
+    /// Confundirlos tiene dos consecuencias opuestas y ambas malas: con `None`
+    /// tratado como vacio, un endpoint que reconecta nunca recibiria la
+    /// cuarentena en vigor; con vacio tratado como desconocido, cada latido del
+    /// canal reenviaria la lista completa a diez mil endpoints.
+    pub cuarentena_entregada: Option<String>,
 }
 
 /// Logica de negocio del plano de control.
@@ -102,6 +111,25 @@ pub trait ManejadorFlota: Send + Sync {
     ) -> Option<EmpujePolitica> {
         None
     }
+
+    /// Informa de la direccion de red desde la que se conecto un agente.
+    ///
+    /// POR QUE LA IP SALE DE AQUI Y NO DE LO QUE EL AGENTE DIGA
+    /// -------------------------------------------------------
+    /// Una cuarentena de enjambre hace que TODA la flota deje de hablar con una
+    /// direccion. Si esa direccion la declarara el propio agente, un endpoint
+    /// comprometido podria declarar la del controlador de dominio, la de la
+    /// puerta de enlace o la del propio plano de control, y conseguir que el
+    /// producto de seguridad aislara a un tercero —o a la red entera— por el.
+    ///
+    /// La direccion que llega aqui es la del socket de una conexion TCP con
+    /// handshake mTLS completado. Falsificarla exigiria estar en la ruta y
+    /// ademas tener un certificado firmado por la CA de la flota, que es
+    /// justamente el atacante que este producto no promete detener con esto.
+    ///
+    /// El defecto no hace nada: un manejador que no necesite inventario de red
+    /// no tiene por que implementarlo.
+    fn visto_en(&self, _cn: &str, _direccion: std::net::SocketAddr) {}
 
     /// Recibe el resultado de una caceria AegisQL.
     ///
@@ -437,8 +465,11 @@ impl ServidorFlota {
                 let _ = sock.set_nodelay(true);
                 let cfg = cfg.clone();
                 let manejador = manejador.clone();
+                // La direccion se toma del SOCKET, antes de cualquier byte que
+                // envie el agente. Ver `ManejadorFlota::visto_en`.
+                let par = sock.peer_addr().ok();
                 std::thread::spawn(move || {
-                    let _ = atender_conexion(cfg, manejador, sock);
+                    let _ = atender_conexion(cfg, manejador, sock, par);
                 });
             }
         });
@@ -498,6 +529,7 @@ fn atender_conexion(
     cfg: Arc<rustls::ServerConfig>,
     manejador: Arc<dyn ManejadorFlota>,
     sock: TcpStream,
+    par: Option<std::net::SocketAddr>,
 ) -> Resultado<()> {
     let conn = ServerConnection::new(cfg).map_err(|e| FleetError::Tls {
         op: "ServerConnection::new",
@@ -515,6 +547,13 @@ fn atender_conexion(
         };
         if cn.is_none() {
             cn = cn_del_par(tls.conn.peer_certificates());
+            // Se informa UNA vez por conexion, en cuanto hay identidad
+            // autenticada: la direccion sola no vale de nada, y hacerlo en cada
+            // marco convertiria el inventario de red en una escritura por
+            // mensaje.
+            if let (Some(id), Some(dir)) = (cn.as_deref(), par) {
+                manejador.visto_en(id, dir);
+            }
         }
         let Some(identidad) = cn.clone() else {
             let _ = escribir_marco(&mut tls, ESTADO_RECHAZADO, b"sin identidad autenticada");
@@ -562,6 +601,9 @@ fn atender_suscripcion(
     let mut estado = EstadoCanal {
         version_entregada: req.version_conocida,
         caza_entregada: String::new(),
+        // Nada entregado todavia: el primer empuje llevara la cuarentena en
+        // vigor, que es lo que necesita un endpoint que acaba de reconectar.
+        cuarentena_entregada: None,
     };
     loop {
         let Some(empuje) = manejador.esperar_empuje(cn, &estado, PLAZO_KEEPALIVE) else {
@@ -573,6 +615,9 @@ fn atender_suscripcion(
         }
         if !empuje.caza_id.is_empty() {
             estado.caza_entregada = empuje.caza_id.clone();
+        }
+        if empuje.cuarentena_valida {
+            estado.cuarentena_entregada = Some(empuje.cuarentena.clone());
         }
         // Un fallo de escritura significa que el agente se fue: se termina sin
         // ruido, que es lo normal cuando un endpoint se apaga.

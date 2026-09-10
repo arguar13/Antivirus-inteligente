@@ -735,6 +735,22 @@ pub struct EmpujePolitica {
     pub caza_id: String,
     /// Consulta AegisQL a ejecutar.
     pub caza_ql: String,
+    /// Direcciones que este endpoint debe dejar de atender, separadas por coma.
+    ///
+    /// Es el CONJUNTO COMPLETO vigente, no un incremento. Enviar incrementos
+    /// obligaria a que los dos extremos estuvieran de acuerdo sobre cuales se
+    /// aplicaron ya, y un mensaje perdido dejaria a un endpoint con una regla
+    /// de firewall que nadie recuerda haber puesto —o, peor, sin una que
+    /// creemos puesta—. Con el conjunto completo, cada empuje deja al endpoint
+    /// en un estado conocido, y una reconexion basta para reconciliar.
+    ///
+    /// El campo `cuarentena_valida` distingue "no hay ninguna" de "este empuje
+    /// no habla de cuarentena", que en un mecanismo de contencion no pueden
+    /// confundirse: interpretar lo segundo como lo primero levantaria todas las
+    /// cuarentenas de la flota con un latido de canal.
+    pub cuarentena: String,
+    /// Si este empuje lleva estado de cuarentena.
+    pub cuarentena_valida: bool,
     /// Si el marco es solo una senal de vida sin contenido nuevo.
     ///
     /// Un canal que solo habla cuando hay novedades es indistinguible de un
@@ -753,6 +769,8 @@ impl EmpujePolitica {
         escribir_bool(&mut b, 4, self.es_keepalive);
         escribir_str(&mut b, 5, &self.caza_id);
         escribir_str(&mut b, 6, &self.caza_ql);
+        escribir_str(&mut b, 7, &self.cuarentena);
+        escribir_bool(&mut b, 8, self.cuarentena_valida);
         b
     }
 
@@ -768,6 +786,8 @@ impl EmpujePolitica {
                 Campo::Entero(4, v) => m.es_keepalive = v != 0,
                 Campo::Bytes(5, v) => m.caza_id = como_str(v)?,
                 Campo::Bytes(6, v) => m.caza_ql = como_str(v)?,
+                Campo::Bytes(7, v) => m.cuarentena = como_str(v)?,
+                Campo::Entero(8, v) => m.cuarentena_valida = v != 0,
                 _ => {}
             }
         }

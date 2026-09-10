@@ -233,6 +233,7 @@ name = "aegis-net"
 version = "0.1.0"
 dependencies = [
  "aegis-ipc",
+ "aegis-scal",
  "libbpf-rs",
  "libc",
  "thiserror 2.0.20",
