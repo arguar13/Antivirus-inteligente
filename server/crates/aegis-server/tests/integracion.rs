@@ -44,6 +44,26 @@ fn cn_unico(prefijo: &str) -> String {
     format!("{prefijo}-{}", uuid::Uuid::new_v4().simple())
 }
 
+/// Serializa las pruebas que afirman algo sobre LA POLITICA ACTIVA.
+///
+/// Casi todo en este esquema se aisla por CN: cada prueba inventa el suyo y no
+/// se cruza con las demas. La politica activa es la excepcion, y no por un
+/// descuido: es un SINGLETON GLOBAL por diseno —un indice unico parcial impide
+/// que haya dos—, porque dos politicas activas dejarian la flota en dos
+/// configuraciones distintas segun a quien preguntara cada agente.
+///
+/// Consecuencia: una prueba que publica y despues comprueba "la activa es la
+/// mia" es correcta solo si nadie mas publica entremedias. Con el runner de
+/// cargo lanzando veinte pruebas en paralelo, eso fallaba una de cada tres
+/// veces, y el fallo no tenia nada que ver con lo que la prueba pretendia
+/// comprobar.
+///
+/// Lo que NO se hizo: relajar la asercion para que "casi siempre" pase, ni
+/// marcar las pruebas como ignoradas, ni pasarlas a `--test-threads=1` (lo que
+/// habria serializado tambien las diecisiete que no lo necesitan). Se serializa
+/// el acceso al recurso que de verdad es unico, y solo entre quienes lo tocan.
+static CERROJO_POLITICA: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 // ---------------------------------------------------------------------------
 // Persistencia
 // ---------------------------------------------------------------------------
@@ -106,11 +126,16 @@ async fn el_evento_se_guarda_clasificado_en_mitre_att_ck() {
         .await
         .unwrap();
 
-    let alertas = almacen.listar_alertas(50, true).await.unwrap();
-    let mia = alertas
-        .iter()
-        .find(|a| a.cn_agente == cn)
-        .expect("la alerta");
+    // Se pregunta POR ESTE endpoint y no se filtra a ojo un listado global.
+    //
+    // El listado global ordena por gravedad y recencia sobre toda la flota: en
+    // cuanto la base de datos acumula unas decenas de alertas mas graves, esta
+    // deja de aparecer en la primera pagina y la prueba falla por un motivo que
+    // no tiene nada que ver con lo que pretende comprobar. Una prueba que
+    // depende del estado global acumulado no prueba nada.
+    let alertas = almacen.listar_alertas_de_agente(&cn, 10).await.unwrap();
+    let mia = alertas.first().expect("la alerta del endpoint");
+    assert_eq!(alertas.len(), 1, "este endpoint solo genero una alerta");
     // La categoria del agente se ha traducido a la tecnica del marco ATT&CK:
     // eso es lo que permite correlacionarla con inteligencia externa.
     assert_eq!(mia.tecnica_mitre.as_deref(), Some("T1055"));
@@ -184,6 +209,7 @@ async fn el_comando_de_aislamiento_llega_al_agente_por_su_latido() {
 
 #[tokio::test]
 async fn solo_puede_haber_una_politica_activa() {
+    let _politica = CERROJO_POLITICA.lock().await;
     let Some(almacen) = almacen_de_pruebas().await else {
         eprintln!("OMITIDA: no hay PostgreSQL");
         return;
@@ -222,6 +248,7 @@ async fn solo_puede_haber_una_politica_activa() {
 /// politica activa.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn publicaciones_de_politica_simultaneas_se_serializan_sin_perder_ninguna() {
+    let _politica = CERROJO_POLITICA.lock().await;
     let Some(almacen) = almacen_de_pruebas().await else {
         eprintln!("OMITIDA: no hay PostgreSQL");
         return;
@@ -793,6 +820,7 @@ async fn un_texto_desmesurado_del_endpoint_se_recorta_antes_de_tocar_la_base_de_
 
 #[tokio::test]
 async fn el_motor_compila_las_reglas_activas_en_la_politica_publicada() {
+    let _politica = CERROJO_POLITICA.lock().await;
     let Some(almacen) = almacen_de_pruebas().await else {
         eprintln!("OMITIDA: no hay PostgreSQL");
         return;
@@ -848,6 +876,7 @@ async fn el_motor_compila_las_reglas_activas_en_la_politica_publicada() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn una_regla_global_llega_al_agente_real_por_empuje_sin_esperar_su_latido() {
+    let _politica = CERROJO_POLITICA.lock().await;
     let Some(almacen) = almacen_de_pruebas().await else {
         eprintln!("OMITIDA: no hay PostgreSQL");
         return;
@@ -1032,6 +1061,7 @@ async fn el_agente_entrega_stix_y_linaje_por_el_canal_mtls_y_queda_en_postgres()
 
 #[tokio::test]
 async fn la_politica_compilada_es_la_que_el_agente_puede_aplicar() {
+    let _politica = CERROJO_POLITICA.lock().await;
     // Comprobacion de forma: el documento que baja a la flota tiene que llevar
     // su version dentro y las reglas con sus parametros ya normalizados, porque
     // el agente lo guarda en disco y lo aplica sin volver a preguntar.

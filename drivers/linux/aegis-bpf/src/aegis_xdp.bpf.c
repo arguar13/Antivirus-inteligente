@@ -22,13 +22,11 @@
  * comprobacion, porque el contenido del paquete lo controla el atacante.
  */
 
-#include <linux/bpf.h>
-#include <linux/if_ether.h>
-#include <linux/ip.h>
-#include <linux/ipv6.h>
-#include <linux/tcp.h>
-#include <linux/udp.h>
-#include <linux/in.h>
+/* vmlinux.h en lugar de las cabeceras UAPI del sistema: trae `struct ethhdr`,
+ * `iphdr`, `ipv6hdr`, `tcphdr`, `xdp_md` y los enums de IPPROTO y de XDP con
+ * los tipos autenticos del kernel, y marcados para reubicacion CO-RE. Los
+ * EtherType son macros y no viajan en el BTF: los aporta aegis_bpf_common.h. */
+#include "vmlinux.h"
 
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
@@ -187,11 +185,11 @@ int aegis_xdp_filter(struct xdp_md *ctx)
         return XDP_PASS;
 
     __u16 proto_l3 = bpf_ntohs(eth->h_proto);
-    if (proto_l3 != ETH_P_IP) {
+    if (proto_l3 != AEGIS_ETH_P_IP) {
         /* IPv6 y el resto de protocolos pasan sin inspeccionar. Decirlo en un
          * contador y no en silencio: un punto ciego que nadie mide es un punto
          * ciego que nadie arregla. */
-        if (proto_l3 == ETH_P_IPV6)
+        if (proto_l3 == AEGIS_ETH_P_IPV6)
             xdp_stat_inc(AEGIS_XDP_STAT_IPV6_UNINSPECTED);
         return XDP_PASS;
     }

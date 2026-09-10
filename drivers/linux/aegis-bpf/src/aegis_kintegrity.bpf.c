@@ -48,7 +48,11 @@
  *     verificador ("the sequence of N jumps is too complex").
  */
 
-#include <linux/bpf.h>
+/* vmlinux.h en lugar de <linux/bpf.h>: ademas de los tipos de kernel, es quien
+ * aporta `struct task_struct` DEFINIDA y `struct bpf_iter_task` tal y como las
+ * conoce el kernel de destino, que es justo lo que exigen las kfuncs de abajo. */
+#include "vmlinux.h"
+
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 
@@ -71,14 +75,12 @@ char LICENSE[] SEC("license") = "GPL";
  *     delante: una declaracion adelantada es BTF_KIND_FWD y no casa con el
  *     BTF_KIND_STRUCT del kernel.
  *   - El PID es `s32` en el BTF del kernel, no `int`.
+ *
+ * Las dos las resuelve vmlinux.h por construccion, y por eso ya no hay aqui ni
+ * un `typedef int s32` ni una `struct bpf_iter_task` opaca escritos a mano:
+ * eran precisamente el tipo de declaracion que acierta hoy y miente manana.
+ * Ahora `s32` y `bpf_iter_task` son las del BTF del kernel.
  * ------------------------------------------------------------------------ */
-
-typedef int s32;
-
-/* Opaca: el kernel la valida por BTF, solo importan tamano y alineacion. */
-struct bpf_iter_task {
-    unsigned long long __opaque[3];
-} __attribute__((aligned(8)));
 
 extern struct task_struct *bpf_task_from_pid(s32 pid) __ksym;
 extern void bpf_task_release(struct task_struct *p) __ksym;
@@ -126,7 +128,7 @@ static __always_inline void aegis_ki_retratar(struct task_struct *t,
                                               uint32_t gen)
 {
     out->tgid = BPF_CORE_READ(t, tgid);
-    out->start_boottime = BPF_CORE_READ(t, start_boottime);
+    out->start_boottime = aegis_inicio_de_tarea(t);
     out->gen = gen;
     out->flags = 0;
     out->_pad = 0;
@@ -276,7 +278,7 @@ int aegis_ki_confirmar(struct aegis_ki_confirm *c)
     struct task_struct *t = bpf_task_from_pid(c->tid);
     if (t) {
         c->en_pidmap = 1;
-        c->start_boottime = BPF_CORE_READ(t, start_boottime);
+        c->start_boottime = aegis_inicio_de_tarea(t);
         c->tgid = BPF_CORE_READ(t, tgid);
         bpf_task_release(t);
     }
@@ -297,7 +299,7 @@ int aegis_ki_confirmar(struct aegis_ki_confirm *c)
         while ((p = bpf_iter_task_next(&it))) {
             if (BPF_CORE_READ(p, pid) == b.tid) {
                 b.hallado = 1;
-                b.start_boottime = BPF_CORE_READ(p, start_boottime);
+                b.start_boottime = aegis_inicio_de_tarea(p);
                 b.tgid = BPF_CORE_READ(p, tgid);
                 /* No se corta el bucle: el iterador tiene que agotarse o
                  * quedarse en un estado que el verificador no acepta al

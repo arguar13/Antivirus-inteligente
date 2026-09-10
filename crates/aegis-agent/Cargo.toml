@@ -17,6 +17,19 @@ default = ["bpf"]
 # privilegios: esa logica es la mayor parte del valor y no debe depender de
 # poder cargar codigo en el kernel.
 bpf = ["dep:libbpf-rs", "dep:libc"]
+# Construccion hermetica: libbpf, libelf y zlib se compilan DESDE FUENTE y se
+# enlazan estaticamente en vez de tomarse del sistema.
+#
+# Es lo que hace posible un artefacto universal. Sin esto, libbpf-rs enlaza
+# libelf.so y libz.so del anfitrion, y el agente deja de arrancar en cualquier
+# distribucion cuyo `libelf.so.1` no sea el que habia en la maquina de
+# construccion. Como los tres son dependencias con codigo C, se compilan con el
+# compilador del sysroot musl (ver tools/toolchain/preparar_musl.sh), de modo
+# que todo el binario habla una unica ABI de libc.
+#
+# No entra por defecto porque compilar elfutils y zlib en cada `cargo build` de
+# desarrollo cuesta minutos y no aporta nada en local.
+hermetico = ["bpf", "libbpf-rs/vendored"]
 
 [dependencies]
 aegis-scal = { path = "../aegis-scal" }

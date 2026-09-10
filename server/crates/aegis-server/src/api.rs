@@ -44,6 +44,7 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         .route("/api/agentes/{cn}", get(obtener_agente))
         .route("/api/agentes/{cn}/comando", get(tomar_comando))
         .route("/api/alertas", get(listar_alertas))
+        .route("/api/agentes/{cn}/alertas", get(listar_alertas_de_agente))
         // Respuesta de un clic
         .route("/api/agentes/{cn}/aislar", post(aislar))
         .route("/api/agentes/{cn}/liberar", post(liberar))
@@ -205,6 +206,32 @@ async fn listar_agentes(
         .servicio
         .almacen()
         .listar_agentes(estado.margen_desconexion_seg, limite)
+        .await
+    {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Lista las alertas de UN endpoint.
+///
+/// El listado global ordena por gravedad y recencia sobre toda la flota, asi
+/// que en un despliegue grande las alertas de una maquina concreta no salen en
+/// las primeras paginas. Para la vista de detalle hace falta preguntar por ella.
+async fn listar_alertas_de_agente(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(cn): Path<String>,
+    Query(q): Query<Limite>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let limite = q.limite.unwrap_or(100).clamp(1, 5_000);
+    match estado
+        .servicio
+        .almacen()
+        .listar_alertas_de_agente(&cn, limite)
         .await
     {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),

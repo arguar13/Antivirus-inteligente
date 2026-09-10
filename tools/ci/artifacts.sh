@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
 #
-# Job de CI: construccion de los artefactos finales de lanzamiento.
+# Job de CI: empaquetado de los binarios para el objetivo del ANFITRION.
 #
 # Produce los binarios de release, sus sumas SHA-256 y un manifiesto de
 # procedencia (commit, compilador, objetivo, fecha). En un producto de seguridad
 # el artefacto ES la superficie de confianza del cliente: hay que poder decir
 # exactamente de que fuente y con que compilador salio cada byte.
 #
-# Enlazado estatico: se intenta el objetivo musl, que produce binarios sin
-# dependencias de la libc del sistema —despliegan en cualquier distribucion, que
-# es justo lo que hace falta en una flota heterogenea—. Donde falte el
-# compilador cruzado de C (varios crates llevan C: yara-x, ring, libbpf), se cae
-# con honestidad al objetivo del anfitrion y se DICE que el binario es dinamico.
+# QUE ES Y QUE NO ES ESTE JOB
+# ---------------------------
+# Este job valida el EMPAQUETADO: que los binarios que se publican compilan en
+# release, salen del tamano esperado, son ELF validos y arrancan.
+#
+# Los artefactos UNIVERSALES —los que se entregan a un cliente, sin dependencia
+# alguna de la libc del anfitrion— los produce tools/ci/hermetico.sh, que si
+# tiene el sysroot musl completo que hace falta.
+#
+# Antes este script intentaba el objetivo musl por su cuenta en cuanto veia un
+# `musl-gcc` en el PATH. Eso resultaba en un fallo garantizado: el musl-gcc que
+# empaquetan las distribuciones no trae las cabeceras UAPI del kernel, y libbpf
+# muere con "asm/types.h: No such file or directory". Adivinar si un toolchain
+# sirve por la presencia de un binario es justo el tipo de suposicion que hace
+# que un pipeline falle sin explicar por que. Ahora no se adivina: quien quiere
+# artefactos estaticos llama al job que sabe construirlos.
 #
 # Uso:  tools/ci/artifacts.sh
 #   AEGIS_TARGET=<triple>  fuerza un objetivo concreto.
-#   AEGIS_STATIC=1         exige enlazado estatico (falla si no se consigue).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_comun.sh"
 cd "$RAIZ"
@@ -23,39 +33,12 @@ cd "$RAIZ"
 titulo "Job: artifacts (binarios de lanzamiento)"
 
 DIST="$RAIZ/dist"
-MUSL="x86_64-unknown-linux-musl"
 ANFITRION="$(rustc -vV 2>/dev/null | awk '/^host:/{print $2}')"
-
-# --- Eleccion del objetivo --------------------------------------------------
-elegir_objetivo() {
-    if [ -n "${AEGIS_TARGET:-}" ]; then
-        echo "$AEGIS_TARGET"; return
-    fi
-    # musl solo si el objetivo esta instalado Y hay compilador de C cruzado,
-    # porque las dependencias con codigo C no enlazan sin el.
-    if rustup target list --installed 2>/dev/null | grep -qx "$MUSL" && hay musl-gcc; then
-        echo "$MUSL"; return
-    fi
-    echo "$ANFITRION"
-}
-OBJETIVO="$(elegir_objetivo)"
+OBJETIVO="${AEGIS_TARGET:-$ANFITRION}"
 
 paso "objetivo de compilacion"
-if [ "$OBJETIVO" = "$MUSL" ]; then
-    ok "$OBJETIVO (enlazado estatico)"
-else
-    ok "$OBJETIVO (enlazado dinamico contra la libc del sistema)"
-    if [ "${AEGIS_STATIC:-0}" = "1" ]; then
-        fallo "se exigio enlazado estatico pero falta el objetivo musl o musl-gcc"
-        echo "      | instala:  rustup target add $MUSL && apt-get install -y musl-tools"
-        exit 1
-    fi
-    if ! rustup target list --installed 2>/dev/null | grep -qx "$MUSL"; then
-        omitido "musl no instalado: los binarios dependeran de la libc del sistema"
-    elif ! hay musl-gcc; then
-        omitido "falta musl-gcc (paquete musl-tools): varias dependencias llevan C"
-    fi
-fi
+ok "$OBJETIVO"
+echo "      | artefactos universales (sin dependencia de la libc): tools/ci/hermetico.sh"
 
 # --- Binarios que se publican ----------------------------------------------
 # paquete:binario. Son los que un cliente despliega; el resto son utilidades
@@ -116,11 +99,6 @@ for b in "${CONSTRUIDOS[@]}"; do
     printf '      | %-18s %s\n' "$b" "$descripcion"
 done
 ok "$ESTATICOS estatico(s), $DINAMICOS dinamico(s)"
-
-if [ "${AEGIS_STATIC:-0}" = "1" ] && [ "$DINAMICOS" -ne 0 ]; then
-    fallo "se exigio enlazado estatico y $DINAMICOS binario(s) salieron dinamicos"
-    exit 1
-fi
 
 # --- Procedencia y sumas ----------------------------------------------------
 paso "sumas SHA-256 y manifiesto de procedencia"

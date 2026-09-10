@@ -49,6 +49,7 @@ declare -a JOBS=(
     "servidor"
     "despliegue"
     "artifacts"
+    "hermetico"
 )
 
 comando_de_job() {
@@ -62,6 +63,7 @@ comando_de_job() {
         docs)         echo "./tools/check-links.sh" ;;
         servidor)     echo "./tools/ci/servidor.sh" ;;
         despliegue)   echo "./tools/ci/despliegue.sh" ;;
+        hermetico)    echo "./tools/ci/hermetico.sh" ;;
         artifacts)    echo "./tools/ci/artifacts.sh" ;;
         *)            echo "" ;;
     esac

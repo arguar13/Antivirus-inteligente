@@ -1,16 +1,12 @@
 /*
  * AegisCore - definiciones compartidas de los programas eBPF.
  *
- * NO se usa vmlinux.h. En su lugar se declaran solo los campos de kernel que
- * los programas realmente leen, marcados con preserve_access_index para que
- * libbpf los reubique via CO-RE contra el BTF del kernel de destino.
- *
- * Es una tecnica soportada y aqui es la correcta por tres razones:
- *   1. Elimina bpftool del pipeline de compilacion (un vmlinux.h generado son
- *      ~100.000 lineas que hay que regenerar por cada kernel de referencia).
- *   2. Hace explicito y auditable EXACTAMENTE que toca el codigo de kernel:
- *      la superficie completa cabe en esta pantalla.
- *   3. Sigue siendo CO-RE: un unico binario funciona en kernels distintos.
+ * Aqui NO hay tipos de kernel. Los aporta `vmlinux.h`, generado del BTF del
+ * kernel (ver el Makefile): asi los anchos y los signos de cada campo son los
+ * autenticos, y libbpf reubica los accesos via CO-RE contra el kernel de
+ * destino. Este fichero contiene solo lo que es de AegisCore —la disposicion
+ * de los registros del ring, la configuracion compartida con Ring 3 y las
+ * constantes UAPI que se usan— y por eso se incluye DESPUES de vmlinux.h.
  */
 #ifndef AEGIS_BPF_COMMON_H
 #define AEGIS_BPF_COMMON_H
@@ -28,48 +24,49 @@
 #endif
 
 /* ------------------------------------------------------------------------
- * Estructuras de kernel. Solo los campos que se leen.
+ * Relocalizacion de tipos: el instante de arranque de una tarea
+ *
+ * `task_struct` guarda el instante en que arranco la tarea en la base
+ * monotona del arranque. Ese campo se llamo `real_start_time` hasta Linux 5.4
+ * y `start_boottime` desde 5.5. AegisCore lo necesita porque es la mitad de la
+ * IDENTIDAD estable de un proceso: el PID se recicla, el par (pid, instante de
+ * arranque) no. Sin el, dos procesos distintos que reutilizan un PID se
+ * confunden en el grafo de linaje, y ahi es donde se esconde un atacante.
+ *
+ * Esto es exactamente el problema para el que existe CO-RE, y se resuelve con
+ * sus dos mecanismos:
+ *
+ *   - `bpf_core_field_exists` pregunta al BTF del kernel de DESTINO si el campo
+ *     nuevo esta. La respuesta se resuelve al cargar, no al compilar.
+ *   - un "sabor" de tipo (`___pre55`) declara el campo viejo. libbpf ignora
+ *     todo lo que sigue a `___` al buscar el tipo en el kernel, asi que este
+ *     sabor casa con `struct task_struct` y permite pedir un campo que el
+ *     vmlinux.h con el que compilamos ya no tiene.
+ *
+ * La rama que no corresponda al kernel de destino queda como codigo muerto y el
+ * verificador la poda. Resultado: UN solo bytecode que lee el campo correcto
+ * tanto en un RHEL 8 como en un kernel 6.x.
  * ------------------------------------------------------------------------ */
 
-struct task_struct {
-    int pid;                            /* TID en terminologia de kernel     */
-    int tgid;                           /* PID en terminologia de userland   */
-    struct task_struct *real_parent;
-    struct task_struct *group_leader;
-    unsigned long long start_boottime;  /* ns desde el arranque, monotono    */
-    char comm[16];                      /* nombre corto, para el informe     */
+/* Solo tiene sentido dentro de una unidad de traduccion de eBPF, que es donde
+ * existen `task_struct` y las macros de CO-RE. El guardia lo pone vmlinux.h. */
+#ifdef __VMLINUX_H__
+#include <bpf/bpf_core_read.h>
+#include <bpf/bpf_helpers.h>
+
+struct task_struct___pre55 {
+    __u64 real_start_time;
 } __attribute__((preserve_access_index));
 
-/* Contexto comun de los tracepoints de syscall. */
-struct trace_event_raw_sys_enter {
-    unsigned long long unused;
-    long int id;
-    unsigned long args[6];
-} __attribute__((preserve_access_index));
+static __always_inline __u64 aegis_inicio_de_tarea(struct task_struct *tarea)
+{
+    if (bpf_core_field_exists(tarea->start_boottime))
+        return BPF_CORE_READ(tarea, start_boottime);
 
-/* Contexto de sched:sched_process_exit. */
-struct trace_event_raw_sched_process_template {
-    unsigned long long unused;
-    char comm[16];
-    int pid;
-    int prio;
-} __attribute__((preserve_access_index));
-
-/* Contexto de sock:inet_sock_set_state. */
-struct trace_event_raw_inet_sock_set_state {
-    unsigned long long unused;
-    const void *skaddr;
-    int oldstate;
-    int newstate;
-    __u16 sport;
-    __u16 dport;
-    __u16 family;
-    __u16 protocol;
-    __u8 saddr[4];
-    __u8 daddr[4];
-    __u8 saddr_v6[16];
-    __u8 daddr_v6[16];
-} __attribute__((preserve_access_index));
+    struct task_struct___pre55 *antigua = (void *)tarea;
+    return BPF_CORE_READ(antigua, real_start_time);
+}
+#endif /* __VMLINUX_H__ */
 
 /* ------------------------------------------------------------------------
  * Constantes UAPI que se necesitan sin arrastrar cabeceras de libc.
@@ -100,6 +97,14 @@ struct trace_event_raw_inet_sock_set_state {
 
 #define AEGIS_AF_INET           2
 #define AEGIS_AF_INET6         10
+
+/* EtherType. Son valores asignados por la IANA y viven en macros de
+ * <linux/if_ether.h>, no en tipos: por eso NO viajan en el BTF del kernel y
+ * vmlinux.h no puede aportarlos. Definirlos aqui es correcto —son numeros de
+ * protocolo, no disposicion de memoria— y evita reintroducir las cabeceras UAPI
+ * del sistema, que si chocarian con vmlinux.h. */
+#define AEGIS_ETH_P_IP     0x0800u
+#define AEGIS_ETH_P_IPV6   0x86DDu
 
 /* ------------------------------------------------------------------------
  * Disposicion de los registros que se escriben en el ring buffer.

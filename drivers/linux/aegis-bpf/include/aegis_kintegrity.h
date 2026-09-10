@@ -21,7 +21,18 @@
  * tal cual para el compilador de BPF, para el comprobador de ABI y para el
  * espejo de Rust.
  */
-#include <stdint.h>
+/* En una unidad de traduccion de eBPF, `vmlinux.h` —generado del BTF del
+ * kernel— ya define los tipos de ancho fijo, y los define con sus tipos base
+ * propios: `int64_t` es alli `long long`, mientras que el <stdint.h> del
+ * compilador lo hace `long`. Incluir los dos redefine el mismo nombre con dos
+ * tipos distintos y no compila.
+ *
+ * El guardia lo pone el propio vmlinux.h, asi que la deteccion no depende de
+ * ninguna bandera del sistema de construccion: esta cabecera se puede incluir
+ * igual desde el kernel, desde Ring 3 y desde Windows. */
+#ifndef __VMLINUX_H__
+#  include <stdint.h>
+#endif
 
 /* Capacidad de los mapas de vista. 65536 cubre `pid_max` por defecto (32768)
  * con holgura para un sistema que lo haya subido. Al desbordarse se CUENTA, no

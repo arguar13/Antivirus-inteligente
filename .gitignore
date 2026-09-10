@@ -45,3 +45,9 @@ crates/aegis-syscallguard/tests/fixtures/syscall_stub
 
 # Artefactos de compilacion del plano de control (FASE 37).
 /server/target/
+
+# CA de proxy corporativo para la imagen hermetica: son de cada organizacion.
+tools/toolchain/imagen/ca/*.crt
+
+# Artefactos de la construccion hermetica (FASE 42).
+dist-hermetico/

@@ -232,36 +232,71 @@ jobs:
   #    publicar nada.
   # ---------------------------------------------------------------------------
   artifacts:
-    name: Artefactos de lanzamiento (estaticos)
+    name: Artefactos del anfitrion
     needs: [lint, test]
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      AEGIS_TARGET: x86_64-unknown-linux-musl
-      AEGIS_STATIC: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: artifacts
+      - run: ./tools/ci/artifacts.sh
+      - name: Publicar artefactos
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegiscore-linux-x86_64-anfitrion
+          path: |
+            dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # 11. Artefactos HERMETICOS: los que se entregan a un cliente (FASE 42).
+  #
+  #    El job anterior compila contra la libc de ESTA maquina y sirve para
+  #    validar el empaquetado. Este produce los binarios universales: sin
+  #    interprete dinamico, sin DT_NEEDED, sin RPATH. Son cosas distintas y por
+  #    eso son dos jobs y no uno con una bandera.
+  #
+  #    El sysroot musl no lo trae ninguna distribucion completo (le faltan las
+  #    cabeceras UAPI del kernel, argp, obstack y un desenrollador valido para
+  #    musl): lo compone tools/toolchain/preparar_musl.sh. Ver docs/37-hermetico.md.
+  # ---------------------------------------------------------------------------
+  hermetico:
+    name: Artefactos hermeticos (universales)
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
-      # musl-tools trae musl-gcc, imprescindible porque varias dependencias
-      # (yara-x, ring, libbpf) compilan codigo C.
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools musl-dev
+      - name: Dependencias del sysroot musl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            musl-tools musl-dev linux-libc-dev \
+            autoconf automake autopoint libtool-bin gettext flex bison gawk m4
       - uses: Swatinem/rust-cache@v2
         with:
-          key: musl
-      - run: ./tools/ci/artifacts.sh
-      - name: Publicar artefactos
+          key: hermetico
+      - name: Componer el sysroot musl
+        run: sudo -E ./tools/toolchain/preparar_musl.sh
+      - run: ./tools/ci/hermetico.sh
+      - name: Publicar artefactos hermeticos
         uses: actions/upload-artifact@v4
         with:
-          name: aegiscore-linux-x86_64-static
+          name: aegiscore-linux-x86_64-hermetico
           path: |
-            dist/
+            dist-hermetico/
           if-no-files-found: error
           retention-days: 90
 
   # ---------------------------------------------------------------------------
-  # 11. Puerta unica. Es el UNICO check que hay que exigir en la proteccion de
+  # 12. Puerta unica. Es el UNICO check que hay que exigir en la proteccion de
   #    rama: agrega el resultado de todos los demas, asi que anadir un job nuevo
   #    no obliga a reconfigurar GitHub. Falla si cualquier dependencia fallo o
   #    fue cancelada.
@@ -269,7 +304,7 @@ jobs:
   gate:
     name: Puerta de calidad
     if: always()
-    needs: [lint, test, ebpf, sanitizers, fuzz-smoke, supply-chain, docs, servidor, despliegue, artifacts]
+    needs: [lint, test, ebpf, sanitizers, fuzz-smoke, supply-chain, docs, servidor, despliegue, artifacts, hermetico]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -348,6 +348,34 @@ impl Almacen {
         Ok(filas.iter().map(fila_a_alerta).collect())
     }
 
+    /// Alertas de UN endpoint concreto, de la mas reciente a la mas antigua.
+    ///
+    /// La consola necesita esto para la vista de detalle: al pinchar un
+    /// endpoint hay que poder ver que le ha pasado A EL, no filtrar a ojo un
+    /// listado global de toda la flota. En un despliegue de diez mil maquinas,
+    /// las alertas de un endpoint concreto no aparecen en las primeras paginas
+    /// del listado global salvo que sean las mas graves del momento.
+    ///
+    /// El indice `idx_alertas_agente (cn_agente, recibido_en DESC)` cubre esta
+    /// consulta exactamente, sin ordenacion adicional.
+    pub async fn listar_alertas_de_agente(
+        &self,
+        cn: &str,
+        limite: i64,
+    ) -> Resultado<Vec<VistaAlerta>> {
+        let filas = sqlx::query(
+            r#"SELECT id, cn_agente, severidad, categoria, descripcion, tecnica_mitre,
+                      tactica_mitre, ocurrido_en, recibido_en, resuelta
+                 FROM alertas WHERE cn_agente = $1
+                ORDER BY recibido_en DESC LIMIT $2"#,
+        )
+        .bind(cn)
+        .bind(limite)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas.iter().map(fila_a_alerta).collect())
+    }
+
     /// Devuelve un agente por su CN.
     pub async fn obtener_agente(&self, cn: &str, margen_seg: i64) -> Resultado<VistaAgente> {
         let fila = sqlx::query(

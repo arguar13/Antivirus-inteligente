@@ -21,7 +21,13 @@
  *     ancho de banda del ring, que es el recurso escaso.
  */
 
-#include <linux/bpf.h>
+/* vmlinux.h PRIMERO y en lugar de <linux/bpf.h>: trae el universo de tipos del
+ * kernel extraido de su BTF —incluidos los contextos de tracepoint y
+ * task_struct— con los tipos AUTENTICOS, y marcados para que libbpf reubique
+ * cada acceso via CO-RE contra el kernel de destino. Incluir ademas las
+ * cabeceras UAPI del sistema duplicaria esas definiciones y no compilaria. */
+#include "vmlinux.h"
+
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -147,7 +153,7 @@ static __always_inline __u64 aegis_task_key(struct task_struct *task)
     if (!task)
         return 0;
     __u32 tgid = BPF_CORE_READ(task, tgid);
-    __u64 start = BPF_CORE_READ(task, start_boottime);
+    __u64 start = aegis_inicio_de_tarea(task);
     return aegis_key_from(tgid, start);
 }
 
@@ -285,7 +291,7 @@ int aegis_tp_execve(struct trace_event_raw_sys_enter *ctx)
     if (!task)
         return 0;
 
-    __u64 start = BPF_CORE_READ(task, start_boottime);
+    __u64 start = aegis_inicio_de_tarea(task);
     __u64 actor = aegis_key_from(tgid, start);
     struct task_struct *parent = BPF_CORE_READ(task, real_parent);
     __u64 parent_key = aegis_task_key(parent);
@@ -624,13 +630,6 @@ int aegis_tp_sock_state(struct trace_event_raw_inet_sock_set_state *ctx)
  * de dentries a mano, que es fragil entre versiones del kernel y multiplica el
  * codigo que corre con privilegios.
  * ------------------------------------------------------------------------ */
-
-/* Contexto de los tracepoints de salida de syscall. */
-struct trace_event_raw_sys_exit {
-    unsigned long long unused;
-    long int id;
-    long int ret;
-} __attribute__((preserve_access_index));
 
 SEC("tracepoint/syscalls/sys_exit_openat")
 int aegis_tp_openat_exit(struct trace_event_raw_sys_exit *ctx)
