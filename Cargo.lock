@@ -163,6 +163,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-hunt"
+version = "0.1.0"
+dependencies = [
+ "aegis-behavior",
+ "aegis-parser",
+ "aegis-scal",
+ "libc",
+ "sha2",
+]
+
+[[package]]
 name = "aegis-intel"
 version = "0.1.0"
 dependencies = [

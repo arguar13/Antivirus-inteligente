@@ -27,6 +27,7 @@ OBJETIVOS=(
     firmware_eventlog
     firmware_uefi
     scal_maps
+    aegisql
 )
 
 # El fuzzing exige toolchain nightly (por el sanitizador y libFuzzer) y el

@@ -18,6 +18,7 @@ libfuzzer-sys = "0.4"
 aegis-fleet = { path = "../crates/aegis-fleet" }
 aegis-firmware = { path = "../crates/aegis-firmware" }
 aegis-scal = { path = "../crates/aegis-scal" }
+aegis-parser = { path = "../crates/aegis-parser" }
 
 # Cada objetivo comprueba una invariante: el parser NUNCA entra en panico ante
 # entrada arbitraria. Un panico ante un mensaje de red malformado es una via de
@@ -67,3 +68,9 @@ bench = false
 
 # Workspace propio: desacopla este crate del workspace del producto.
 [workspace]
+
+[[bin]]
+name = "aegisql"
+path = "fuzz_targets/aegisql.rs"
+test = false
+doc = false

@@ -28,7 +28,15 @@
 //!    comprueban al analizar. Un error de tecleo se ve en la consola, no se
 //!    convierte en diez mil fallos remotos.
 
+/// Arbol sintactico.
+pub mod ast;
+/// Errores con posicion dentro de la consulta.
+pub mod error;
 /// Descripcion de tablas, columnas, tipos y coste de acceso.
 pub mod esquema;
 /// Analisis lexico.
 pub mod lexico;
+/// Planificacion por coste de acceso.
+pub mod plan;
+/// Analisis sintactico y semantico.
+pub mod sintaxis;

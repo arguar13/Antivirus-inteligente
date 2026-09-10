@@ -3,6 +3,7 @@ resolver = "2"
 exclude = ["fuzz"]
 members = [
     "crates/aegis-parser",
+    "crates/aegis-hunt",
     "crates/aegis-scal",
     "crates/aegis-behavior",
     "crates/aegis-kintegrity",

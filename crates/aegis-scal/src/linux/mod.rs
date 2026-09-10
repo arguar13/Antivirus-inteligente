@@ -8,6 +8,7 @@
 
 pub mod fsmon;
 pub mod memory;
+pub mod net;
 pub mod netfilter;
 pub mod process;
 
