@@ -24,3 +24,9 @@
 
 /// Valores del endpoint y su comparacion.
 pub mod valor;
+
+/// Entropia de Shannon.
+pub mod entropia;
+
+/// El ejecutor de consultas.
+pub mod ejecutor;

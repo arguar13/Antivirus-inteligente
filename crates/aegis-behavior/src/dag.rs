@@ -175,6 +175,17 @@ impl BehaviorGraph {
         self.limits
     }
 
+    /// Recorre los nodos del grafo, en orden no especificado.
+    ///
+    /// Es de SOLO LECTURA a proposito: quien consulta el grafo —el ejecutor de
+    /// AegisQL, el informe de linaje que sube al plano de control— necesita
+    /// enumerarlo, pero nadie de fuera puede modificarlo. Las mutaciones pasan
+    /// todas por `insert`, `link`, `observe` y `mark_dead`, que son las que
+    /// mantienen los indices y los limites de tamano coherentes.
+    pub fn nodos(&self) -> impl Iterator<Item = (&ProcessKey, &Node)> {
+        self.nodes.iter()
+    }
+
     /// Nodo por identidad.
     pub fn node(&self, key: ProcessKey) -> Option<&Node> {
         self.nodes.get(&key)
