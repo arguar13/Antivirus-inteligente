@@ -947,14 +947,21 @@ async fn una_regla_global_llega_al_agente_real_por_empuje_sin_esperar_su_latido(
     let inicio = std::time::Instant::now();
     let empuje = tokio::task::spawn_blocking(move || {
         let mut canal = canal;
-        for _ in 0..32 {
+        // Se acota por TIEMPO y no por numero de marcos. Por el canal viajan
+        // tambien cacerias, y cuantas haya abiertas depende de lo que este
+        // haciendo el resto de la flota —o, aqui, el resto de la suite—. Un
+        // limite de marcos convertiria eso en un fallo aleatorio; un limite de
+        // tiempo mide lo que la prueba quiere afirmar: que la politica llega
+        // pronto, sin esperar al latido del agente.
+        let limite = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while std::time::Instant::now() < limite {
             let marco = canal.siguiente()?;
             if !marco.politica_json.is_empty() {
                 return Ok(marco);
             }
         }
         Err(aegis_fleet::FleetError::Protocolo(
-            "el canal no entrego politica en 32 marcos".to_string(),
+            "el canal no entrego politica en 20 s".to_string(),
         ))
     })
     .await

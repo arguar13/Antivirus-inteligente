@@ -25,6 +25,8 @@ const app = {
   ws: null,
   reintento: 0,
   seleccionado: null,
+  // Caceria que se esta mirando ahora mismo.
+  caza: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -46,7 +48,15 @@ async function api(ruta, opciones = {}) {
   }
   if (r.status === 204) return null;
   const cuerpo = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(cuerpo.error || ('HTTP ' + r.status));
+  if (!r.ok) {
+    const e = new Error(cuerpo.error || ('HTTP ' + r.status));
+    // El analizador de AegisQL devuelve la consulta con el tramo culpable
+    // subrayado y una sugerencia. Perderlo aqui dejaria al analista con un
+    // "error de sintaxis" a secas, que es lo que se queria evitar.
+    if (cuerpo.detalle) e.detalle = cuerpo.detalle;
+    if (cuerpo.sugerencia) e.sugerencia = cuerpo.sugerencia;
+    throw e;
+  }
   return cuerpo;
 }
 
@@ -193,6 +203,25 @@ function manejarEvento(m) {
       registrarActividad('canal', `${m.objetos} objeto(s) STIX de ${corto(m.cn)}`);
       if (app.vista === 'inteligencia') cargarStix();
       break;
+
+    case 'caza_lanzada':
+      registrarActividad('caza',
+        `caza lanzada por ${m.por} a ${m.objetivo} endpoint(s)`);
+      if (app.vista === 'caza') cargarCacerias();
+      break;
+
+    case 'caza_respuesta':
+      // Se refresca por CADA respuesta y no al terminar: una caceria sobre diez
+      // mil endpoints se ve llegar. Solo se toca la pantalla si el analista
+      // esta mirando ESA caceria; si no, seria repintar por nada.
+      if (m.error) {
+        registrarActividad('caza', `${corto(m.cn)} no pudo: ${m.error}`);
+      } else if (m.coincidencias > 0) {
+        registrarActividad('caza',
+          `${corto(m.cn)}: ${m.coincidencias} coincidencia(s)`);
+      }
+      if (app.vista === 'caza' && app.caza === m.caza_id) verCaza(m.caza_id);
+      break;
   }
 }
 
@@ -243,6 +272,7 @@ function refrescarVista() {
   else if (app.vista === 'reglas') cargarReglas();
   else if (app.vista === 'inteligencia') cargarStix();
   else if (app.vista === 'linaje') cargarGrafos();
+  else if (app.vista === 'caza') cargarCacerias();
 }
 
 // ── Indicadores ─────────────────────────────────────────────────────────
@@ -695,3 +725,146 @@ async function cargarStix() {
 
 $('#r-valor').placeholder = CAMPO_DE_TIPO.bloquear_puerto[1];
 if (app.token) entrar(); else $('#acceso').hidden = false;
+
+
+// ── Caza distribuida (AegisQL) ──────────────────────────────────────────
+
+/** Lanza una caceria a toda la flota. */
+$('#form-caza').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const ql = $('#caza-ql').value.trim();
+  if (!ql) return;
+
+  const err = $('#caza-error');
+  err.hidden = true;
+  $('#btn-cazar').disabled = true;
+  try {
+    const r = await api('/api/cacerias', {
+      method: 'POST',
+      body: JSON.stringify({ consulta: ql }),
+    });
+    app.caza = r.id;
+    // El coste lo calcula el planificador del servidor: avisar antes de que el
+    // analista se pregunte por que su caceria tarda.
+    if (r.coste === 'caro') {
+      registrarActividad('caza',
+        'consulta cara: puede tardar en una flota grande');
+    }
+    await cargarCacerias();
+    await verCaza(r.id);
+  } catch (e) {
+    // El error del analizador trae la posicion y una sugerencia. Se muestra tal
+    // cual lo dibuja el servidor, con el subrayado bajo el tramo culpable: es
+    // mucho mas util que "error de sintaxis".
+    err.textContent = e.detalle || e.message;
+    err.hidden = false;
+  } finally {
+    $('#btn-cazar').disabled = false;
+  }
+});
+
+/** Cacerias recientes. */
+async function cargarCacerias() {
+  let lista = [];
+  try { lista = await api('/api/cacerias?limite=20'); } catch { return; }
+
+  const cuerpo = $('#tabla-cacerias tbody');
+  cuerpo.textContent = '';
+  for (const c of lista) {
+    const tr = document.createElement('tr');
+    tr.append(
+      celdaTexto(new Date(c.lanzada_en).toLocaleTimeString()),
+      celdaTexto(c.consulta.length > 70 ? c.consulta.slice(0, 70) + '…' : c.consulta),
+      celdaTexto(c.lanzada_por),
+      celdaTexto(String(c.objetivo)),
+    );
+    const acciones = document.createElement('td');
+    const ver = document.createElement('button');
+    ver.className = 'secundario';
+    ver.textContent = 'Ver';
+    ver.addEventListener('click', () => verCaza(c.id));
+    acciones.append(ver);
+    tr.append(acciones);
+    cuerpo.append(tr);
+  }
+}
+
+/** Pinta el resumen agregado y las filas de una caceria. */
+async function verCaza(id) {
+  let d;
+  try { d = await api('/api/cacerias/' + id + '?limite=500'); } catch { return; }
+  app.caza = id;
+  $('#caza-ql').value = d.caza.consulta;
+
+  const r = d.resumen;
+  $('#cz-respondieron').textContent = r.respondieron;
+  $('#cz-objetivo').textContent = d.caza.objetivo;
+  $('#cz-hallazgos').textContent = r.con_hallazgos;
+  $('#cz-coincidencias').textContent = r.coincidencias;
+  $('#cz-inaccesibles').textContent = r.inaccesibles;
+  $('#cz-agotados').textContent = r.agotados;
+  $('#caza-resumen').hidden = false;
+
+  // Cabecera: el endpoint primero, porque en una caza distribuida la pregunta
+  // "donde" es tan importante como "que".
+  const cab = $('#caza-cabecera');
+  cab.textContent = '';
+  cab.append(th('Endpoint'));
+  for (const c of d.caza.columnas) cab.append(th(c));
+
+  const cuerpo = $('#tabla-caza tbody');
+  cuerpo.textContent = '';
+  let filas = 0;
+  for (const resp of d.respuestas) {
+    for (const fila of resp.filas) {
+      const tr = document.createElement('tr');
+      tr.append(celdaTexto(corto(resp.cn_agente)));
+      for (const celdaTexto of fila) tr.append(celdaTexto(celdaTexto));
+      cuerpo.append(tr);
+      filas++;
+    }
+  }
+  $('#tabla-caza').hidden = filas === 0;
+  $('#caza-vacio').hidden = filas !== 0;
+}
+
+/** Esquema de AegisQL, servido por el binario que valida las consultas. */
+$('#btn-esquema').addEventListener('click', async () => {
+  let e;
+  try { e = await api('/api/aegisql/esquema'); } catch { return; }
+  const cuerpo = $('#esquema-cuerpo');
+  cuerpo.textContent = '';
+  for (const t of e.tablas) {
+    const h = document.createElement('h4');
+    h.textContent = t.nombre;
+    const p = document.createElement('p');
+    p.className = 'nota';
+    p.textContent = t.descripcion;
+    const tabla = document.createElement('table');
+    tabla.className = 'tabla';
+    const thead = document.createElement('thead');
+    const trh = document.createElement('tr');
+    trh.append(th('Columna'), th('Tipo'), th('Coste'), th('Qué es'));
+    thead.append(trh);
+    const tbody = document.createElement('tbody');
+    for (const c of t.columnas) {
+      const tr = document.createElement('tr');
+      tr.append(celdaTexto(c.nombre), celdaTexto(c.tipo), celdaTexto(c.coste), celdaTexto(c.descripcion));
+      tbody.append(tr);
+    }
+    tabla.append(thead, tbody);
+    cuerpo.append(h, p, tabla);
+  }
+  $('#modal-esquema').hidden = false;
+});
+
+$('#btn-cerrar-esquema').addEventListener('click', () => {
+  $('#modal-esquema').hidden = true;
+});
+
+/** Celda de encabezado. */
+function th(texto) {
+  const e = document.createElement('th');
+  e.textContent = texto;
+  return e;
+}

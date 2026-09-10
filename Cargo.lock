@@ -167,6 +167,7 @@ name = "aegis-hunt"
 version = "0.1.0"
 dependencies = [
  "aegis-behavior",
+ "aegis-fleet",
  "aegis-parser",
  "aegis-scal",
  "libc",

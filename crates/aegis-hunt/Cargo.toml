@@ -14,6 +14,9 @@ workspace = true
 aegis-parser = { path = "../aegis-parser" }
 aegis-scal = { path = "../aegis-scal" }
 aegis-behavior = { path = "../aegis-behavior" }
+# El lado del agente traduce entre el protocolo de flota y el ejecutor. Ver
+# `agente.rs`: es codigo del ENDPOINT, no del plano de control.
+aegis-fleet = { path = "../aegis-fleet" }
 sha2 = "0.10"
 
 [dev-dependencies]

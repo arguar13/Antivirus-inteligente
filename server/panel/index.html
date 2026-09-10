@@ -45,6 +45,7 @@
       <button data-vista="linaje">Linaje</button>
       <button data-vista="reglas">Reglas</button>
       <button data-vista="inteligencia">Inteligencia</button>
+      <button data-vista="caza">Caza</button>
     </nav>
     <div class="estado">
       <span id="enlace" class="enlace desconectado" title="Estado del canal en tiempo real">
@@ -160,6 +161,59 @@
         <p id="stix-vacio" class="vacio" hidden>Sin inteligencia ingerida todavía.</p>
       </section>
 
+      <section class="vista" id="vista-caza" hidden>
+        <div class="barra-vista"><h2>Caza distribuida (AegisQL)</h2></div>
+        <p class="nota">
+          Una pregunta a toda la flota a la vez. La consulta se valida aquí antes
+          de salir: si hay un error, se ve en esta pantalla y no en diez mil
+          endpoints.
+        </p>
+
+        <form id="form-caza" class="form-caza">
+          <textarea id="caza-ql" rows="3" spellcheck="false"
+            placeholder="SELECT pid, path, sha256 FROM processes WHERE network.port = 4444 AND memory.entropy &gt; 7.0"></textarea>
+          <div class="acciones-caza">
+            <button type="submit" id="btn-cazar">Lanzar a la flota</button>
+            <button type="button" id="btn-esquema" class="secundario">Ver esquema</button>
+          </div>
+        </form>
+
+        <!-- Error del analizador, con la posición subrayada. -->
+        <pre id="caza-error" class="caza-error" hidden></pre>
+
+        <div id="caza-resumen" class="caza-resumen" hidden>
+          <div class="kpi"><span class="valor" id="cz-respondieron">0</span>
+                           <span class="etiqueta">respondieron</span></div>
+          <div class="kpi"><span class="valor" id="cz-objetivo">0</span>
+                           <span class="etiqueta">en la flota</span></div>
+          <div class="kpi"><span class="valor" id="cz-hallazgos">0</span>
+                           <span class="etiqueta">con hallazgos</span></div>
+          <div class="kpi"><span class="valor" id="cz-coincidencias">0</span>
+                           <span class="etiqueta">coincidencias</span></div>
+          <!-- Estos dos son los que impiden leer un resultado vacio como
+               "la flota esta limpia". -->
+          <div class="kpi aviso"><span class="valor" id="cz-inaccesibles">0</span>
+                           <span class="etiqueta">valores no legibles</span></div>
+          <div class="kpi aviso"><span class="valor" id="cz-agotados">0</span>
+                           <span class="etiqueta">se quedaron a medias</span></div>
+        </div>
+
+        <table class="tabla" id="tabla-caza" hidden>
+          <thead><tr id="caza-cabecera"></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="caza-vacio" class="vacio" hidden>
+          Ningún endpoint ha respondido todavía.
+        </p>
+
+        <div class="barra-vista"><h3>Cacerías recientes</h3></div>
+        <table class="tabla" id="tabla-cacerias">
+          <thead><tr><th>Lanzada</th><th>Consulta</th><th>Por</th>
+                     <th>Flota</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
     </div>
 
     <!-- Actividad en vivo -->
@@ -180,6 +234,22 @@
       <button id="btn-aislar" class="peligro">Aislar endpoint</button>
       <button id="btn-liberar" class="secundario">Liberar</button>
       <button id="btn-cerrar" class="secundario">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Esquema de AegisQL, servido por el binario que valida las consultas -->
+<div id="modal-esquema" class="modal" hidden>
+  <div class="modal-caja ancha">
+    <h3>Esquema de AegisQL</h3>
+    <p class="nota">
+      Lo sirve el mismo binario que valida las consultas, así que no puede
+      quedar desfasado. El coste indica cuánto cuesta cada columna en el
+      endpoint: las caras conviene combinarlas con un filtro barato.
+    </p>
+    <div id="esquema-cuerpo" class="esquema"></div>
+    <div class="modal-acciones">
+      <button id="btn-cerrar-esquema" class="secundario">Cerrar</button>
     </div>
   </div>
 </div>

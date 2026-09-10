@@ -197,3 +197,54 @@ button.peligro { background: var(--grave); border-color: var(--grave); color: #1
   .cuerpo { grid-template-columns: 1fr; }
   .kpis { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ── Caza distribuida (AegisQL) ───────────────────────────────────────── */
+
+.form-caza { display: grid; gap: 0.6rem; margin-bottom: 0.8rem; }
+
+.form-caza textarea {
+  width: 100%;
+  /* Monoespaciada porque el error del analizador subraya con acentos bajo el
+     tramo culpable: con una tipografia proporcional el subrayado no cae donde
+     debe y la ayuda deja de ayudar. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9rem;
+  padding: 0.6rem;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  background: var(--fondo-2);
+  color: var(--texto);
+  resize: vertical;
+}
+
+.acciones-caza { display: flex; gap: 0.5rem; }
+
+.caza-error {
+  /* Misma tipografia y mismo tamano que el area de texto, por lo mismo. */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  white-space: pre;
+  overflow-x: auto;
+  padding: 0.7rem;
+  border-left: 3px solid var(--grave);
+  background: var(--fondo-2);
+  border-radius: 4px;
+  margin-bottom: 0.8rem;
+}
+
+.caza-resumen {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+/* Los dos indicadores que impiden leer un resultado vacio como "flota limpia"
+   se distinguen del resto: no son un dato mas, son una advertencia sobre la
+   fiabilidad de todo lo demas. */
+.caza-resumen .kpi.aviso { border-left: 3px solid var(--aviso); }
+
+.modal-caja.ancha { max-width: 900px; max-height: 80vh; overflow-y: auto; }
+
+.esquema h4 { margin: 1.2rem 0 0.2rem; font-family: ui-monospace, monospace; }
+.esquema .tabla { margin-bottom: 0.5rem; }

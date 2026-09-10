@@ -1131,6 +1131,25 @@ pub struct NodoGrafo {
 /// flota, y el analista no tendra forma de saber cual.
 pub const CANAL_CAZA: &str = "aegis_caza";
 
+/// Cuanto tiempo sigue una caceria abierta entregandose a los que reconecten.
+///
+/// POR QUE UNA CACERIA CADUCA
+/// --------------------------
+/// Una caceria abierta le corresponde a todo endpoint que no la haya
+/// contestado, incluidos los que estaban apagados. Sin caducidad, esa lista
+/// crece para siempre: un portatil que vuelve de vacaciones recibiria de golpe
+/// TODAS las cacerias que se lanzaron mientras no estaba, una detras de otra,
+/// antes de poder recibir su politica. Con suficientes cacerias acumuladas, un
+/// endpoint que reconecta no llega nunca a ponerse al dia.
+///
+/// Y las respuestas tardias tampoco sirven de mucho: una caceria pregunta por
+/// el estado de una maquina AHORA. La respuesta de un endpoint que la contesta
+/// una semana despues describe una maquina distinta de la que se pregunto.
+///
+/// Veinticuatro horas cubre con holgura el caso real —un endpoint apagado
+/// durante la noche o un fin de semana— sin dejar que la cola crezca sin fin.
+pub const VENTANA_ENTREGA_CAZA_HORAS: i64 = 24;
+
 /// Una caceria, tal y como la ve la consola.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VistaCaza {
@@ -1262,6 +1281,7 @@ impl Almacen {
             r#"SELECT c.id, c.consulta
                  FROM cacerias c
                 WHERE c.cerrada_en IS NULL
+                  AND c.lanzada_en > now() - make_interval(hours => $2::int)
                   AND NOT EXISTS (
                       SELECT 1 FROM caza_respuestas r
                        WHERE r.caza_id = c.id AND r.cn_agente = $1)
@@ -1269,6 +1289,7 @@ impl Almacen {
                 LIMIT 1"#,
         )
         .bind(cn)
+        .bind(VENTANA_ENTREGA_CAZA_HORAS as i32)
         .fetch_optional(&self.pool)
         .await?;
         Ok(fila.map(|f| (f.get("id"), f.get("consulta"))))

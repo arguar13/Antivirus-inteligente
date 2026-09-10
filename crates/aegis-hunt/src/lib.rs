@@ -30,3 +30,6 @@ pub mod entropia;
 
 /// El ejecutor de consultas.
 pub mod ejecutor;
+
+/// El lado del endpoint: recibir, ejecutar y responder cacerias.
+pub mod agente;
