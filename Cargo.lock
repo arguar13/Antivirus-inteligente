@@ -227,6 +227,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-parser"
+version = "0.1.0"
+dependencies = [
+ "logos",
+ "serde_json",
+]
+
+[[package]]
 name = "aegis-ransom"
 version = "0.1.0"
 dependencies = [
