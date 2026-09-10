@@ -17,6 +17,8 @@ workspace = true
 # el servidor decodifica exactamente lo que el agente codifica: la compatibilidad
 # de cable no es una promesa, es el mismo codigo.
 aegis-fleet = { path = "../../../crates/aegis-fleet" }
+# Valida AegisQL ANTES de difundir: ver la nota en `lanzar_caza` de api.rs.
+aegis-parser = { path = "../../../crates/aegis-parser" }
 
 # --- Runtime asincrono ------------------------------------------------------
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }

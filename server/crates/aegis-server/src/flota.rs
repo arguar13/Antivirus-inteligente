@@ -19,8 +19,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use aegis_fleet::proto::{
-    AckEvento, AckGrafo, AckLatido, AckStix, EmpujePolitica, Latido, ReporteEvento, ReporteGrafo,
-    ReporteStix, RespuestaEnrolamiento, SolicitudEnrolamiento,
+    AckCaza, AckEvento, AckGrafo, AckLatido, AckStix, EmpujePolitica, Latido, ReporteCaza,
+    ReporteEvento, ReporteGrafo, ReporteStix, RespuestaEnrolamiento, SolicitudEnrolamiento,
 };
 use aegis_fleet::servidor::ManejadorFlota;
 use tokio::runtime::Handle;
@@ -31,8 +31,8 @@ use crate::dominio::ServicioFlota;
 pub struct ManejadorPersistente {
     servicio: Arc<ServicioFlota>,
     handle: Handle,
-    /// Receptor de avisos de politica; `None` desactiva el empuje.
-    avisos: Option<tokio::sync::watch::Receiver<i64>>,
+    /// Receptor de avisos (politica y cacerias); `None` desactiva el empuje.
+    avisos: Option<tokio::sync::watch::Receiver<crate::notificador::Aviso>>,
 }
 
 impl ManejadorPersistente {
@@ -49,7 +49,10 @@ impl ManejadorPersistente {
     }
 
     /// Habilita el empuje de politica con el notificador dado.
-    pub fn con_avisos(mut self, avisos: tokio::sync::watch::Receiver<i64>) -> ManejadorPersistente {
+    pub fn con_avisos(
+        mut self,
+        avisos: tokio::sync::watch::Receiver<crate::notificador::Aviso>,
+    ) -> ManejadorPersistente {
         self.avisos = Some(avisos);
         self
     }
@@ -193,34 +196,46 @@ impl ManejadorFlota for ManejadorPersistente {
     fn esperar_empuje(
         &self,
         cn: &str,
-        version_conocida: u64,
+        estado: &aegis_fleet::servidor::EstadoCanal,
         plazo: Duration,
     ) -> Option<EmpujePolitica> {
+        let version_conocida = estado.version_entregada;
+        let caza_entregada = estado.caza_entregada.clone();
         // Sin notificador no hay empuje: se cierra el canal en vez de dejar al
         // agente esperando indefinidamente algo que no va a llegar.
         let mut rx = self.avisos.as_ref()?.clone();
         let cn = cn.to_string();
 
         self.handle.block_on(async move {
-            let version_anunciada = *rx.borrow();
+            let version_anunciada = rx.borrow().version_politica;
 
             // Un agente que reconecta atrasado se pone al dia sin esperar al
             // siguiente cambio.
             if version_anunciada > version_conocida as i64 {
-                return Some(self.componer_empuje(&cn, version_anunciada).await);
+                return Some(
+                    self.componer_empuje(&cn, version_anunciada, version_conocida, &caza_entregada)
+                        .await,
+                );
             }
 
-            // Tambien puede haber comandos suyos esperando aunque la politica no
-            // haya cambiado.
-            let empuje = self.componer_empuje(&cn, version_anunciada).await;
-            if !empuje.comandos_json.is_empty() {
+            // Tambien puede haber comandos suyos, o una caceria que aun no ha
+            // contestado, aunque la politica no haya cambiado. El caso de la
+            // caceria es el que cubre al endpoint que estaba apagado: al
+            // reconectar la recibe sin esperar a que se lance ninguna otra.
+            let empuje = self
+                .componer_empuje(&cn, version_anunciada, version_conocida, &caza_entregada)
+                .await;
+            if !empuje.comandos_json.is_empty() || !empuje.caza_ql.is_empty() {
                 return Some(empuje);
             }
 
             match tokio::time::timeout(plazo, rx.changed()).await {
                 Ok(Ok(())) => {
-                    let v = *rx.borrow();
-                    Some(self.componer_empuje(&cn, v).await)
+                    let v = rx.borrow().version_politica;
+                    Some(
+                        self.componer_empuje(&cn, v, version_conocida, &caza_entregada)
+                            .await,
+                    )
                 }
                 // El emisor desaparecio: el servicio esta cerrando.
                 Ok(Err(_)) => None,
@@ -231,6 +246,81 @@ impl ManejadorFlota for ManejadorPersistente {
                     es_keepalive: true,
                     ..Default::default()
                 }),
+            }
+        })
+    }
+
+    fn caza(&self, cn: &str, req: &ReporteCaza) -> AckCaza {
+        let servicio = self.servicio.clone();
+        let cn = cn.to_string();
+        let req = req.clone();
+
+        self.handle.block_on(async move {
+            let Ok(caza_id) = uuid::Uuid::parse_str(&req.caza_id) else {
+                return AckCaza {
+                    recibido: false,
+                    motivo: "identificador de caceria invalido".to_string(),
+                };
+            };
+
+            // Las filas se guardan como array de arrays de texto. El tipo de
+            // cada columna ya lo declara el esquema de AegisQL.
+            let filas = serde_json::Value::Array(
+                req.filas
+                    .iter()
+                    .map(|f| {
+                        serde_json::Value::Array(
+                            f.celdas
+                                .iter()
+                                .map(|c| serde_json::Value::String(c.clone()))
+                                .collect(),
+                        )
+                    })
+                    .collect(),
+            );
+
+            let almacen = servicio.almacen();
+            if let Err(e) = almacen
+                .guardar_respuesta_caza(
+                    caza_id,
+                    &cn,
+                    &filas,
+                    req.coincidencias as i64,
+                    req.examinadas as i64,
+                    req.inaccesibles as i64,
+                    req.incompleto,
+                    req.agotado,
+                    req.duracion_ms as i64,
+                    &req.error,
+                )
+                .await
+            {
+                // Se DICE que no se guardo. Responder "recibido" haria creer al
+                // agente que su trabajo sirvio, y el resultado se perderia sin
+                // que nadie se enterara.
+                tracing::error!(error = %e, cn = %cn, "no se pudo guardar la respuesta de caza");
+                return AckCaza {
+                    recibido: false,
+                    motivo: "el plano de control no pudo guardar la respuesta".to_string(),
+                };
+            }
+
+            // El panel se entera al instante: una caceria sobre diez mil
+            // endpoints se ve llegar, no se espera a que termine.
+            servicio
+                .bus()
+                .publicar(crate::eventos::EventoPanel::CazaRespuesta {
+                    caza_id: req.caza_id.clone(),
+                    cn: cn.clone(),
+                    coincidencias: req.coincidencias as i64,
+                    inaccesibles: req.inaccesibles as i64,
+                    agotado: req.agotado,
+                    error: req.error.clone(),
+                });
+
+            AckCaza {
+                recibido: true,
+                motivo: String::new(),
             }
         })
     }
@@ -272,7 +362,23 @@ impl ManejadorFlota for ManejadorPersistente {
 
 impl ManejadorPersistente {
     /// Construye el empuje con la politica vigente y los comandos del agente.
-    async fn componer_empuje(&self, cn: &str, version: i64) -> EmpujePolitica {
+    ///
+    /// `version_conocida` es la que el agente declaro tener. Si la vigente no es
+    /// mas nueva, el cuerpo de la politica NO viaja: solo su numero de version.
+    ///
+    /// Importa mas de lo que parece. Desde que las cacerias comparten canal con
+    /// la politica, cualquier caceria despierta los canales de TODA la flota; si
+    /// cada uno de esos despertares reenviara la politica completa, lanzar una
+    /// consulta de rutina costaria diez mil copias de una politica que los
+    /// agentes ya tienen. El agente distingue los dos casos por el numero de
+    /// version, que siempre viaja.
+    async fn componer_empuje(
+        &self,
+        cn: &str,
+        version: i64,
+        version_conocida: u64,
+        caza_entregada: &str,
+    ) -> EmpujePolitica {
         let almacen = self.servicio.almacen();
         let (v, politica) = almacen
             .politica_activa()
@@ -292,9 +398,24 @@ impl ManejadorPersistente {
             }
         }
 
+        // Caceria pendiente para ESTE agente. Va en el mismo empuje que la
+        // politica porque el canal es el mismo, y eso significa que un endpoint
+        // que reconecta despues de estar apagado recibe a la vez la politica que
+        // se perdio y la caceria que se lanzo mientras no estaba.
+        // Si es la MISMA que este canal ya le entrego, no se reenvia: el agente
+        // sigue trabajando en ella. Reenviarla seria un bucle cerrado entre el
+        // canal y un agente que aun no ha terminado de contestar.
+        let (caza_id, caza_ql) = match almacen.caza_pendiente_para(cn).await {
+            Ok(Some((id, ql))) if id.to_string() != caza_entregada => (id.to_string(), ql),
+            _ => (String::new(), String::new()),
+        };
+
+        let hay_politica_nueva = v.max(0) as u64 > version_conocida;
         EmpujePolitica {
+            caza_id,
+            caza_ql,
             version: v.max(0) as u64,
-            politica_json: if politica.is_null() {
+            politica_json: if politica.is_null() || !hay_politica_nueva {
                 String::new()
             } else {
                 politica.to_string()

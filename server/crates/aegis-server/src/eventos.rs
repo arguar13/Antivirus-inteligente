@@ -80,6 +80,36 @@ pub enum EventoPanel {
         /// Numero de reglas activas.
         reglas: usize,
     },
+    /// Se ha lanzado una caceria AegisQL a la flota.
+    CazaLanzada {
+        /// Identificador de la caceria.
+        caza_id: String,
+        /// Consulta tal y como se escribio.
+        consulta: String,
+        /// Operador que la ordeno.
+        por: String,
+        /// Endpoints en linea al lanzarla: el denominador de la cobertura.
+        objetivo: i64,
+    },
+    /// Un endpoint ha respondido a una caceria.
+    ///
+    /// Se publica por CADA respuesta y no solo al terminar. Una caceria sobre
+    /// diez mil endpoints tarda; el analista tiene que ver llegar los hallazgos
+    /// segun aparecen, no una barra de progreso.
+    CazaRespuesta {
+        /// Caceria a la que responde.
+        caza_id: String,
+        /// Endpoint que respondio.
+        cn: String,
+        /// Coincidencias que encontro.
+        coincidencias: i64,
+        /// Valores que no pudo leer.
+        inaccesibles: i64,
+        /// Si agoto su presupuesto de tiempo.
+        agotado: bool,
+        /// Error informado, si lo hubo.
+        error: String,
+    },
     /// Ha llegado inteligencia nueva.
     InteligenciaNueva {
         /// Agente que la entrego.

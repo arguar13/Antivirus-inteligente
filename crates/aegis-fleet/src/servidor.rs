@@ -28,6 +28,28 @@ use crate::rpc::{
 };
 use crate::tls::{cn_del_par, config_servidor};
 
+/// Lo que un canal de suscripcion ya le ha entregado a su agente.
+///
+/// POR QUE HACE FALTA LLEVAR LA CUENTA
+/// -----------------------------------
+/// El canal decide si empujar comparando lo que hay con lo que el agente ya
+/// tiene. Con la politica bastaba un numero de version. Con las cacerias no: una
+/// caceria le corresponde a un agente hasta que la CONTESTA, y contestar lleva
+/// su tiempo —puede tardar segundos en un endpoint cargado—.
+///
+/// Sin esta cuenta, el canal ve la caceria pendiente, la empuja, vuelve a mirar,
+/// la sigue viendo pendiente, y la empuja otra vez: un bucle cerrado que satura
+/// al agente y al servidor con la misma consulta. Multiplicado por diez mil
+/// canales, es una denegacion de servicio que se provoca el propio producto al
+/// lanzar una caceria.
+#[derive(Debug, Clone, Default)]
+pub struct EstadoCanal {
+    /// Ultima version de politica entregada por este canal.
+    pub version_entregada: u64,
+    /// Identificador de la ultima caceria entregada, o vacio si ninguna.
+    pub caza_entregada: String,
+}
+
 /// Logica de negocio del plano de control.
 ///
 /// Cada metodo recibe el CN AUTENTICADO del agente (extraido de su certificado,
@@ -75,7 +97,7 @@ pub trait ManejadorFlota: Send + Sync {
     fn esperar_empuje(
         &self,
         _cn: &str,
-        _version_conocida: u64,
+        _estado: &EstadoCanal,
         _plazo: Duration,
     ) -> Option<EmpujePolitica> {
         None
@@ -310,9 +332,10 @@ impl ManejadorFlota for PlanoDeControl {
     fn esperar_empuje(
         &self,
         _cn: &str,
-        version_conocida: u64,
+        estado: &EstadoCanal,
         plazo: Duration,
     ) -> Option<EmpujePolitica> {
+        let version_conocida = estado.version_entregada;
         let (lock, cv) = &self.cambio;
         let guarda = lock.lock().ok()?;
 
@@ -536,14 +559,20 @@ fn atender_suscripcion(
     req: &SuscripcionPolitica,
     tls: &mut rustls::StreamOwned<ServerConnection, TcpStream>,
 ) -> Resultado<()> {
-    let mut version_entregada = req.version_conocida;
+    let mut estado = EstadoCanal {
+        version_entregada: req.version_conocida,
+        caza_entregada: String::new(),
+    };
     loop {
-        let Some(empuje) = manejador.esperar_empuje(cn, version_entregada, PLAZO_KEEPALIVE) else {
+        let Some(empuje) = manejador.esperar_empuje(cn, &estado, PLAZO_KEEPALIVE) else {
             // El manejador cierra el canal de forma ordenada.
             return Ok(());
         };
         if !empuje.es_keepalive {
-            version_entregada = empuje.version;
+            estado.version_entregada = empuje.version;
+        }
+        if !empuje.caza_id.is_empty() {
+            estado.caza_entregada = empuje.caza_id.clone();
         }
         // Un fallo de escritura significa que el agente se fue: se termina sin
         // ruido, que es lo normal cuando un endpoint se apaga.

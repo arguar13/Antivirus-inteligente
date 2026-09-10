@@ -57,6 +57,11 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         .route("/api/stix/objetos", get(listar_objetos_stix))
         .route("/api/grafos", get(listar_grafos))
         .route("/api/grafos/{id}", get(obtener_grafo))
+        // --- Caceria distribuida AegisQL (FASE 43) ---
+        .route("/api/cacerias", get(listar_cacerias).post(lanzar_caza))
+        .route("/api/cacerias/{id}", get(obtener_caza))
+        .route("/api/cacerias/{id}/cerrar", post(cerrar_caza))
+        .route("/api/aegisql/esquema", get(esquema_aegisql))
         // Tiempo real
         .route("/api/ws", get(websocket))
         // Reputacion k-anonima
@@ -867,4 +872,257 @@ async fn consultar_reputacion(
         }
         Err(e) => error_500(e).into_response(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// FASE 43: caceria distribuida AegisQL
+// ---------------------------------------------------------------------------
+
+/// Consulta que el analista quiere lanzar a la flota.
+#[derive(Deserialize)]
+struct NuevaCaza {
+    /// Texto AegisQL.
+    consulta: String,
+}
+
+/// Lanza una caceria a toda la flota.
+///
+/// LA VALIDACION OCURRE AQUI Y NO EN EL ENDPOINT
+/// ---------------------------------------------
+/// La consulta se analiza contra el esquema ANTES de guardarla y de difundirla.
+/// Si no se hiciera, una columna mal escrita se convertiria en diez mil fallos
+/// remotos —cada uno con su registro y su alerta— por un error que se veia en
+/// la consola antes de pulsar "ejecutar". Ademas, el analizador es el que
+/// impone el techo de filas: sin pasar por el, una consulta sin `LIMIT` pediria
+/// a cada endpoint que devolviera todo lo que tiene.
+///
+/// El error que se devuelve lleva la posicion exacta y una sugerencia, para que
+/// el analista corrija en vez de adivinar.
+async fn lanzar_caza(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Json(p): Json<NuevaCaza>,
+) -> axum::response::Response {
+    let operador = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+
+    let consulta = match aegis_parser::sintaxis::analizar(&p.consulta) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": e.mensaje,
+                    "sugerencia": e.sugerencia,
+                    "inicio": e.inicio,
+                    "fin": e.fin,
+                    "detalle": e.dibujar(&p.consulta),
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    let plan = aegis_parser::plan::planificar(consulta);
+    let columnas: Vec<String> = match &plan.consulta.proyeccion {
+        aegis_parser::ast::Proyeccion::Columnas(c) => {
+            c.iter().map(|c| c.nombre.to_string()).collect()
+        }
+        aegis_parser::ast::Proyeccion::Todo => {
+            aegis_parser::plan::columnas_de_asterisco(plan.consulta.tabla)
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        }
+        aegis_parser::ast::Proyeccion::Cuenta => vec!["count".to_string()],
+    };
+
+    let almacen = estado.servicio.almacen();
+    match almacen
+        .lanzar_caza(
+            &p.consulta,
+            plan.consulta.tabla,
+            &columnas,
+            &operador,
+            // El margen de desconexion es tres intervalos de latido: un
+            // endpoint que se pierde uno sigue contando como en linea, y el
+            // denominador de la cobertura no baja por un paquete perdido.
+            (estado.servicio.intervalo_latido_seg() * 3) as i64,
+        )
+        .await
+    {
+        Ok(id) => {
+            let objetivo = almacen
+                .obtener_caza(id)
+                .await
+                .ok()
+                .flatten()
+                .map(|c| c.objetivo)
+                .unwrap_or(0);
+            estado
+                .servicio
+                .bus()
+                .publicar(crate::eventos::EventoPanel::CazaLanzada {
+                    caza_id: id.to_string(),
+                    consulta: p.consulta.clone(),
+                    por: operador,
+                    objetivo,
+                });
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "id": id,
+                    "tabla": plan.consulta.tabla,
+                    "columnas": columnas,
+                    "objetivo": objetivo,
+                    // Se devuelve el coste para que la consola pueda avisar de
+                    // que una caceria cara va a tardar en una flota grande.
+                    "coste": format!("{:?}", plan.coste_maximo).to_lowercase(),
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Cacerias recientes.
+async fn listar_cacerias(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Query(q): Query<Limite>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let limite = q.limite.unwrap_or(50).clamp(1, 500);
+    match estado.servicio.almacen().listar_cacerias(limite).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Una caceria con su resumen agregado y las respuestas mas utiles.
+async fn obtener_caza(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<Limite>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let Ok(id) = uuid::Uuid::parse_str(&id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "identificador invalido"})),
+        )
+            .into_response();
+    };
+    let almacen = estado.servicio.almacen();
+    let limite = q.limite.unwrap_or(200).clamp(1, 5_000);
+
+    let (caza, resumen, respuestas) = tokio::join!(
+        almacen.obtener_caza(id),
+        almacen.resumen_caza(id),
+        almacen.respuestas_caza(id, limite)
+    );
+
+    let caza = match caza {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "no existe esa caceria"})),
+            )
+                .into_response()
+        }
+        Err(e) => return error_500(e).into_response(),
+    };
+    let resumen = match resumen {
+        Ok(r) => r,
+        Err(e) => return error_500(e).into_response(),
+    };
+    let respuestas = match respuestas {
+        Ok(r) => r,
+        Err(e) => return error_500(e).into_response(),
+    };
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "caza": caza,
+            "resumen": resumen,
+            "respuestas": respuestas,
+        })),
+    )
+        .into_response()
+}
+
+/// Cierra una caceria: deja de entregarse a los endpoints que reconecten.
+async fn cerrar_caza(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let Ok(id) = uuid::Uuid::parse_str(&id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "identificador invalido"})),
+        )
+            .into_response();
+    };
+    match estado.servicio.almacen().cerrar_caza(id).await {
+        Ok(true) => (StatusCode::OK, Json(serde_json::json!({"cerrada": true}))).into_response(),
+        Ok(false) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "no existe o ya estaba cerrada"})),
+        )
+            .into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Esquema de AegisQL: tablas, columnas, tipos y coste.
+///
+/// Lo sirve el mismo binario que valida las consultas, asi que la ayuda que ve
+/// el analista en la consola NO PUEDE desincronizarse del esquema real. Una
+/// documentacion mantenida a mano al lado del codigo diverge en la primera
+/// columna que alguien anade con prisa.
+async fn esquema_aegisql(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let tablas: Vec<serde_json::Value> = aegis_parser::esquema::TABLAS
+        .iter()
+        .map(|t| {
+            serde_json::json!({
+                "nombre": t.nombre,
+                "descripcion": t.descripcion,
+                "columnas": t.columnas.iter().map(|c| serde_json::json!({
+                    "nombre": c.nombre,
+                    "tipo": c.tipo.nombre(),
+                    "coste": format!("{:?}", c.coste).to_lowercase(),
+                    "descripcion": c.descripcion,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "tablas": tablas,
+            "limite_por_defecto": aegis_parser::sintaxis::LIMITE_POR_DEFECTO,
+            "limite_maximo": aegis_parser::sintaxis::LIMITE_MAXIMO,
+        })),
+    )
+        .into_response()
 }

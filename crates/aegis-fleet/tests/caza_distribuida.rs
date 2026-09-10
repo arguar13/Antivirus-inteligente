@@ -45,9 +45,19 @@ impl ManejadorFlota for PlanoDeCaza {
     fn esperar_empuje(
         &self,
         _cn: &str,
-        _version_conocida: u64,
+        estado: &aegis_fleet::servidor::EstadoCanal,
         _plazo: Duration,
     ) -> Option<EmpujePolitica> {
+        // Si este canal ya le entrego la caceria, NO se repite: el agente
+        // sigue trabajando en ella. Es la misma regla que aplica el plano de
+        // control persistente, y esta aqui para que la prueba de bucle cerrado
+        // ejercite el comportamiento real y no una version simplificada.
+        if !estado.caza_entregada.is_empty() {
+            return Some(EmpujePolitica {
+                es_keepalive: true,
+                ..Default::default()
+            });
+        }
         // Solo la primera vez lleva caceria; las siguientes son latidos del
         // canal. Asi la prueba comprueba tambien que un agente no reejecuta la
         // misma consulta en bucle.
@@ -249,5 +259,41 @@ fn un_endpoint_que_no_puede_ejecutar_la_consulta_lo_dice() {
     assert!(informes[0].filas.is_empty());
 
     drop(informes);
+    servidor.parar();
+}
+
+#[test]
+fn una_caza_no_se_reenvia_al_agente_que_todavia_no_la_ha_contestado() {
+    // El defecto que esta prueba fija: el canal ve la caceria pendiente, la
+    // empuja, vuelve a mirar, la sigue viendo pendiente y la empuja otra vez.
+    // Un bucle cerrado entre el canal y un agente que aun esta trabajando.
+    // Multiplicado por diez mil canales, es una denegacion de servicio que se
+    // provoca el propio producto al lanzar una caceria.
+    let plano = Arc::new(PlanoDeCaza {
+        consulta: "SELECT pid FROM processes".to_string(),
+        informes: Mutex::new(Vec::new()),
+        entregas: AtomicUsize::new(0),
+    });
+    let (servidor, ca, dir) = banco(plano.clone());
+
+    let agente = cliente(&ca, dir, "endpoint-bucle");
+    let mut canal = agente
+        .abrir_sesion()
+        .expect("sesion")
+        .suscribir_politica(0)
+        .expect("suscribir");
+
+    let primero = canal.siguiente().expect("primer marco");
+    assert_eq!(primero.caza_id, "caza-1", "la caceria baja una vez");
+
+    // Sin contestarla, los marcos siguientes NO pueden repetirla.
+    for i in 0..5 {
+        let marco = canal.siguiente().expect("marco siguiente");
+        assert!(
+            marco.caza_id.is_empty(),
+            "el marco {i} repite la caceria que el agente aun no contesto"
+        );
+    }
+
     servidor.parar();
 }

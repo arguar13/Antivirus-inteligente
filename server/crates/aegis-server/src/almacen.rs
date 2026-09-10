@@ -1117,3 +1117,344 @@ pub struct NodoGrafo {
     /// Puntuacion de comportamiento.
     pub puntuacion: i32,
 }
+
+// ---------------------------------------------------------------------------
+// FASE 43: cacerias distribuidas AegisQL
+// ---------------------------------------------------------------------------
+
+/// Canal de PostgreSQL por el que se avisa de que hay caceria nueva.
+///
+/// Se usa el mismo mecanismo que la politica y por el mismo motivo: el plano de
+/// control se despliega con varias instancias detras de un balanceador, y los
+/// agentes estan repartidos entre todas. La caceria la recibe una instancia; el
+/// aviso tiene que llegar a las demas o solo respondera una fraccion de la
+/// flota, y el analista no tendra forma de saber cual.
+pub const CANAL_CAZA: &str = "aegis_caza";
+
+/// Una caceria, tal y como la ve la consola.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VistaCaza {
+    /// Identificador.
+    pub id: Uuid,
+    /// Texto exacto que escribio el analista.
+    pub consulta: String,
+    /// Tabla sobre la que se consulta.
+    pub tabla: String,
+    /// Columnas devueltas, en orden.
+    pub columnas: Vec<String>,
+    /// Operador que la ordeno.
+    pub lanzada_por: String,
+    /// Momento de lanzamiento.
+    pub lanzada_en: chrono::DateTime<chrono::Utc>,
+    /// Momento de cierre, si ya se cerro.
+    pub cerrada_en: Option<chrono::DateTime<chrono::Utc>>,
+    /// Agentes en linea cuando se lanzo: el denominador de la cobertura.
+    pub objetivo: i64,
+}
+
+/// Resumen agregado de una caceria.
+///
+/// Es lo que responde la pregunta que de verdad hace un analista: no "dame las
+/// filas" sino "que parte de mi flota contesto, cuantos encontraron algo, y de
+/// que no me puedo fiar".
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ResumenCaza {
+    /// Endpoints que han respondido.
+    pub respondieron: i64,
+    /// Endpoints con al menos una coincidencia.
+    pub con_hallazgos: i64,
+    /// Suma de coincidencias en toda la flota.
+    pub coincidencias: i64,
+    /// Suma de filas examinadas.
+    pub examinadas: i64,
+    /// Suma de valores que no se pudieron obtener.
+    pub inaccesibles: i64,
+    /// Endpoints que agotaron su presupuesto de tiempo.
+    pub agotados: i64,
+    /// Endpoints que informaron de un error.
+    pub con_error: i64,
+    /// Milisegundos del endpoint mas lento.
+    pub peor_ms: i64,
+}
+
+/// Respuesta de un endpoint concreto.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VistaRespuestaCaza {
+    /// Endpoint que respondio.
+    pub cn_agente: String,
+    /// Filas devueltas.
+    pub filas: serde_json::Value,
+    /// Filas que pasaron el filtro en ese endpoint.
+    pub coincidencias: i64,
+    /// Filas examinadas.
+    pub examinadas: i64,
+    /// Valores inaccesibles.
+    pub inaccesibles: i64,
+    /// Si el resultado se recorto.
+    pub incompleto: bool,
+    /// Si se agoto el presupuesto.
+    pub agotado: bool,
+    /// Milisegundos empleados.
+    pub duracion_ms: i64,
+    /// Error informado por el endpoint.
+    pub error: String,
+    /// Momento de llegada.
+    pub recibida_en: chrono::DateTime<chrono::Utc>,
+}
+
+impl Almacen {
+    /// Registra una caceria y avisa a las demas instancias.
+    pub async fn lanzar_caza(
+        &self,
+        consulta: &str,
+        tabla: &str,
+        columnas: &[String],
+        lanzada_por: &str,
+        margen_seg: i64,
+    ) -> Resultado<Uuid> {
+        let id = Uuid::new_v4();
+
+        // El denominador se captura AHORA. Contar los agentes en linea al leer
+        // el resultado daria una cobertura que cambia sola: un endpoint que se
+        // apago despues de responder haria bajar el porcentaje sin que nadie
+        // hubiera dejado de contestar.
+        let objetivo: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM agentes
+              WHERE ultimo_latido IS NOT NULL
+                AND ultimo_latido > now() - make_interval(secs => $1::double precision)",
+        )
+        .bind(margen_seg as f64)
+        .fetch_one(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"INSERT INTO cacerias (id, consulta, tabla, columnas, lanzada_por, objetivo)
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
+        )
+        .bind(id)
+        .bind(consulta)
+        .bind(tabla)
+        .bind(columnas)
+        .bind(lanzada_por)
+        .bind(objetivo)
+        .execute(&self.pool)
+        .await?;
+
+        // El aviso va DESPUES de confirmar la insercion: avisar antes dejaria a
+        // las otras instancias buscando una caceria que aun no existe.
+        sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(CANAL_CAZA)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await?;
+
+        Ok(id)
+    }
+
+    /// Caceria abierta que ESTE agente todavia no ha contestado.
+    ///
+    /// Que la condicion sea "no ha contestado" y no "es posterior a su ultima
+    /// conexion" es lo que hace que un endpoint apagado reciba la caceria al
+    /// volver, y que uno que ya respondio no la repita en bucle. La consulta
+    /// cae sobre la clave primaria de `caza_respuestas`.
+    pub async fn caza_pendiente_para(&self, cn: &str) -> Resultado<Option<(Uuid, String)>> {
+        let fila = sqlx::query(
+            r#"SELECT c.id, c.consulta
+                 FROM cacerias c
+                WHERE c.cerrada_en IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM caza_respuestas r
+                       WHERE r.caza_id = c.id AND r.cn_agente = $1)
+                ORDER BY c.lanzada_en DESC
+                LIMIT 1"#,
+        )
+        .bind(cn)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(fila.map(|f| (f.get("id"), f.get("consulta"))))
+    }
+
+    /// Guarda la respuesta de un endpoint.
+    ///
+    /// Es idempotente por la clave primaria (caza_id, cn_agente): un agente que
+    /// pierde la conexion justo despues de responder y reintenta SUSTITUYE su
+    /// respuesta en vez de duplicarla. Sin eso, un endpoint con mala red
+    /// inflaria el recuento y el analista veria una amenaza mas extendida de lo
+    /// que esta.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn guardar_respuesta_caza(
+        &self,
+        caza_id: Uuid,
+        cn: &str,
+        filas: &serde_json::Value,
+        coincidencias: i64,
+        examinadas: i64,
+        inaccesibles: i64,
+        incompleto: bool,
+        agotado: bool,
+        duracion_ms: i64,
+        error: &str,
+    ) -> Resultado<()> {
+        sqlx::query(
+            r#"INSERT INTO caza_respuestas
+                   (caza_id, cn_agente, filas, coincidencias, examinadas,
+                    inaccesibles, incompleto, agotado, duracion_ms, error)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+               ON CONFLICT (caza_id, cn_agente) DO UPDATE SET
+                   filas = EXCLUDED.filas,
+                   coincidencias = EXCLUDED.coincidencias,
+                   examinadas = EXCLUDED.examinadas,
+                   inaccesibles = EXCLUDED.inaccesibles,
+                   incompleto = EXCLUDED.incompleto,
+                   agotado = EXCLUDED.agotado,
+                   duracion_ms = EXCLUDED.duracion_ms,
+                   error = EXCLUDED.error,
+                   recibida_en = now()"#,
+        )
+        .bind(caza_id)
+        .bind(cn)
+        .bind(filas)
+        .bind(coincidencias)
+        .bind(examinadas)
+        .bind(inaccesibles)
+        .bind(incompleto)
+        .bind(agotado)
+        .bind(duracion_ms)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Una caceria por su identificador.
+    pub async fn obtener_caza(&self, id: Uuid) -> Resultado<Option<VistaCaza>> {
+        let fila = sqlx::query(
+            r#"SELECT id, consulta, tabla, columnas, lanzada_por, lanzada_en,
+                      cerrada_en, objetivo
+                 FROM cacerias WHERE id = $1"#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(fila.map(|f| VistaCaza {
+            id: f.get("id"),
+            consulta: f.get("consulta"),
+            tabla: f.get("tabla"),
+            columnas: f.get("columnas"),
+            lanzada_por: f.get("lanzada_por"),
+            lanzada_en: f.get("lanzada_en"),
+            cerrada_en: f.try_get("cerrada_en").ok().flatten(),
+            objetivo: f.get("objetivo"),
+        }))
+    }
+
+    /// Cacerias recientes.
+    pub async fn listar_cacerias(&self, limite: i64) -> Resultado<Vec<VistaCaza>> {
+        let filas = sqlx::query(
+            r#"SELECT id, consulta, tabla, columnas, lanzada_por, lanzada_en,
+                      cerrada_en, objetivo
+                 FROM cacerias ORDER BY lanzada_en DESC LIMIT $1"#,
+        )
+        .bind(limite)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas
+            .iter()
+            .map(|f| VistaCaza {
+                id: f.get("id"),
+                consulta: f.get("consulta"),
+                tabla: f.get("tabla"),
+                columnas: f.get("columnas"),
+                lanzada_por: f.get("lanzada_por"),
+                lanzada_en: f.get("lanzada_en"),
+                cerrada_en: f.try_get("cerrada_en").ok().flatten(),
+                objetivo: f.get("objetivo"),
+            })
+            .collect())
+    }
+
+    /// Agrega las respuestas de una caceria.
+    ///
+    /// La agregacion la hace PostgreSQL y no el servidor: traerse diez mil
+    /// respuestas a memoria para sumarlas seria mover megabytes por la red en
+    /// cada refresco del panel, cuando lo que el analista mira son ocho
+    /// numeros.
+    pub async fn resumen_caza(&self, id: Uuid) -> Resultado<ResumenCaza> {
+        let f = sqlx::query(
+            r#"SELECT
+                   count(*)                                         AS respondieron,
+                   count(*) FILTER (WHERE coincidencias > 0)         AS con_hallazgos,
+                   -- `sum()` sobre BIGINT devuelve NUMERIC en PostgreSQL, no
+                   -- BIGINT: es asi para que la suma de una columna de 64 bits
+                   -- no pueda desbordar. Sin el cast explicito, leer la
+                   -- columna como i64 revienta en tiempo de EJECUCION, que es
+                   -- justo donde no se quiere descubrir un error de tipos.
+                   COALESCE(sum(coincidencias), 0)::bigint           AS coincidencias,
+                   COALESCE(sum(examinadas), 0)::bigint              AS examinadas,
+                   COALESCE(sum(inaccesibles), 0)::bigint            AS inaccesibles,
+                   count(*) FILTER (WHERE agotado)                   AS agotados,
+                   count(*) FILTER (WHERE error <> '')               AS con_error,
+                   COALESCE(max(duracion_ms), 0)                     AS peor_ms
+                 FROM caza_respuestas WHERE caza_id = $1"#,
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(ResumenCaza {
+            respondieron: f.get("respondieron"),
+            con_hallazgos: f.get("con_hallazgos"),
+            coincidencias: f.get("coincidencias"),
+            examinadas: f.get("examinadas"),
+            inaccesibles: f.get("inaccesibles"),
+            agotados: f.get("agotados"),
+            con_error: f.get("con_error"),
+            peor_ms: f.get("peor_ms"),
+        })
+    }
+
+    /// Respuestas de una caceria, primero las que encontraron algo.
+    pub async fn respuestas_caza(
+        &self,
+        id: Uuid,
+        limite: i64,
+    ) -> Resultado<Vec<VistaRespuestaCaza>> {
+        let filas = sqlx::query(
+            r#"SELECT cn_agente, filas, coincidencias, examinadas, inaccesibles,
+                      incompleto, agotado, duracion_ms, error, recibida_en
+                 FROM caza_respuestas
+                WHERE caza_id = $1
+                ORDER BY coincidencias DESC, recibida_en DESC
+                LIMIT $2"#,
+        )
+        .bind(id)
+        .bind(limite)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(filas
+            .iter()
+            .map(|f| VistaRespuestaCaza {
+                cn_agente: f.get("cn_agente"),
+                filas: f.get("filas"),
+                coincidencias: f.get("coincidencias"),
+                examinadas: f.get("examinadas"),
+                inaccesibles: f.get("inaccesibles"),
+                incompleto: f.get("incompleto"),
+                agotado: f.get("agotado"),
+                duracion_ms: f.get("duracion_ms"),
+                error: f.get("error"),
+                recibida_en: f.get("recibida_en"),
+            })
+            .collect())
+    }
+
+    /// Cierra una caceria: deja de entregarse a los agentes que reconecten.
+    pub async fn cerrar_caza(&self, id: Uuid) -> Resultado<bool> {
+        let r = sqlx::query(
+            "UPDATE cacerias SET cerrada_en = now() WHERE id = $1 AND cerrada_en IS NULL",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(r.rows_affected() > 0)
+    }
+}

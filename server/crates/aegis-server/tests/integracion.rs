@@ -938,10 +938,24 @@ async fn una_regla_global_llega_al_agente_real_por_empuje_sin_esperar_su_latido(
     });
 
     // El agente espera en su canal.
+    //
+    // Se espera EN BUCLE hasta ver la politica, que es lo que hace un agente de
+    // verdad: por el mismo canal viajan tambien latidos y cacerias, asi que un
+    // agente que se quedara con el primer marco que llega estaria suponiendo
+    // que nadie mas usa el canal. Se acota con un numero de marcos para que un
+    // canal que nunca entregue la politica falle en vez de colgarse.
     let inicio = std::time::Instant::now();
     let empuje = tokio::task::spawn_blocking(move || {
         let mut canal = canal;
-        canal.siguiente()
+        for _ in 0..32 {
+            let marco = canal.siguiente()?;
+            if !marco.politica_json.is_empty() {
+                return Ok(marco);
+            }
+        }
+        Err(aegis_fleet::FleetError::Protocolo(
+            "el canal no entrego politica en 32 marcos".to_string(),
+        ))
     })
     .await
     .expect("hilo del canal")
@@ -1085,4 +1099,322 @@ async fn la_politica_compilada_es_la_que_el_agente_puede_aplicar() {
     assert_eq!(r["tipo"], "bloquear_puerto");
     assert_eq!(r["parametros"]["puerto"], 445);
     assert_eq!(r["parametros"]["direccion"], "ambas", "sin huecos");
+}
+
+// ---------------------------------------------------------------------------
+// FASE 43: cacerias distribuidas AegisQL
+// ---------------------------------------------------------------------------
+
+/// Indica si ESA caceria concreta sigue pendiente para ESE agente.
+///
+/// `caza_pendiente_para` devuelve la caceria abierta mas reciente que el agente
+/// no ha contestado, que es justo lo que tiene que hacer en produccion. Aqui se
+/// comprueba la propiedad concreta —"esta ya no le toca"— en vez de exigir que
+/// no le toque ninguna: la base de datos es compartida y otras pruebas abren
+/// las suyas al mismo tiempo. Una asercion sobre el estado global de la tabla
+/// fallaria por algo que no tiene nada que ver con lo que se quiere comprobar.
+async fn sigue_pendiente(almacen: &Almacen, cn: &str, id: uuid::Uuid) -> bool {
+    let mut visto = Vec::new();
+    // Se recorren las cacerias abiertas sin contestar marcandolas de una en
+    // una, porque la consulta solo devuelve la mas reciente.
+    loop {
+        match almacen.caza_pendiente_para(cn).await.unwrap() {
+            Some((pendiente, _)) if pendiente == id => return true,
+            Some((otra, _)) if !visto.contains(&otra) => {
+                // Se contesta la ajena para que la consulta siga bajando.
+                almacen
+                    .guardar_respuesta_caza(
+                        otra,
+                        cn,
+                        &serde_json::json!([]),
+                        0,
+                        0,
+                        0,
+                        false,
+                        false,
+                        0,
+                        "",
+                    )
+                    .await
+                    .unwrap();
+                visto.push(otra);
+            }
+            _ => return false,
+        }
+    }
+}
+
+#[tokio::test]
+async fn una_caceria_llega_al_agente_que_no_la_ha_contestado_y_deja_de_llegarle_al_responder() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn = cn_unico("cazador");
+    servicio
+        .enrolar(&cn, "id", "host", "1.0.0", b"h")
+        .await
+        .unwrap();
+
+    let id = almacen
+        .lanzar_caza(
+            "SELECT pid FROM processes WHERE uid = 0",
+            "processes",
+            &["pid".to_string()],
+            "analista@soc",
+            90,
+        )
+        .await
+        .unwrap();
+
+    // Antes de responder, la caceria le corresponde.
+    assert!(
+        sigue_pendiente(&almacen, &cn, id).await,
+        "la caceria recien lanzada tiene que llegarle"
+    );
+
+    // Responde.
+    almacen
+        .guardar_respuesta_caza(
+            id,
+            &cn,
+            &serde_json::json!([["1"]]),
+            1,
+            250,
+            0,
+            false,
+            false,
+            7,
+            "",
+        )
+        .await
+        .unwrap();
+
+    // Y deja de corresponderle: sin esto, un endpoint reejecutaria la misma
+    // consulta en cada latido del canal, para siempre.
+    assert!(
+        !sigue_pendiente(&almacen, &cn, id).await,
+        "una caceria ya contestada no puede volver a entregarse"
+    );
+}
+
+#[tokio::test]
+async fn la_respuesta_de_un_agente_es_idempotente_ante_un_reintento() {
+    // Un endpoint con mala red que reintenta no puede inflar el recuento: el
+    // analista veria una amenaza mas extendida de lo que esta.
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn = cn_unico("reintento");
+    servicio
+        .enrolar(&cn, "id", "host", "1.0.0", b"h")
+        .await
+        .unwrap();
+
+    let id = almacen
+        .lanzar_caza(
+            "SELECT COUNT(*) FROM processes",
+            "processes",
+            &["count".into()],
+            "op",
+            90,
+        )
+        .await
+        .unwrap();
+
+    for _ in 0..3 {
+        almacen
+            .guardar_respuesta_caza(
+                id,
+                &cn,
+                &serde_json::json!([["5"]]),
+                5,
+                100,
+                0,
+                false,
+                false,
+                3,
+                "",
+            )
+            .await
+            .unwrap();
+    }
+
+    let r = almacen.resumen_caza(id).await.unwrap();
+    assert_eq!(r.respondieron, 1, "tres reintentos son UNA respuesta");
+    assert_eq!(
+        r.coincidencias, 5,
+        "y sus coincidencias no se suman tres veces"
+    );
+}
+
+#[tokio::test]
+async fn el_resumen_agrega_toda_la_flota_y_distingue_lo_que_no_se_pudo_ver() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+
+    let id = almacen
+        .lanzar_caza(
+            "SELECT pid, sha256 FROM processes WHERE memory.rwx",
+            "processes",
+            &["pid".into(), "sha256".into()],
+            "analista@soc",
+            90,
+        )
+        .await
+        .unwrap();
+
+    // Tres endpoints con desenlaces distintos, que es el caso real.
+    let limpio = cn_unico("limpio");
+    let sucio = cn_unico("sucio");
+    let ciego = cn_unico("ciego");
+    for cn in [&limpio, &sucio, &ciego] {
+        servicio
+            .enrolar(cn, "id", "host", "1.0.0", b"h")
+            .await
+            .unwrap();
+    }
+
+    // Uno no encuentra nada.
+    almacen
+        .guardar_respuesta_caza(
+            id,
+            &limpio,
+            &serde_json::json!([]),
+            0,
+            300,
+            0,
+            false,
+            false,
+            5,
+            "",
+        )
+        .await
+        .unwrap();
+    // Otro encuentra dos cosas.
+    almacen
+        .guardar_respuesta_caza(
+            id,
+            &sucio,
+            &serde_json::json!([["1234", "ab".repeat(32)], ["5678", "cd".repeat(32)]]),
+            2,
+            280,
+            0,
+            false,
+            false,
+            12,
+            "",
+        )
+        .await
+        .unwrap();
+    // Y el tercero no pudo mirar del todo: agoto su presupuesto y hubo valores
+    // inaccesibles. Este es el caso que un resumen honesto NO puede esconder.
+    almacen
+        .guardar_respuesta_caza(
+            id,
+            &ciego,
+            &serde_json::json!([]),
+            0,
+            40,
+            17,
+            true,
+            true,
+            5000,
+            "",
+        )
+        .await
+        .unwrap();
+
+    let r = almacen.resumen_caza(id).await.unwrap();
+    assert_eq!(r.respondieron, 3);
+    assert_eq!(r.con_hallazgos, 1, "solo uno encontro algo");
+    assert_eq!(r.coincidencias, 2);
+    assert_eq!(r.examinadas, 620);
+    assert_eq!(r.inaccesibles, 17, "lo que no se pudo leer no se esconde");
+    assert_eq!(r.agotados, 1, "y el que se quedo a medias tampoco");
+    assert_eq!(r.peor_ms, 5000);
+
+    // Las respuestas llegan con las utiles primero: en una flota de diez mil,
+    // el analista no puede pasar paginas hasta encontrar el hallazgo.
+    let respuestas = almacen.respuestas_caza(id, 10).await.unwrap();
+    assert_eq!(respuestas[0].cn_agente, sucio);
+    assert_eq!(respuestas[0].coincidencias, 2);
+}
+
+#[tokio::test]
+async fn una_caceria_cerrada_deja_de_entregarse() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn = cn_unico("tarde");
+    servicio
+        .enrolar(&cn, "id", "host", "1.0.0", b"h")
+        .await
+        .unwrap();
+
+    let id = almacen
+        .lanzar_caza(
+            "SELECT pid FROM processes",
+            "processes",
+            &["pid".into()],
+            "op",
+            90,
+        )
+        .await
+        .unwrap();
+    assert!(sigue_pendiente(&almacen, &cn, id).await);
+
+    assert!(almacen.cerrar_caza(id).await.unwrap());
+    assert!(
+        !sigue_pendiente(&almacen, &cn, id).await,
+        "una caceria cerrada no puede seguir bajando a la flota"
+    );
+    // Cerrarla dos veces no es un error nuevo, pero tampoco un exito.
+    assert!(!almacen.cerrar_caza(id).await.unwrap());
+}
+
+#[tokio::test]
+async fn el_objetivo_se_congela_al_lanzar_la_caceria() {
+    // El denominador de la cobertura tiene que capturarse AL LANZAR. Si se
+    // contara al leer el resultado, un endpoint que se apago despues de
+    // responder haria bajar el porcentaje sin que nadie dejara de contestar.
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
+    let cn = cn_unico("vivo");
+    servicio
+        .enrolar(&cn, "id", "host", "1.0.0", b"h")
+        .await
+        .unwrap();
+    servicio.latido(&cn, 20_000, 0, 0).await.unwrap();
+
+    let id = almacen
+        .lanzar_caza(
+            "SELECT pid FROM processes",
+            "processes",
+            &["pid".into()],
+            "op",
+            90,
+        )
+        .await
+        .unwrap();
+
+    let caza = almacen.obtener_caza(id).await.unwrap().unwrap();
+    assert!(
+        caza.objetivo >= 1,
+        "al menos el agente que acaba de latir cuenta como objetivo"
+    );
+    assert_eq!(caza.lanzada_por, "op");
+    assert_eq!(caza.tabla, "processes");
+    assert!(caza.cerrada_en.is_none());
 }
