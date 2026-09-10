@@ -70,6 +70,14 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "kafka" ]; then
     fi
 fi
 
+# Paridad de defensa en Windows (FASE 47). El driver no se compila aqui —hace
+# falta el WDK— pero la DECISION si, y es la parte que puede estar mal de forma
+# peligrosa. El grupo informa siempre de que se pudo ejercer y que no.
+if [ -f tools/verificar-windows.sh ]; then
+    paso windows "Windows · politica de auto-defensa y clasificacion ETW-Ti" \
+        ./tools/verificar-windows.sh
+fi
+
 paso abi   "ABI · layout C vs Rust (gcc)"   env CC=gcc   ./tools/abi-check.sh
 paso abi   "ABI · layout C vs Rust (clang)" env CC=clang ./tools/abi-check.sh
 # Los pasos de eBPF solo aplican en Linux y solo si el subproyecto existe ya.

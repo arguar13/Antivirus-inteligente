@@ -1,0 +1,64 @@
+;
+; aegis.inf — driver de auto-defensa de AegisCore (FASE 47).
+;
+; NOTAS DE INSTALACION QUE NO SON DETALLES
+; ---------------------------------------
+; - `StartType = 0` (SERVICE_BOOT_START) y el grupo `Early-Launch` son lo que
+;   hace que el driver este cargado antes que un bootkit. Ver el modulo 01,
+;   seccion 1.4.
+; - `LoadOrderGroup = Early-Launch` exige que el driver este firmado con un
+;   certificado ELAM de Microsoft. Sin el, Windows no lo carga en esa fase.
+; - `ErrorControl = 1` (NORMAL): si el driver falla al cargar, se registra y se
+;   sigue arrancando. `CRITICAL` dejaria la maquina del cliente sin arrancar
+;   ante un problema de firma, que es exactamente lo que un atacante conseguiria
+;   manipulando el almacen de certificados.
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = AntiVirus
+ClassGuid   = {b1d1a169-c54f-4379-81db-bee7d88d7454}
+Provider    = %ProveedorNombre%
+CatalogFile = aegis.cat
+DriverVer   = 01/01/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12   ; %windir%\system32\drivers
+
+[DefaultInstall.NTamd64]
+OptionDesc = %ServicioDesc%
+CopyFiles  = AegisFicheros
+
+[DefaultInstall.NTamd64.Services]
+AddService = %ServicioNombre%,0x00000002,AegisServicio
+
+[DefaultUninstall.NTamd64]
+DelFiles = AegisFicheros
+
+[DefaultUninstall.NTamd64.Services]
+DelService = %ServicioNombre%,0x00000200
+
+[AegisFicheros]
+aegis.sys
+
+[AegisServicio]
+DisplayName    = %ServicioNombre%
+Description    = %ServicioDesc%
+ServiceBinary  = %12%\aegis.sys
+ServiceType    = 1    ; SERVICE_KERNEL_DRIVER
+StartType      = 0    ; SERVICE_BOOT_START — antes que un bootkit
+ErrorControl   = 1    ; NORMAL — un fallo no deja la maquina sin arrancar
+LoadOrderGroup = Early-Launch
+
+[SourceDisksNames]
+1 = %DiscoNombre%
+
+[SourceDisksFiles]
+aegis.sys = 1,,
+
+[Strings]
+ProveedorNombre = "AegisCore"
+ServicioNombre  = "AegisSelfDefense"
+ServicioDesc    = "AegisCore — auto-defensa del agente (ObRegisterCallbacks)"
+DiscoNombre     = "Disco de instalacion de AegisCore"
