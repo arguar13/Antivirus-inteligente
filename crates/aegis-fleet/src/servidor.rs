@@ -18,8 +18,9 @@ use rustls::ServerConnection;
 use crate::error::{FleetError, Resultado};
 use crate::pki::{ahora_unix, Identidad};
 use crate::proto::{
-    AckEvento, AckGrafo, AckLatido, AckStix, EmpujePolitica, Latido, ReporteEvento, ReporteGrafo,
-    ReporteStix, RespuestaEnrolamiento, SolicitudEnrolamiento, SuscripcionPolitica,
+    AckCaza, AckEvento, AckGrafo, AckLatido, AckStix, EmpujePolitica, Latido, ReporteCaza,
+    ReporteEvento, ReporteGrafo, ReporteStix, RespuestaEnrolamiento, SolicitudEnrolamiento,
+    SuscripcionPolitica,
 };
 use crate::rpc::{
     escribir_marco, leer_marco, Metodo, ESTADO_INTERNO, ESTADO_METODO_DESCONOCIDO, ESTADO_OK,
@@ -78,6 +79,20 @@ pub trait ManejadorFlota: Send + Sync {
         _plazo: Duration,
     ) -> Option<EmpujePolitica> {
         None
+    }
+
+    /// Recibe el resultado de una caceria AegisQL.
+    ///
+    /// El valor por defecto RECHAZA con un motivo en vez de aceptar en
+    /// silencio. Un plano de control que no sabe agregar cacerias y responde
+    /// "recibido" haria creer al agente que su trabajo sirvio de algo, y al
+    /// analista que la flota respondio; el resultado se perderia sin que nadie
+    /// se enterara.
+    fn caza(&self, _cn: &str, _req: &ReporteCaza) -> AckCaza {
+        AckCaza {
+            recibido: false,
+            motivo: "este plano de control no agrega cacerias".to_string(),
+        }
     }
 }
 
@@ -330,6 +345,7 @@ impl PlanoDeControl {
             politica_json: self.politica.lock().map(|p| p.clone()).unwrap_or_default(),
             comandos_json: String::new(),
             es_keepalive: false,
+            ..Default::default()
         }
     }
 }
@@ -594,5 +610,9 @@ fn despachar(
             ESTADO_INTERNO,
             b"la suscripcion no se despacha como llamada unaria".to_vec(),
         ),
+        Metodo::ReportarCaza => match ReporteCaza::decodificar(cuerpo) {
+            Ok(req) => (ESTADO_OK, manejador.caza(cn, &req).codificar()),
+            Err(_) => (ESTADO_INTERNO, b"informe de caza invalido".to_vec()),
+        },
     }
 }

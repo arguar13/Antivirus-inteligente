@@ -63,6 +63,13 @@ pub enum Metodo {
     /// conexion queda abierta y el servidor escribe por ella cuando hay algo
     /// que entregar.
     SuscribirPolitica,
+    /// Devolver el resultado de una caceria AegisQL.
+    ///
+    /// La consulta baja por el canal de suscripcion —ver `EmpujePolitica`— y el
+    /// resultado sube por aqui, en una conexion normal de peticion/respuesta.
+    /// Separarlos es lo que permite que un endpoint tarde lo que necesite en
+    /// responder sin bloquear el canal por el que le llegan las politicas.
+    ReportarCaza,
 }
 
 impl Metodo {
@@ -75,6 +82,7 @@ impl Metodo {
             Metodo::ReportarStix => 4,
             Metodo::ReportarGrafo => 5,
             Metodo::SuscribirPolitica => 6,
+            Metodo::ReportarCaza => 7,
         }
     }
 
@@ -87,6 +95,7 @@ impl Metodo {
             4 => Some(Metodo::ReportarStix),
             5 => Some(Metodo::ReportarGrafo),
             6 => Some(Metodo::SuscribirPolitica),
+            7 => Some(Metodo::ReportarCaza),
             _ => None,
         }
     }

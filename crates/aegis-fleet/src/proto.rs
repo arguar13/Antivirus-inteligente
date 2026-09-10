@@ -701,7 +701,23 @@ impl SuscripcionPolitica {
     }
 }
 
-/// `PolicyPush`: lo que el servidor escribe por el canal de suscripcion.
+/// `ServerPush`: lo que el servidor escribe por el canal de suscripcion.
+///
+/// POR QUE LA CAZA VIAJA POR ESTE MISMO CANAL
+/// ------------------------------------------
+/// Difundir una consulta de caza a la flota es exactamente el mismo problema
+/// que empujar una politica: llegar a decenas de miles de endpoints en
+/// milisegundos, sin esperar a su siguiente latido.
+///
+/// Ese canal YA existe, ya esta abierto contra cada agente, ya tiene latido
+/// propio, y su coste esta MEDIDO: 10.000 canales simultaneos cuestan 10.006
+/// hilos y 10.046 descriptores en el servidor (FASE 41, docs/36-carga.md).
+/// Abrir un segundo canal por agente para las cacerias duplicaria exactamente
+/// ese coste a cambio de nada. Se reutiliza.
+///
+/// Los campos nuevos no rompen a un agente antiguo: el decodificador ignora los
+/// campos que no conoce, asi que uno que no entienda de cazas seguira aplicando
+/// politica igual que antes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EmpujePolitica {
     /// Version de la politica que se entrega.
@@ -710,6 +726,15 @@ pub struct EmpujePolitica {
     pub politica_json: String,
     /// Comandos dirigidos a ESTE agente, en JSON.
     pub comandos_json: String,
+    /// Identificador de la caceria, si este empuje lleva una.
+    ///
+    /// Vacio cuando el empuje es solo de politica. El agente lo devuelve con
+    /// los resultados para que el plano de control sepa a que caceria
+    /// corresponden: sin el, dos cacerias lanzadas con segundos de diferencia
+    /// mezclarian sus respuestas.
+    pub caza_id: String,
+    /// Consulta AegisQL a ejecutar.
+    pub caza_ql: String,
     /// Si el marco es solo una senal de vida sin contenido nuevo.
     ///
     /// Un canal que solo habla cuando hay novedades es indistinguible de un
@@ -726,6 +751,8 @@ impl EmpujePolitica {
         escribir_str(&mut b, 2, &self.politica_json);
         escribir_str(&mut b, 3, &self.comandos_json);
         escribir_bool(&mut b, 4, self.es_keepalive);
+        escribir_str(&mut b, 5, &self.caza_id);
+        escribir_str(&mut b, 6, &self.caza_ql);
         b
     }
 
@@ -739,6 +766,192 @@ impl EmpujePolitica {
                 Campo::Bytes(2, v) => m.politica_json = como_str(v)?,
                 Campo::Bytes(3, v) => m.comandos_json = como_str(v)?,
                 Campo::Entero(4, v) => m.es_keepalive = v != 0,
+                Campo::Bytes(5, v) => m.caza_id = como_str(v)?,
+                Campo::Bytes(6, v) => m.caza_ql = como_str(v)?,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// Filas maximas que un agente puede devolver en un informe de caza.
+///
+/// Coincide con el techo que impone el analizador de AegisQL. Se comprueba
+/// tambien aqui, y no solo alli, porque un agente comprometido podria enviar un
+/// informe que nunca paso por ese analizador: el plano de control no puede
+/// confiar en que el otro extremo respeto un limite.
+pub const MAX_FILAS_CAZA: usize = 10_000;
+
+/// Celdas maximas por fila.
+pub const MAX_CELDAS_FILA: usize = 32;
+
+/// Una fila de resultado de caza: celdas ya convertidas a texto.
+///
+/// Se transportan como texto y no con tipos porque el destino es una tabla en
+/// una consola: el tipo ya lo declara el esquema de AegisQL, y arrastrar una
+/// union por celda multiplicaria el tamano del mensaje por cada fila de cada
+/// endpoint sin anadir nada que el analista pueda ver.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FilaCaza {
+    /// Celdas, en el orden de las columnas declaradas.
+    pub celdas: Vec<String>,
+}
+
+impl FilaCaza {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        for c in &self.celdas {
+            escribir_str(&mut b, 1, c);
+        }
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            if let Campo::Bytes(1, v) = campo {
+                if m.celdas.len() >= MAX_CELDAS_FILA {
+                    return Err(FleetError::Protocolo(format!(
+                        "una fila de caza excede las {MAX_CELDAS_FILA} celdas"
+                    )));
+                }
+                m.celdas.push(como_str(v)?);
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// `HuntReport`: lo que un agente responde a una caceria.
+///
+/// Lleva contadores ademas de filas, y esa es la parte que hace util la
+/// agregacion: el plano de control puede decirle al analista "9.847 endpoints
+/// respondieron, 12 encontraron algo, 3 no pudieron leer parte de su memoria",
+/// en vez de una lista de filas sin contexto.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReporteCaza {
+    /// Identidad del agente.
+    pub id_agente: String,
+    /// Caceria a la que responde.
+    pub caza_id: String,
+    /// Nombres de las columnas, en orden.
+    pub columnas: Vec<String>,
+    /// Filas devueltas.
+    pub filas: Vec<FilaCaza>,
+    /// Filas que pasaron el filtro, aunque no se devolvieran todas.
+    pub coincidencias: u64,
+    /// Filas examinadas.
+    pub examinadas: u64,
+    /// Valores que el endpoint no pudo obtener.
+    pub inaccesibles: u64,
+    /// Cierto si el resultado se corto por limite o por presupuesto.
+    pub incompleto: bool,
+    /// Cierto si se corto por PRESUPUESTO: la consulta es demasiado cara aqui.
+    pub agotado: bool,
+    /// Milisegundos empleados en el endpoint.
+    pub duracion_ms: u64,
+    /// Motivo por el que el endpoint no pudo ejecutar la consulta, si aplica.
+    ///
+    /// Un endpoint que rechaza la consulta tiene que DECIRLO. Si se limitara a
+    /// no responder, seria indistinguible de uno apagado, y el analista creeria
+    /// que su caceria cubrio una flota que en realidad no cubrio.
+    pub error: String,
+}
+
+impl ReporteCaza {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_str(&mut b, 1, &self.id_agente);
+        escribir_str(&mut b, 2, &self.caza_id);
+        for c in &self.columnas {
+            escribir_str(&mut b, 3, c);
+        }
+        for f in &self.filas {
+            escribir_bytes(&mut b, 4, &f.codificar());
+        }
+        escribir_u64(&mut b, 5, self.coincidencias);
+        escribir_u64(&mut b, 6, self.examinadas);
+        escribir_u64(&mut b, 7, self.inaccesibles);
+        escribir_bool(&mut b, 8, self.incompleto);
+        escribir_bool(&mut b, 9, self.agotado);
+        escribir_u64(&mut b, 10, self.duracion_ms);
+        escribir_str(&mut b, 11, &self.error);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    ///
+    /// El limite de filas se comprueba DURANTE el recorrido y no despues: un
+    /// limite que para comprobarse exige haber reservado ya la memoria que se
+    /// queria acotar no protege de nada.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Bytes(1, v) => m.id_agente = como_str(v)?,
+                Campo::Bytes(2, v) => m.caza_id = como_str(v)?,
+                Campo::Bytes(3, v) => {
+                    if m.columnas.len() >= MAX_CELDAS_FILA {
+                        return Err(FleetError::Protocolo(format!(
+                            "un informe de caza excede las {MAX_CELDAS_FILA} columnas"
+                        )));
+                    }
+                    m.columnas.push(como_str(v)?);
+                }
+                Campo::Bytes(4, v) => {
+                    if m.filas.len() >= MAX_FILAS_CAZA {
+                        return Err(FleetError::Protocolo(format!(
+                            "un informe de caza excede las {MAX_FILAS_CAZA} filas"
+                        )));
+                    }
+                    m.filas.push(FilaCaza::decodificar(v)?);
+                }
+                Campo::Entero(5, v) => m.coincidencias = v,
+                Campo::Entero(6, v) => m.examinadas = v,
+                Campo::Entero(7, v) => m.inaccesibles = v,
+                Campo::Entero(8, v) => m.incompleto = v != 0,
+                Campo::Entero(9, v) => m.agotado = v != 0,
+                Campo::Entero(10, v) => m.duracion_ms = v,
+                Campo::Bytes(11, v) => m.error = como_str(v)?,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// `HuntAck`: acuse del informe de caza.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AckCaza {
+    /// Si el informe se acepto.
+    pub recibido: bool,
+    /// Motivo del rechazo, si lo hubo.
+    pub motivo: String,
+}
+
+impl AckCaza {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_bool(&mut b, 1, self.recibido);
+        escribir_str(&mut b, 2, &self.motivo);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Entero(1, v) => m.recibido = v != 0,
+                Campo::Bytes(2, v) => m.motivo = como_str(v)?,
                 _ => {}
             }
         }

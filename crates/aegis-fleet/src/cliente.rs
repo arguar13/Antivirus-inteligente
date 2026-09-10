@@ -14,7 +14,8 @@ use rustls::{ClientConnection, StreamOwned};
 
 use crate::error::{FleetError, Resultado};
 use crate::proto::{
-    AckEvento, AckLatido, Latido, ReporteEvento, RespuestaEnrolamiento, SolicitudEnrolamiento,
+    AckCaza, AckEvento, AckLatido, Latido, ReporteCaza, ReporteEvento, RespuestaEnrolamiento,
+    SolicitudEnrolamiento,
 };
 use crate::proto::{
     AckGrafo, AckStix, EmpujePolitica, ReporteGrafo, ReporteStix, SuscripcionPolitica,
@@ -72,6 +73,18 @@ impl SesionFlota {
     pub fn reportar_grafo(&mut self, req: &ReporteGrafo) -> Resultado<AckGrafo> {
         let cuerpo = llamada_unaria(&mut self.tls, Metodo::ReportarGrafo, &req.codificar())?;
         AckGrafo::decodificar(&cuerpo)
+    }
+
+    /// Devuelve el resultado de una caceria AegisQL.
+    ///
+    /// Va por una conexion normal y no por el canal de suscripcion a proposito:
+    /// una caceria cara puede tardar segundos en el endpoint, y bloquear el
+    /// canal de politica mientras tanto retrasaria una orden de aislamiento
+    /// —que es lo que se envia cuando la maquina esta comprometida— detras de
+    /// una consulta de rutina.
+    pub fn reportar_caza(&mut self, req: &ReporteCaza) -> Resultado<AckCaza> {
+        let cuerpo = llamada_unaria(&mut self.tls, Metodo::ReportarCaza, &req.codificar())?;
+        AckCaza::decodificar(&cuerpo)
     }
 
     /// Convierte esta sesion en un canal de politica y devuelve el canal.
