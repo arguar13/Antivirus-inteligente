@@ -1,0 +1,22 @@
+[package]
+name = "aegis-selfdefense"
+description = "Autodefensa legitima: OTP firmado del Control Plane, decision de tamper, clasificacion ELAM y requisitos PPL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# La orden de operacion autorizada (OTP) se firma con la firma HIBRIDA de la
+# FASE 59: el camino de desinstalacion del dueno tambien es post-cuantico. Solo
+# la feature de firma; la autodefensa no intercambia claves.
+aegis-pqc = { path = "../aegis-pqc", default-features = false, features = ["sign"] }
+# Nonce del OTP (anti-replay) desde la entropia del sistema.
+getrandom = "0.2"
+# Medida (hash) de un driver de arranque para la clasificacion ELAM.
+sha2 = "0.10"
