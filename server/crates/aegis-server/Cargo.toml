@@ -23,6 +23,12 @@ aegis-parser = { path = "../../../crates/aegis-parser" }
 # Kafka queda tras una caracteristica porque arrastra una biblioteca en C: quien
 # solo integre por syslog no deberia pagarla ni auditarla.
 aegis-firehose = { path = "../../../crates/aegis-firehose" }
+# Atestacion TPM 2.0 (FASE 49): el plano de control VERIFICA el quote del agente
+# antes de creerse su telemetria. La emision del quote (contra el TPM) vive en el
+# agente y esta gated; aqui solo se verifica, que es cripto pura.
+aegis-attest = { path = "../../../crates/aegis-attest" }
+aegis-firmware = { path = "../../../crates/aegis-firmware" }
+getrandom = "0.2"
 
 # --- Runtime asincrono ------------------------------------------------------
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }
@@ -68,3 +74,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 # Las pruebas de integracion hablan con PostgreSQL, Redis y mTLS reales.
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros"] }
 tokio-stream = { version = "0.1", features = ["net"] }
+# Material de clave REAL para el test de decision de atestacion: se firma un
+# quote de verdad y se comprueba que la decision lo acepta o cuarentena.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+sha2 = "0.10"

@@ -35,6 +35,7 @@ members = [
     "crates/aegis-watchdog",
     "crates/aegis-e2e",
     "crates/aegis-firehose",
+    "crates/aegis-attest",
 ]
 
 [workspace.package]
