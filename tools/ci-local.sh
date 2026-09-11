@@ -161,6 +161,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "syscallguard" ]; then
     fi
 fi
 
+# PTGuard (Intel PT, FASE 51): el nucleo —decodificar la traza, reconstruir el
+# flujo, decidir ROP/JOP— se prueba en "Rust · tests" con trazas binarias reales
+# y codigo x86-64 real. Aqui se comprueba que la fontaneria de captura en vivo
+# COMPILA (feature pt-live) y se declara si esta maquina puede capturar de verdad
+# —que sin intel_pt, no—.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ptguard" ]; then
+    printf '%s==>%s PTGuard · trazado Intel PT (nucleo probado; captura gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-ptguard.sh > /tmp/aegis-ptguard.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-ptguard.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-ptguard.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
 # en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
 # el informe lo confirma donde corre la puerta de calidad.

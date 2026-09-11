@@ -37,6 +37,7 @@ members = [
     "crates/aegis-firehose",
     "crates/aegis-attest",
     "crates/aegis-rollback",
+    "crates/aegis-ptguard",
 ]
 
 [workspace.package]
