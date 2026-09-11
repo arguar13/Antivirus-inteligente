@@ -280,6 +280,24 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "hardsense" ]; then
     fi
 fi
 
+# AegisCloudNative (escape de contenedor, FASE 62): el nucleo —reconocer los
+# patrones de escape (release_agent/core_pattern, montaje del disco del host,
+# setns al host, bpf en contenedor, unshare(NEWUSER)+mount) y NO marcar las mismas
+# syscalls en el host— se prueba en "Rust · tests". Aqui se re-ejercita y se
+# DECLARA el muro: enganchar esas syscalls en vivo es un eBPF en el kernel (BTF,
+# privilegios, bytecode cargado).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "cloudnative" ]; then
+    printf '%s==>%s AegisCloudNative · escape de contenedor (nucleo probado; enganche eBPF gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-cloudnative.sh > /tmp/aegis-cloudnative-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-cloudnative-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-cloudnative-ci.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
 # en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
 # el informe lo confirma donde corre la puerta de calidad.

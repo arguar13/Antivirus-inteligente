@@ -45,6 +45,7 @@ members = [
     "crates/aegis-vmi",
     "crates/aegis-selfdefense",
     "crates/aegis-hardsense",
+    "crates/aegis-cloudnative",
 ]
 
 [workspace.package]
