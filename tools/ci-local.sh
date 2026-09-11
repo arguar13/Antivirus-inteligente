@@ -178,6 +178,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ptguard" ]; then
     fi
 fi
 
+# Honey-tokens / decepcion activa (FASE 52): el nucleo —acunar, renderizar
+# credenciales creibles, planificar sobre /proc/maps real, decidir el disparo— se
+# prueba en "Rust · tests". Aqui se comprueba que la fontaneria de inyeccion en
+# memoria ajena compila y se declara que su ejecucion necesita un proceso victima
+# real.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "honeytoken" ]; then
+    printf '%s==>%s Honeytoken · decepcion activa (nucleo probado; inyeccion gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-honeytoken.sh > /tmp/aegis-honeytoken.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-honeytoken.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-honeytoken.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
 # en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
 # el informe lo confirma donde corre la puerta de calidad.

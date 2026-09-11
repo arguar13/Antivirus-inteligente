@@ -1,0 +1,33 @@
+[package]
+name = "aegis-honeytoken"
+description = "Honey-tokens dinamicos y decepcion activa: credenciales senuelo atribuibles (FASE 52)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# La colocacion del token en la memoria de un proceso vivo (process_vm_writev) y
+# el sembrado real en el sistema de ficheros. Necesita privilegios y un proceso
+# objetivo; se compila solo con esta feature y el CI declara si se ejercio.
+inyeccion = ["dep:libc"]
+
+[dependencies]
+# Marcador atribuible y derivacion por token: mismo stack que el resto del repo.
+hmac = "0.12"
+sha2 = "0.10"
+hkdf = "0.12"
+rand = "0.8"
+zeroize = "1"
+thiserror = "2"
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+# Validan por PARSEO REAL que los artefactos senuelo son crebibles: una clave
+# OpenSSH que no parsea no engana a nadie; un XML mal formado se descarta.
+ssh-key = "0.6"
+roxmltree = "0.20"
