@@ -62,6 +62,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-itdr"
+version = "0.1.0"
+dependencies = [
+ "petgraph",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-parser"
 version = "0.1.0"
 dependencies = [
@@ -102,6 +110,7 @@ dependencies = [
  "aegis-firehose",
  "aegis-firmware",
  "aegis-fleet",
+ "aegis-itdr",
  "aegis-parser",
  "aegis-pqc",
  "aegis-selfdefense",

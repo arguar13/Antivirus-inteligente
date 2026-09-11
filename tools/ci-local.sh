@@ -195,6 +195,22 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "honeytoken" ]; then
     fi
 fi
 
+# ITDR (FASE 58): el nucleo —parsear tickets Kerberos, decidir Kerberoasting /
+# Golden / Silver y correlacionar el grafo de identidad— se prueba en "Servidor ·
+# tests". Aqui se re-ejercita ese nucleo y se DECLARA que la captura EN VIVO de la
+# capa de identidad necesita un dominio Active Directory real, que no hay aqui.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "itdr" ]; then
+    printf '%s==>%s ITDR · deteccion de identidad (nucleo probado; captura en vivo gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-itdr.sh > /tmp/aegis-itdr-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-itdr-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-itdr-ci.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
 # en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
 # el informe lo confirma donde corre la puerta de calidad.

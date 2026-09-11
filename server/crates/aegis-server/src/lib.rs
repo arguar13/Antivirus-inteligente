@@ -34,6 +34,7 @@ pub mod firehose;
 pub mod flota;
 pub mod grpc;
 pub mod heuristicas;
+pub mod itdr;
 pub mod notificador;
 pub mod panel;
 pub mod pizarra;

@@ -1,0 +1,26 @@
+[package]
+name = "aegis-itdr"
+description = "Deteccion y respuesta a amenazas de identidad (ITDR): Kerberoasting, Golden/Silver Ticket y grafo de identidad con centralidad"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Errores nombrados y sin ambiguedad, igual que el resto del proyecto.
+thiserror = "2"
+# Grafo de identidad en memoria (motor del Control Plane, item 2 de la FASE 58).
+# petgraph es Rust puro y estable. Se fija en la 0.7 A PROPOSITO: `prost-build`
+# (build-dependency de aegis-server via tonic-build) YA arrastra petgraph 0.7.1,
+# asi que pedir la 0.7 deja UNA sola version en el arbol en vez de dos —la
+# politica de cadena de suministro del proyecto lo exige, igual que el comentario
+# de x25519-dalek en aegis-pqc—. Ademas reutiliza el fixedbitset 0.5 y el
+# indexmap 2 ya presentes. De petgraph usamos solo la estructura de grafo y el
+# recorrido de vecinos; la centralidad de intermediacion (Brandes) y la
+# alcanzabilidad de escalada las implementamos nosotros en `grafo.rs`, con un KAT
+# verificable a mano, en vez de depender de un algoritmo externo.
+petgraph = { version = "0.7", default-features = false }
