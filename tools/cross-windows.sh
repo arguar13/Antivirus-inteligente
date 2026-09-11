@@ -121,6 +121,23 @@ if [ -f "$RB_POLITICA" ]; then
     fi
 fi
 
+# --- 2c. La politica de tamper (autodefensa, FASE 55'), a objeto Windows -----
+TAMPER_POLITICA="$DRV/aegis_tamper_politica.c"
+if [ -f "$TAMPER_POLITICA" ]; then
+    echo "==> Politica de tamper -> objeto Windows x64 ($TARGET)"
+    if clang --target="$TARGET" -ffreestanding -O2 -Wall -Wextra -Werror \
+         -c "$TAMPER_POLITICA" -o "$OUT/tamper.obj" 2>"$OUT/tamperclang.err"; then
+        maq="$(llvm-readobj --file-headers "$OUT/tamper.obj" 2>/dev/null | awk -F'[()]' '/Machine:/{print $2}' | tr -d ' ')"
+        if [ "$maq" = "0x8664" ] && llvm-nm "$OUT/tamper.obj" 2>/dev/null | grep -q " T aegis_decidir_tamper$"; then
+            echo "    ${VERDE}OK${FIN}  objeto COFF x86-64 con la decision de tamper"
+        else
+            echo "    ${ROJO}FALLO${FIN}: la politica de tamper no cross-compilo bien (maquina=$maq)"; FALLOS=$((FALLOS+1))
+        fi
+    else
+        echo "    ${ROJO}FALLO${FIN}: la politica de tamper no compila para Windows"; sed 's/^/      /' "$OUT/tamperclang.err"; FALLOS=$((FALLOS+1))
+    fi
+fi
+
 # --- 3. El driver de produccion completo: gated por $WDK_ROOT ----------------
 echo "==> Driver de produccion completo (obcallbacks.c + driver.c)"
 if [ -n "${WDK_ROOT:-}" ] && [ -d "$WDK_ROOT" ]; then

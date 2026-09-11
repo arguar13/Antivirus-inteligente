@@ -38,6 +38,9 @@ DRIVER=kernel/windows/aegis/obcallbacks.c
 RB_POLITICA=kernel/windows/aegis/aegis_rollback_politica.c
 RB_SONDA=tools/rollback_politica_probe.c
 
+TAMPER_POLITICA=kernel/windows/aegis/aegis_tamper_politica.c
+TAMPER_SONDA=tools/tamper_politica_probe.c
+
 # --- 1. La decision, con los dos compiladores -------------------------------
 for CC in gcc clang; do
     command -v "$CC" >/dev/null 2>&1 || { echo "  omitido: no hay $CC"; continue; }
@@ -60,6 +63,21 @@ for CC in gcc clang; do
             :
         else
             echo "  ${ROJO}FALLO${FIN}: la politica de rollback no se cumple con $CC" >&2
+            FALLOS=$((FALLOS + 1))
+        fi
+    fi
+
+    # La politica de tamper protection (autodefensa, FASE 55'): misma logica de
+    # separacion. Decidir mal aqui deja a un atacante borrar el EDR (de menos) o
+    # impide al DUENO desinstalarlo (de mas). La afirmacion central es la linea
+    # etica: con el OTP del Control Plane, la eliminacion se permite.
+    if [ -f "$TAMPER_SONDA" ]; then
+        echo "==> Politica de tamper ($CC)"
+        if "$CC" -std=c11 -Wall -Wextra -Werror -o "$OUT/tamperprobe-$CC" "$TAMPER_SONDA" "$TAMPER_POLITICA" \
+           && "$OUT/tamperprobe-$CC"; then
+            :
+        else
+            echo "  ${ROJO}FALLO${FIN}: la politica de tamper no se cumple con $CC" >&2
             FALLOS=$((FALLOS + 1))
         fi
     fi
