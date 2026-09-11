@@ -35,16 +35,33 @@ POLITICA=kernel/windows/aegis/aegis_politica.c
 SONDA=tools/windows_politica_probe.c
 DRIVER=kernel/windows/aegis/obcallbacks.c
 
+RB_POLITICA=kernel/windows/aegis/aegis_rollback_politica.c
+RB_SONDA=tools/rollback_politica_probe.c
+
 # --- 1. La decision, con los dos compiladores -------------------------------
 for CC in gcc clang; do
     command -v "$CC" >/dev/null 2>&1 || { echo "  omitido: no hay $CC"; continue; }
-    echo "==> Politica de Windows ($CC)"
+    echo "==> Politica de auto-defensa ($CC)"
     if "$CC" -std=c11 -Wall -Wextra -Werror -o "$OUT/probe-$CC" "$SONDA" "$POLITICA" \
        && "$OUT/probe-$CC"; then
         :
     else
-        echo "  ${ROJO}FALLO${FIN}: la politica no se cumple con $CC" >&2
+        echo "  ${ROJO}FALLO${FIN}: la politica de auto-defensa no se cumple con $CC" >&2
         FALLOS=$((FALLOS + 1))
+    fi
+
+    # La politica del minifilter de rollback (FASE 50): misma logica de
+    # separacion que la FASE 47. Decidir mal aqui llena el disco del cliente
+    # (interceptar de mas) o deja ficheros sin poder revertir (de menos).
+    if [ -f "$RB_SONDA" ]; then
+        echo "==> Politica de rollback ($CC)"
+        if "$CC" -std=c11 -Wall -Wextra -Werror -o "$OUT/rbprobe-$CC" "$RB_SONDA" "$RB_POLITICA" \
+           && "$OUT/rbprobe-$CC"; then
+            :
+        else
+            echo "  ${ROJO}FALLO${FIN}: la politica de rollback no se cumple con $CC" >&2
+            FALLOS=$((FALLOS + 1))
+        fi
     fi
 done
 

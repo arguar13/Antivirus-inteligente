@@ -1,0 +1,41 @@
+[package]
+name = "aegis-rollback"
+description = "Reversion de ransomware: copia-sombra cifrada y restauracion en milisegundos (FASE 50)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# La captura en vivo (fanotify) intercepta la escritura ANTES de que ocurra para
+# leer el contenido original. Necesita CAP_SYS_ADMIN y un kernel con
+# FAN_PRE_ACCESS; se compila solo con esta feature y el CI declara si la ejercio.
+fanotify = ["dep:libc"]
+
+[dependencies]
+# Mismo stack criptografico que la cuarentena de aegis-resp (AES-256-GCM + HKDF),
+# ya vendorizado: la copia-sombra se guarda cifrada para que el propio ransomware
+# no la vea en claro ni la borre a ciegas.
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+zeroize = "1"
+rand = "0.8"
+# Huella rapida para deduplicar el diario (ya usada en aegis-fim).
+blake3 = "1"
+thiserror = "2"
+# La entropia de Shannon distingue un documento de su version cifrada.
+aegis-ml = { path = "../aegis-ml" }
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
+# Directorios y ficheros temporales REALES en las pruebas: se cifra de verdad un
+# fichero en disco y se restaura, sin mocks.
+tempfile = "3"
+# Un keystream de alta entropia reproducible para el "ransomware" sintetico de
+# las pruebas: cifra un documento real y el rollback lo revierte.
+chacha20 = "0.9"

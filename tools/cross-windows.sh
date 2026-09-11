@@ -104,6 +104,23 @@ else
     echo "    ${ROJO}FALLO${FIN}: el punto de entrada no compila"; sed 's/^/      /' "$OUT/entry.err"; FALLOS=$((FALLOS+1))
 fi
 
+# --- 2b. La politica del minifilter de rollback (FASE 50), a objeto Windows --
+RB_POLITICA="$DRV/aegis_rollback_politica.c"
+if [ -f "$RB_POLITICA" ]; then
+    echo "==> Politica de rollback -> objeto Windows x64 ($TARGET)"
+    if clang --target="$TARGET" -ffreestanding -O2 -Wall -Wextra -Werror \
+         -c "$RB_POLITICA" -o "$OUT/rollback.obj" 2>"$OUT/rbclang.err"; then
+        maq="$(llvm-readobj --file-headers "$OUT/rollback.obj" 2>/dev/null | awk -F'[()]' '/Machine:/{print $2}' | tr -d ' ')"
+        if [ "$maq" = "0x8664" ] && llvm-nm "$OUT/rollback.obj" 2>/dev/null | grep -q " T aegis_rb_decidir$"; then
+            echo "    ${VERDE}OK${FIN}  objeto COFF x86-64 con la decision del minifilter"
+        else
+            echo "    ${ROJO}FALLO${FIN}: la politica de rollback no cross-compilo bien (maquina=$maq)"; FALLOS=$((FALLOS+1))
+        fi
+    else
+        echo "    ${ROJO}FALLO${FIN}: la politica de rollback no compila para Windows"; sed 's/^/      /' "$OUT/rbclang.err"; FALLOS=$((FALLOS+1))
+    fi
+fi
+
 # --- 3. El driver de produccion completo: gated por $WDK_ROOT ----------------
 echo "==> Driver de produccion completo (obcallbacks.c + driver.c)"
 if [ -n "${WDK_ROOT:-}" ] && [ -d "$WDK_ROOT" ]; then
