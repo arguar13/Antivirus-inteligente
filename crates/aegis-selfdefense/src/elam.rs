@@ -16,10 +16,17 @@
 //! queda marcado para el analisis. Nunca se convierte una sospecha en un
 //! ladrillo.
 
+use crate::abi::BdcbClassification;
 use sha2::{Digest, Sha256};
 
-/// Clasificacion de un driver, con los codigos que Windows espera del callback
-/// ELAM (`BDCB_CLASSIFICATION`).
+/// La clasificacion —la DECISION— de un driver de arranque.
+///
+/// Ojo: estos codigos internos NO son los que Windows espera en el callback. El
+/// `BDCB_CLASSIFICATION` real del WDK numera distinto (en Windows, `0` es
+/// "desconocida", no "buena"). El puente correcto a ese codigo de wire es
+/// [`BdcbClassification::from`] (ver [`crate::abi`]); confundir una cosa con la
+/// otra haria que el kernel bloqueara un driver bueno o cargara uno malo. Aqui se
+/// separan a proposito: esto es la decision; el codigo de wire se deriva de ella.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ClasificacionElam {
@@ -35,7 +42,9 @@ pub enum ClasificacionElam {
 }
 
 impl ClasificacionElam {
-    /// El codigo numerico que se devuelve al kernel.
+    /// El codigo interno estable de esta decision. NO es el valor que se devuelve
+    /// al kernel: para eso esta [`BdcbClassification::from`], que traduce esta
+    /// decision al `BDCB_CLASSIFICATION` real del WDK.
     #[must_use]
     pub const fn as_u8(self) -> u8 {
         self as u8
@@ -45,6 +54,20 @@ impl ClasificacionElam {
     #[must_use]
     pub const fn bloquea(self) -> bool {
         matches!(self, ClasificacionElam::ConocidoMalo)
+    }
+}
+
+/// El puente honesto de la DECISION al codigo de wire REAL del WDK. Es lo que un
+/// driver ELAM devolveria de verdad en el callback: nuestra decision, traducida
+/// al `BDCB_CLASSIFICATION` que Windows entiende.
+impl From<ClasificacionElam> for BdcbClassification {
+    fn from(c: ClasificacionElam) -> Self {
+        match c {
+            ClasificacionElam::ConocidoBueno => BdcbClassification::KnownGoodImage,
+            ClasificacionElam::ConocidoMalo => BdcbClassification::KnownBadImage,
+            ClasificacionElam::MaloPeroCritico => BdcbClassification::KnownBadImageBootCritical,
+            ClasificacionElam::Desconocido => BdcbClassification::UnknownImage,
+        }
     }
 }
 
@@ -146,10 +169,32 @@ mod tests {
     }
 
     #[test]
-    fn codigos_como_los_de_windows() {
+    fn la_decision_se_traduce_al_codigo_real_del_wdk() {
+        // Los codigos internos son un detalle nuestro (estables, pero internos).
         assert_eq!(ClasificacionElam::ConocidoBueno.as_u8(), 0);
-        assert_eq!(ClasificacionElam::ConocidoMalo.as_u8(), 1);
-        assert_eq!(ClasificacionElam::MaloPeroCritico.as_u8(), 2);
         assert_eq!(ClasificacionElam::Desconocido.as_u8(), 3);
+        // Lo que se devuelve al kernel es el BDCB_CLASSIFICATION REAL del WDK, y
+        // NO coincide con el codigo interno: "bueno" es 1 en Windows, no 0.
+        assert_eq!(
+            BdcbClassification::from(ClasificacionElam::ConocidoBueno),
+            BdcbClassification::KnownGoodImage
+        );
+        assert_eq!(
+            BdcbClassification::from(ClasificacionElam::ConocidoMalo),
+            BdcbClassification::KnownBadImage
+        );
+        assert_eq!(
+            BdcbClassification::from(ClasificacionElam::MaloPeroCritico),
+            BdcbClassification::KnownBadImageBootCritical
+        );
+        assert_eq!(
+            BdcbClassification::from(ClasificacionElam::Desconocido),
+            BdcbClassification::UnknownImage
+        );
+        // La trampa que esta capa evita: "bueno" NO es 0 en el wire de Windows.
+        assert_ne!(
+            BdcbClassification::from(ClasificacionElam::ConocidoBueno).as_i32(),
+            i32::from(ClasificacionElam::ConocidoBueno.as_u8())
+        );
     }
 }

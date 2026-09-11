@@ -36,19 +36,41 @@
 //! (`kernel/windows/aegis/aegis_tamper_politica.c`), que el futuro minifilter
 //! del WDK incluye; este modulo Rust es su espejo probado contra la misma tabla
 //! de verdad.
+//!
+//! ## Resiliencia empresarial (FASE 60): los contratos de ABI y el guardian
+//!
+//! Sobre esas piezas, la autodefensa se lleva a nivel de sistema con dos capas
+//! mas:
+//!
+//! - **Contratos de ABI** ([`abi`]): las estructuras binarias EXACTAS con las
+//!   que la decision cruza al kernel de Windows —el callback de ELAM
+//!   (`BDCB_*`) y el byte `PS_PROTECTION` de PPL—, con tamano, offsets y codigos
+//!   reales del WDK verificados EN COMPILACION. Si la ABI se desincroniza, no
+//!   compila. La carga en vivo del driver es el muro, declarado.
+//! - **Guardian de detencion** ([`resiliencia`], [`AegisResilience`]): traduce
+//!   una senal de parada del sistema operativo (`SIGTERM`, un control del SCM,
+//!   una peticion de desinstalar) a su [`OperacionProtegida`] y le aplica la
+//!   regla de tamper con verificacion real del OTP. Es "el agente rechaza
+//!   cualquier senal de parada sin un OTP del Control Plane", extremo a extremo y
+//!   con firmas hibridas reales. Y no miente: declara cuando una senal
+//!   (`SIGKILL`/`SIGSTOP`) no es interceptable desde el espacio de usuario y su
+//!   cumplimiento es cosa del kernel (PPL).
 
 #![forbid(unsafe_code)]
 
+pub mod abi;
 pub mod elam;
 pub mod otp;
 pub mod ppl;
 pub mod replay;
+pub mod resiliencia;
 pub mod tamper;
 
 pub use elam::{ClasificacionElam, PoliticaElam};
 pub use otp::{OperacionProtegida, OrdenAutorizada, Otp};
 pub use ppl::{NivelProteccion, RequisitosPpl};
 pub use replay::RegistroOtp;
+pub use resiliencia::{AegisResilience, MotivoDetencion, ResultadoDetencion, SenalDetencion};
 pub use tamper::{decidir, ContextoTamper, Solicitante, Veredicto};
 
 use thiserror::Error;
@@ -61,7 +83,7 @@ use thiserror::Error;
 /// distinguir el motivo evita dar un oraculo al atacante: aqui el "atacante" que
 /// presenta un OTP invalido no aprende nada util, porque no puede fabricar uno
 /// valido sin la clave del Control Plane.
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
 pub enum TamperError {
     /// El OTP no tiene el tamano/formato esperado.
     #[error("OTP mal formado: {0}")]

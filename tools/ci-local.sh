@@ -244,6 +244,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "vmi" ]; then
     fi
 fi
 
+# Resiliencia empresarial (autodefensa ELAM/PPL + tamper crypto, FASE 60): el
+# nucleo —traducir una senal de parada del SO a su operacion protegida, verificar
+# y consumir el OTP hibrido del Control Plane, decidir permitir/denegar, y los
+# contratos de ABI de Windows (BDCB_*/PS_PROTECTION) con tamano y codigos reales
+# del WDK verificados en compilacion— se prueba en "Rust · tests". Aqui se
+# re-ejercita y se DECLARA el muro: la puesta en vivo (registrar el callback ELAM,
+# que el kernel conceda PPL, imponer un SIGKILL) necesita Windows + WDK + cert AM.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "resiliencia" ]; then
+    printf '%s==>%s Resiliencia · autodefensa ELAM/PPL + tamper crypto (nucleo probado; puesta en vivo gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-resiliencia.sh > /tmp/aegis-resiliencia-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-resiliencia-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-resiliencia-ci.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
 # en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
 # el informe lo confirma donde corre la puerta de calidad.
