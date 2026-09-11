@@ -1,0 +1,27 @@
+[package]
+name = "aegis-vmi"
+description = "Introspeccion de maquina virtual (VMI) DEFENSIVA: EPT y lectura de estructuras del kernel desde memoria fisica para detectar rootkits por debajo del SO"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# La ruta EN VIVO del hipervisor (abrir /dev/kvm, crear la VM, mapear memoria,
+# atrapar las EPT violations) va tras la caracteristica `kvm`: necesita VT-x/AMD-V
+# y privilegios, que el runner del CI no tiene. Sin la caracteristica, el crate es
+# Rust puro y todo el NUCLEO (estructuras EPT, recorrido de tablas, parser del
+# kernel) se compila y se prueba igual. Es el mismo patron que `pt-live` en
+# aegis-ptguard: la fontaneria gated compila, la ejecucion real se declara.
+libc = { version = "0.2", optional = true }
+
+[features]
+default = []
+# Compila la ruta en vivo sobre KVM. No la ejecuta salvo que el chip y los
+# privilegios esten; el CI comprueba que COMPILA y declara que no se ejercio.
+kvm = ["dep:libc"]

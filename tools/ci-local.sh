@@ -227,6 +227,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "memhunt" ]; then
     fi
 fi
 
+# Introspeccion de Ring -1 (VMI + EPT, FASE 54): el nucleo —estructuras EPT con
+# ABI verificada, recorrido de tablas, clasificacion de violaciones, parser del
+# kernel desde memoria fisica, deteccion de procesos ocultos por vista cruzada—
+# se prueba en "Rust · tests". Aqui se comprueba que la fontaneria en vivo sobre
+# KVM COMPILA y se declara el muro: arrancar el hipervisor necesita VT-x/AMD-V.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "vmi" ]; then
+    printf '%s==>%s VMI Ring -1 · introspeccion por EPT (nucleo probado; hipervisor gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-vmi.sh > /tmp/aegis-vmi-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-vmi-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-vmi-ci.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
 # en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
 # el informe lo confirma donde corre la puerta de calidad.

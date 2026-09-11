@@ -455,6 +455,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-vmi"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-vuln"
 version = "0.1.0"
 dependencies = [
