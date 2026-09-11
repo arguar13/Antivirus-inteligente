@@ -211,6 +211,24 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "itdr" ]; then
     fi
 fi
 
+# Orquestador de remediacion (AI-RO, FASE 64): el nucleo —la maquina de estados
+# transaccional que elige el playbook, lanza las acciones en paralelo, sobrevive a
+# fallos parciales y es idempotente en el reintento— se prueba en "Servidor ·
+# tests". Aqui se re-ejercita y se DECLARA el muro: la ejecucion REAL de cada
+# accion (XDP, matar proceso, revocar ticket, volcado) ocurre en el agente contra
+# un sistema real, por gRPC/mTLS.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "orchestrator" ]; then
+    printf '%s==>%s AI-RO · orquestador de remediacion (nucleo probado; ejecucion en flota gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-orchestrator.sh > /tmp/aegis-orchestrator-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-orchestrator-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-orchestrator-ci.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena

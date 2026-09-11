@@ -1,0 +1,22 @@
+[package]
+name = "aegis-orchestrator"
+description = "AegisOrchestrator (AI-RO): maquina de estados transaccional de remediacion de flota; ante una deteccion critica lanza en paralelo el playbook de respuesta, resiliente a fallos parciales e idempotente en el reintento"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# El disparador es una deteccion del motor ITDR (Golden/Silver Ticket, ...).
+aegis-itdr = { path = "../aegis-itdr" }
+# Concurrencia de las acciones del playbook (se lanzan a la vez y se esperan
+# juntas) y el runtime para las pruebas.
+tokio = { version = "1", features = ["rt", "macros", "sync", "time"] }
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+# El trait de la frontera (los agentes) es asincrono y se usa por `dyn`.
+async-trait = "0.1"
+thiserror = "2"

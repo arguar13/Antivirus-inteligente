@@ -9,7 +9,7 @@
 # de suministro del endpoint sigue siendo corta y revisable.
 [workspace]
 resolver = "2"
-members = ["crates/aegis-server", "crates/aegis-itdr", "crates/fleet-simulator"]
+members = ["crates/aegis-server", "crates/aegis-itdr", "crates/aegis-orchestrator", "crates/fleet-simulator"]
 
 [workspace.package]
 version = "0.1.0"
