@@ -17,6 +17,7 @@
 //! parametros que hay que elegir bien en RSA (tamano, relleno) y que son una
 //! fuente habitual de fallos de implementacion.
 
+use aegis_pqc::firma_hibrida::{ClaveVerificacionHibrida, FirmaHibrida};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 
 /// Error de verificacion de firma.
@@ -31,6 +32,10 @@ pub enum SignatureError {
     /// La firma no verifica contra la clave y el contenido.
     #[error("firma invalida: el artefacto fue manipulado o firmado con otra clave")]
     Invalid,
+    /// La firma hibrida esta mal formada o anuncia una suite que no se acepta
+    /// (p. ej. una firma clasica presentada a un verificador hibrido: downgrade).
+    #[error("firma hibrida mal formada o de suite no aceptada")]
+    HibridaMalFormada,
 }
 
 /// Clave publica de verificacion de actualizaciones.
@@ -69,6 +74,73 @@ impl UpdateKey {
     /// Los 32 bytes de la clave.
     pub fn to_bytes(&self) -> [u8; 32] {
         self.key.to_bytes()
+    }
+}
+
+/// Clave de verificacion de actualizaciones, con **agilidad criptografica**.
+///
+/// Durante la migracion de la flota conviven dos suites. El verificador se
+/// configura con UNA, y esa eleccion ES la politica: un verificador hibrido
+/// RECHAZA una firma clasica (anti-downgrade). Eso es justo lo que impide que un
+/// atacante fuerce a la flota de vuelta a la criptografia que una computadora
+/// cuantica rompe.
+#[derive(Clone)]
+pub enum ClaveActualizacion {
+    /// Solo Ed25519 (clasico, legado). Formato de firma: 64 bytes crudos.
+    Clasica(UpdateKey),
+    /// Hibrida Ed25519 + ML-DSA-65 (objetivo de la FASE 59). Formato de wire:
+    /// `suite(1) || ed25519(64) || mldsa(3309)`.
+    Hibrida(Box<ClaveVerificacionHibrida>),
+}
+
+impl core::fmt::Debug for ClaveActualizacion {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // No se imprime el material de clave.
+        match self {
+            ClaveActualizacion::Clasica(_) => f.write_str("ClaveActualizacion::Clasica"),
+            ClaveActualizacion::Hibrida(_) => f.write_str("ClaveActualizacion::Hibrida"),
+        }
+    }
+}
+
+impl ClaveActualizacion {
+    /// Verifica `firma` sobre `bytes` bajo el contexto `ctx`, segun la suite.
+    ///
+    /// - **Clasica**: Ed25519 sobre `bytes` (el formato legado no lleva contexto).
+    /// - **Hibrida**: exige el wire hibrido y que verifiquen **ambas** firmas;
+    ///   `ctx` separa dominios (en el canal de updates, el tipo de artefacto, de
+    ///   modo que una firma de "reglas" no se reinterprete como un "binario").
+    ///
+    /// # Errores
+    /// [`SignatureError::HibridaMalFormada`] si el wire hibrido no cuadra o su
+    /// suite no se acepta (incluye el caso downgrade); [`SignatureError::Invalid`]
+    /// si alguna firma no verifica; los errores de [`UpdateKey::verify`] en el
+    /// camino clasico.
+    pub fn verificar(&self, bytes: &[u8], ctx: &[u8], firma: &[u8]) -> Result<(), SignatureError> {
+        match self {
+            ClaveActualizacion::Clasica(k) => k.verify(bytes, firma),
+            ClaveActualizacion::Hibrida(k) => {
+                let fh = FirmaHibrida::desde_bytes(firma)
+                    .map_err(|_| SignatureError::HibridaMalFormada)?;
+                if k.verificar(bytes, ctx, &fh) {
+                    Ok(())
+                } else {
+                    Err(SignatureError::Invalid)
+                }
+            }
+        }
+    }
+}
+
+impl From<UpdateKey> for ClaveActualizacion {
+    fn from(k: UpdateKey) -> Self {
+        ClaveActualizacion::Clasica(k)
+    }
+}
+
+impl From<ClaveVerificacionHibrida> for ClaveActualizacion {
+    fn from(k: ClaveVerificacionHibrida) -> Self {
+        ClaveActualizacion::Hibrida(Box::new(k))
     }
 }
 

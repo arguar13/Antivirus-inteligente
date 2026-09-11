@@ -24,7 +24,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::artifact::Artifact;
-use crate::signature::{SignatureError, UpdateKey};
+use crate::signature::{ClaveActualizacion, SignatureError, UpdateKey};
+use aegis_pqc::firma_hibrida::ClaveVerificacionHibrida;
 
 /// Error del proceso de actualizacion.
 #[derive(Debug, thiserror::Error)]
@@ -78,15 +79,35 @@ impl<F: Fn(&Path) -> bool> HealthCheck for F {
 #[derive(Debug, Clone)]
 pub struct Updater {
     install_dir: PathBuf,
-    key: UpdateKey,
+    clave: ClaveActualizacion,
 }
 
 impl Updater {
-    /// Crea un actualizador que instala en `install_dir` y verifica con `key`.
+    /// Crea un actualizador **clasico** (Ed25519) que instala en `install_dir`.
+    ///
+    /// Se conserva para interoperar durante la migracion; el camino objetivo de
+    /// la FASE 59 es [`Updater::nuevo_hibrido`].
     pub fn new(install_dir: impl AsRef<Path>, key: UpdateKey) -> Updater {
+        Self::con_clave(install_dir, ClaveActualizacion::Clasica(key))
+    }
+
+    /// Crea un actualizador **hibrido** (Ed25519 + ML-DSA-65): un artefacto se
+    /// aplica solo si verifican las dos firmas. Es el camino post-cuantico.
+    pub fn nuevo_hibrido(
+        install_dir: impl AsRef<Path>,
+        clave: ClaveVerificacionHibrida,
+    ) -> Updater {
+        Self::con_clave(install_dir, ClaveActualizacion::Hibrida(Box::new(clave)))
+    }
+
+    /// Crea un actualizador con una clave de cualquier suite (agilidad).
+    pub fn con_clave(
+        install_dir: impl AsRef<Path>,
+        clave: impl Into<ClaveActualizacion>,
+    ) -> Updater {
         Updater {
             install_dir: install_dir.as_ref().to_path_buf(),
-            key,
+            clave: clave.into(),
         }
     }
 
@@ -101,8 +122,17 @@ impl Updater {
     }
 
     /// Verifica la firma del artefacto sin aplicarlo.
+    ///
+    /// El contexto de firma es el TIPO de artefacto: asi una firma valida para
+    /// un conjunto de reglas YARA no puede reinterpretarse como el binario del
+    /// agente (separacion de dominios). Solo aplica a la suite hibrida; el
+    /// formato clasico legado no lleva contexto.
     pub fn verify(&self, artifact: &Artifact) -> Result<(), UpdateError> {
-        self.key.verify(&artifact.bytes, &artifact.signature)?;
+        self.clave.verificar(
+            &artifact.bytes,
+            artifact.kind.as_str().as_bytes(),
+            &artifact.signature,
+        )?;
         Ok(())
     }
 

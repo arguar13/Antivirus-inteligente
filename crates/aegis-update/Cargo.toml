@@ -1,6 +1,6 @@
 [package]
 name = "aegis-update"
-description = "Actualizacion firmada Ed25519 con rollback atomico"
+description = "Actualizacion firmada (hibrida Ed25519+ML-DSA-65) con rollback atomico"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,7 +14,13 @@ workspace = true
 thiserror = "2"
 ed25519-dalek = "2"
 sha2 = "0.10"
+# Firma hibrida post-cuantica (FASE 59). Solo la feature `sign`: el canal de
+# updates verifica firmas, no intercambia claves.
+aegis-pqc = { path = "../aegis-pqc", default-features = false, features = ["sign"] }
 
 [dev-dependencies]
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
+# En pruebas se firma con la clave hibrida para ejercer el camino nuevo de
+# extremo a extremo; por eso aegis-pqc tambien como dev-dependency.
+aegis-pqc = { path = "../aegis-pqc", default-features = false, features = ["sign"] }

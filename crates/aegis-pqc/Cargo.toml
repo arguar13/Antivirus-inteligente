@@ -1,0 +1,60 @@
+[package]
+name = "aegis-pqc"
+description = "Criptografia post-cuantica hibrida (ML-KEM-768 + ML-DSA-65) para el canal C2 y el firmado de actualizaciones"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# Limpieza del material secreto al soltarlo. Ya esta en el arbol (lo usan
+# curve25519-dalek y aes-gcm), no suma superficie nueva.
+zeroize = { version = "1", default-features = false, features = ["derive"], optional = true }
+# Entropia del sistema para los constructores aleatorios de produccion (generar
+# un par de claves, una aleatoriedad de encapsulado). Ya esta en el arbol (0.2);
+# la aportamos nosotros en vez de delegar en la feature `rand` de cada primitiva.
+getrandom = { version = "0.2", optional = true }
+
+# --- feature `kem`: encapsulado de clave hibrido X25519MLKEM768 --------------
+# ML-KEM-768 (FIPS 203; ex CRYSTALS-Kyber). libcrux de Cryspen: Rust puro,
+# FORMALMENTE VERIFICADO con hax, el mismo que usa Firefox. Solo el tamano 768 y
+# SIN la feature `rand`: la aleatoriedad la aporta el llamante, lo que ademas
+# hace la API derandomizada que los KAT de ACVP necesitan.
+libcrux-ml-kem = { version = "0.0.10", default-features = false, features = ["mlkem768"], optional = true }
+# X25519 clasico. La serie 2.x reutiliza EXACTAMENTE el curve25519-dalek 4.x y el
+# rand_core 0.6 que el arbol ya tiene (la 3.x arrastraria una segunda version de
+# curve25519-dalek, que la politica de cadena de suministro desaconseja).
+# `static_secrets` habilita StaticSecret (clave reutilizable con serializacion);
+# `zeroize` limpia el secreto efimero al soltarlo.
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize"], optional = true }
+# Combinador: HKDF-SHA256 ata los dos secretos (clasico y PQC) al transcript.
+hkdf = { version = "0.12", optional = true }
+
+# --- feature `sign`: firma hibrida Ed25519 + ML-DSA-65 -----------------------
+# ML-DSA-65 (FIPS 204; ex CRYSTALS-Dilithium). RustCrypto, la misma familia que
+# aes-gcm/sha2 que el proyecto ya usa. SIN getrandom ni pkcs8: la firma es
+# determinista y las claves se cargan por bytes; la aleatoriedad, cuando hace
+# falta (generar una clave nueva), la aporta el llamante.
+ml-dsa = { version = "0.1.1", default-features = false, features = ["alloc"], optional = true }
+# Ed25519 clasico, ya presente en el arbol (lo usa aegis-update y aegis-attest).
+ed25519-dalek = { version = "2", optional = true }
+
+# Compartida por ambos caminos: SHA-256 para el digest del transcript y los
+# dominios de separacion del combinador.
+sha2 = { version = "0.10", optional = true }
+
+[features]
+default = ["kem", "sign"]
+kem = ["dep:libcrux-ml-kem", "dep:x25519-dalek", "dep:hkdf", "dep:sha2", "dep:zeroize", "dep:getrandom"]
+sign = ["dep:ml-dsa", "dep:ed25519-dalek", "dep:sha2", "dep:zeroize", "dep:getrandom"]
+
+[dev-dependencies]
+# Los vectores KAT oficiales (NIST ACVP, FIPS 203/204) se guardan como JSON y se
+# parsean con serde_json, que YA esta en el arbol del workspace: no suma
+# superficie de cadena de suministro nueva, solo en tiempo de prueba.
+serde_json = "1"

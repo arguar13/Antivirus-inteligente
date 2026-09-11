@@ -40,15 +40,20 @@ members = [
     "crates/aegis-ptguard",
     "crates/aegis-honeytoken",
     "crates/aegis-edgeml",
+    "crates/aegis-pqc",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-# MSRV real, no aspiracional. Se subio de 1.77 a 1.82 cuando entro tract-onnx:
-# mantener una declaracion que el codigo ya no cumple hace que clippy avise de
-# violaciones inexistentes y, peor, oculta las reales.
-rust-version = "1.82"
+# MSRV real, no aspiracional. Se subio de 1.77 a 1.82 cuando entro tract-onnx, y
+# de 1.82 a 1.85 cuando entro aegis-pqc (FASE 59): el crate `ml-dsa` de RustCrypto
+# —la impl FIPS 204 de la firma ML-DSA-65— es edicion 2024 y exige rustc 1.85. El
+# criterio no cambia: mantener una declaracion que el codigo ya no cumple hace que
+# clippy avise de violaciones inexistentes y, peor, oculta las reales. La parte
+# del agente que VERIFICA firmas de actualizacion depende de ese crate, asi que
+# 1.85 es el piso real del producto, no una aspiracion.
+rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/arguar13/Antivirus-inteligente"
 
