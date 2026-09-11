@@ -41,6 +41,7 @@ members = [
     "crates/aegis-honeytoken",
     "crates/aegis-edgeml",
     "crates/aegis-pqc",
+    "crates/aegis-emu",
     "crates/aegis-selfdefense",
 ]
 

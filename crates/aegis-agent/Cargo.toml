@@ -33,6 +33,11 @@ hermetico = ["bpf", "libbpf-rs/vendored"]
 
 [dependencies]
 aegis-edgeml = { path = "../aegis-edgeml" }
+# Micro-sandbox de emulacion (FASE 56): cuando el agente ve un binario
+# desconocido, en vez de ejecutarlo en el host lo EMULA para observar su
+# comportamiento. Es Rust puro (solo thiserror), asi que no engorda la superficie
+# de ataque del agente.
+aegis-emu = { path = "../aegis-emu" }
 aegis-scal = { path = "../aegis-scal" }
 aegis-behavior = { path = "../aegis-behavior" }
 aegis-ipc = { path = "../aegis-ipc" }

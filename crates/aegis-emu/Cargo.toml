@@ -1,0 +1,22 @@
+[package]
+name = "aegis-emu"
+description = "Micro-sandbox de emulacion x86-64 en memoria: desempaqueta binarios desconocidos y observa su comportamiento sin ejecutarlos en el host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Errores nombrados y exhaustivos, igual que el resto del proyecto. Ninguna
+# dependencia mas: el emulador es Rust puro, sin C. Esa es la decision de la
+# FASE 56 —un motor de emulacion propio en vez de un binding a unicorn-engine—
+# porque el agente de un EDR NO puede cargar un emulador de CPU en C de decenas
+# de miles de lineas en su arbol: seria superficie de ataque nueva dentro de la
+# pieza que defiende el endpoint. Lo que se soporta se prueba de verdad contra
+# codigo maquina real; lo que no, se rechaza RUIDOSAMENTE (nunca se finge una
+# ejecucion).
+thiserror = "2"

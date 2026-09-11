@@ -19,6 +19,7 @@ pub mod decode;
 pub mod edge_ml;
 pub mod error;
 pub mod graph;
+pub mod microsandbox;
 pub mod ransom;
 pub mod scal;
 pub mod triage;
