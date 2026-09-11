@@ -211,6 +211,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-hardsense"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "aegis-honeytoken"
 version = "0.1.0"
 dependencies = [

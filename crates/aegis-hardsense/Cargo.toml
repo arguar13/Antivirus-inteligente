@@ -1,0 +1,18 @@
+[package]
+name = "aegis-hardsense"
+description = "AegisHPC: telemetria de la PMU (perf_event_open) para detectar ataques de canal lateral y anomalias ROP/JOP por picos de fallos de cache y de prediccion de saltos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Solo para el syscall perf_event_open y sus tipos. La ABI de perf_event_attr se
+# refleja aqui (como en aegis-ptguard y aegis-syscallguard): cada crate de
+# hardware es autocontenido, con su espejo minimo verificado en compilacion, para
+# no arrastrar la maquinaria de otros y mantener el arbol del agente pequeno.
+libc = "0.2"

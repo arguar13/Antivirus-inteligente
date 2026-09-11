@@ -263,6 +263,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "resiliencia" ]; then
     fi
 fi
 
+# AegisHPC (telemetria de la PMU, FASE 61): el nucleo —aprender la linea base por
+# EWMA y decidir si un pico de fallos de cache es canal lateral o un pico de
+# fallos de prediccion de saltos es ROP/JOP— se prueba en "Rust · tests". Aqui se
+# re-ejercita y se DECLARA el muro: LEER la PMU en vivo necesita que el hardware
+# la exponga, y este runner (microVM) no lo hace (perf_event_open -> ENOENT).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "hardsense" ]; then
+    printf '%s==>%s AegisHPC · telemetria PMU anti canal-lateral/ROP (nucleo probado; PMU en vivo gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-hardsense.sh > /tmp/aegis-hardsense-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-hardsense-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-hardsense-ci.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
 # en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
 # el informe lo confirma donde corre la puerta de calidad.
