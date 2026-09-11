@@ -16,6 +16,7 @@
 
 pub mod behavior;
 pub mod decode;
+pub mod edge_ml;
 pub mod error;
 pub mod graph;
 pub mod ransom;

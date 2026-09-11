@@ -32,6 +32,7 @@ bpf = ["dep:libbpf-rs", "dep:libc"]
 hermetico = ["bpf", "libbpf-rs/vendored"]
 
 [dependencies]
+aegis-edgeml = { path = "../aegis-edgeml" }
 aegis-scal = { path = "../aegis-scal" }
 aegis-behavior = { path = "../aegis-behavior" }
 aegis-ipc = { path = "../aegis-ipc" }
