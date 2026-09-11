@@ -14,7 +14,10 @@ members = ["crates/aegis-server", "crates/fleet-simulator"]
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+# MSRV real: subio a 1.85 en la FASE 55' cuando el servidor paso a EMITIR los OTP
+# firmados de autodefensa (aegis-selfdefense -> aegis-pqc[sign] -> ml-dsa, que es
+# edicion 2024 y exige rustc 1.85). Mismo criterio que el workspace del agente.
+rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/arguar13/Antivirus-inteligente"
 

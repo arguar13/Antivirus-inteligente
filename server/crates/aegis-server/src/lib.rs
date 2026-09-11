@@ -22,6 +22,7 @@
 pub mod almacen;
 pub mod api;
 pub mod atestacion;
+pub mod autodefensa;
 pub mod ca;
 pub mod cache;
 pub mod config;

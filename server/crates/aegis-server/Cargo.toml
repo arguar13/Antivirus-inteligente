@@ -33,6 +33,10 @@ aegis-firmware = { path = "../../../crates/aegis-firmware" }
 # Solo la feature `kem` (intercambio de claves), no la de firma: no arrastra
 # ml-dsa y el canal sigue compilando con el MSRV del servidor.
 aegis-pqc = { path = "../../../crates/aegis-pqc", default-features = false, features = ["kem"] }
+# Autodefensa (FASE 55'): el plano de control EMITE los OTP firmados que son el
+# camino de desinstalacion autorizado del dueno de la flota. Arrastra aegis-pqc
+# con la feature de firma (ml-dsa), por eso el MSRV del servidor sube a 1.85.
+aegis-selfdefense = { path = "../../../crates/aegis-selfdefense" }
 getrandom = "0.2"
 
 # --- Runtime asincrono ------------------------------------------------------

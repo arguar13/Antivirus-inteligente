@@ -239,6 +239,7 @@ docs/                         Blueprint arquitectónico
 | 47 | [Decepción activa](docs/47-decepcion.md) — honey-tokens dinámicos con marcador HMAC atribuible: credenciales señuelo creíbles que, al ser tocadas, delatan e identifican al intruso |
 | 48 | [TinyML en el borde](docs/48-tinyml-borde.md) — clasificador de comportamiento embebido en el agente: detecta zero-day por la forma de las syscalls y aísla sin conexión a la nube |
 | 49 | [Criptografía post-cuántica](docs/49-pqc.md) — migración híbrida a NIST ML-KEM-768 y ML-DSA-65: capa HPKE sobre el mTLS del C2 y firma Ed25519+ML-DSA en las actualizaciones, contra *Harvest Now, Decrypt Later*, anclada en los KAT oficiales de ACVP |
+| 50 | [Autodefensa legítima](docs/50-autodefensa.md) — ELAM, PPL y Tamper Protection con un OTP firmado por el Control Plane: el agente resiste al atacante pero **siempre** obedece la desinstalación autorizada del dueño; la línea que separa un EDR de un rootkit |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo
