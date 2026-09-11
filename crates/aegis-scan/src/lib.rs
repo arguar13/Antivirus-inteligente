@@ -17,10 +17,15 @@
 #![deny(missing_docs)]
 
 pub mod memory;
+pub mod memscanner;
 pub mod rules;
 pub mod service;
 pub mod yara;
 
 pub use memory::{MemoryRegion, MemoryScanPolicy, Perms, RegionClass};
+pub use memscanner::{
+    AegisMemScanner, CoincidenciaMem, ConfigEscaner, Estrangulador, FuenteMemoria, MemScanError,
+    RegionMem, RitmoMaximo, SinEstrangular,
+};
 pub use service::{ScanJob, ScanOutcome, ScanService, ScanServiceConfig, ScanTarget};
 pub use yara::{Detection, ProcessScanReport, Severity, YaraEngine, YaraError};

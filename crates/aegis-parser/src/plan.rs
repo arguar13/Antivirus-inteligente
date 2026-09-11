@@ -341,4 +341,13 @@ mod pruebas {
         assert!(p.consulta.filtro.is_none());
         assert_eq!(p.columnas_necesarias, vec!["pid"]);
     }
+
+    #[test]
+    fn la_consulta_de_ram_hunting_planifica_a_la_tabla_memory() {
+        // La query EXACTA de la FASE 57. Que planifique fija que el esquema
+        // acepta la tabla `memory` y su columna `yara_match`.
+        let p = plan("SELECT pid FROM memory WHERE yara_match = 'APT29_Core'");
+        assert_eq!(p.consulta.tabla, "memory");
+        assert_eq!(orden_de_evaluacion(&p), vec!["yara_match"]);
+    }
 }

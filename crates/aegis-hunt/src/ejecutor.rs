@@ -85,6 +85,7 @@ pub struct Resultado {
 /// Ejecuta consultas contra este endpoint.
 pub struct Ejecutor<'a> {
     grafo: Option<&'a BehaviorGraph>,
+    yara: Option<&'a aegis_scan::YaraEngine>,
     presupuesto: Duration,
 }
 
@@ -96,6 +97,7 @@ impl<'a> Ejecutor<'a> {
     pub fn nuevo() -> Ejecutor<'a> {
         Ejecutor {
             grafo: None,
+            yara: None,
             presupuesto: PRESUPUESTO_POR_DEFECTO,
         }
     }
@@ -104,8 +106,18 @@ impl<'a> Ejecutor<'a> {
     pub fn con_grafo(grafo: &'a BehaviorGraph) -> Ejecutor<'a> {
         Ejecutor {
             grafo: Some(grafo),
+            yara: None,
             presupuesto: PRESUPUESTO_POR_DEFECTO,
         }
+    }
+
+    /// Da al ejecutor el motor YARA que la tabla `memory` necesita para escanear
+    /// la memoria de los procesos (FASE 57). Sin el, una consulta a `memory`
+    /// responde que no se pudo (inaccesible), nunca finge que no habia nada.
+    #[must_use]
+    pub fn con_yara(mut self, motor: &'a aegis_scan::YaraEngine) -> Ejecutor<'a> {
+        self.yara = Some(motor);
+        self
     }
 
     /// Cambia el presupuesto de tiempo.
@@ -121,6 +133,7 @@ impl<'a> Ejecutor<'a> {
             "processes" => self.tabla_procesos(plan, reloj),
             "connections" => self.tabla_conexiones(plan, reloj),
             "memory_regions" => self.tabla_memoria(plan, reloj),
+            "memory" => self.tabla_yara(plan, reloj),
             "graph_edges" => self.tabla_aristas(plan, reloj),
             // El analizador no deja pasar otra tabla. Si llegara, devolver
             // vacio es preferible a entrar en panico dentro del agente.
@@ -312,6 +325,75 @@ impl<'a> Ejecutor<'a> {
                     }
                 }
                 r.inaccesibles += fila.inaccesibles;
+            }
+        }
+        if matches!(plan.consulta.proyeccion, Proyeccion::Cuenta) {
+            r.filas = vec![vec![r.coincidencias.to_string()]];
+        }
+        r
+    }
+
+    // -----------------------------------------------------------------------
+    // memory (RAM hunting con YARA, FASE 57)
+    // -----------------------------------------------------------------------
+
+    /// `SELECT pid FROM memory WHERE yara_match = 'RULE'`: por cada proceso,
+    /// escanea su memoria con `AegisMemScanner` y expone el conjunto de reglas
+    /// que coincidieron. El estrangulado real de E/S/CPU lo pone el SO por fuera
+    /// (cgroups/Job Objects, gated); aqui el limite es el presupuesto de tiempo.
+    fn tabla_yara(&self, plan: &Plan, reloj: Instant) -> Resultado {
+        let mut r = Resultado {
+            columnas: self.columnas_de_salida(plan),
+            ..Default::default()
+        };
+        let salida = self.columnas_de_salida(plan);
+
+        // Sin motor YARA cargado no se puede escanear: se dice, no se finge.
+        let Some(motor) = self.yara else {
+            r.inaccesibles += 1;
+            return r;
+        };
+        let procesos = match listar_procesos() {
+            Some(p) => p,
+            None => return r,
+        };
+        let escaner =
+            aegis_scan::AegisMemScanner::nuevo(motor, aegis_scan::ConfigEscaner::default());
+
+        for p in procesos {
+            if reloj.elapsed() > self.presupuesto {
+                r.agotado = true;
+                r.incompleto = true;
+                break;
+            }
+            r.examinadas += 1;
+            let pid = p.key.pid;
+            let fuente = FuenteProceso { pid };
+            let mut reglas = match escaner.escanear(&fuente, &mut aegis_scan::SinEstrangular) {
+                Ok(cs) => cs.into_iter().map(|c| c.regla).collect::<Vec<_>>(),
+                Err(_) => {
+                    // Memoria de otro usuario o proceso muerto: no se pudo mirar.
+                    r.inaccesibles += 1;
+                    continue;
+                }
+            };
+            reglas.sort();
+            reglas.dedup();
+
+            let mut fila = FilaMemoriaYara { pid, reglas };
+            if let Some(f) = &plan.consulta.filtro {
+                if !evaluar(f, &mut fila) {
+                    continue;
+                }
+            }
+            r.coincidencias += 1;
+            if !matches!(plan.consulta.proyeccion, Proyeccion::Cuenta) {
+                if r.filas.len() < plan.consulta.limite as usize {
+                    r.filas
+                        .push(salida.iter().map(|c| fila.valor(c).a_texto()).collect());
+                } else {
+                    r.incompleto = true;
+                }
             }
         }
         if matches!(plan.consulta.proyeccion, Proyeccion::Cuenta) {
@@ -690,6 +772,76 @@ impl Fila for FilaSocket<'_> {
     }
 }
 
+/// Fuente de memoria de un proceso vivo para `AegisMemScanner`: lee sus regiones
+/// privadas legibles (donde vive el codigo inyectado o desempaquetado) a traves
+/// de la capa de acceso a memoria del agente.
+///
+/// Leer la memoria de OTRO proceso necesita privilegios (o el driver de las
+/// FASES de kernel); donde no se pueda, `leer` falla y la caza lo cuenta como
+/// inaccesible en vez de fingir que no habia nada. Esa es la parte gated.
+struct FuenteProceso {
+    pid: u32,
+}
+
+impl aegis_scan::FuenteMemoria for FuenteProceso {
+    fn regiones(&self) -> Vec<aegis_scan::RegionMem> {
+        let Ok(regiones) = aegis_scal::linux::memory::regions_of(self.pid as i32) else {
+            return Vec::new();
+        };
+        regiones
+            .into_iter()
+            // Regiones privadas y legibles: el codigo inyectado/desempaquetado
+            // vive ahi. Saltarse las respaldadas por fichero acota el coste y el
+            // ruido (una libc no es un hallazgo).
+            .filter(|r| r.perms.read && r.perms.private)
+            .map(|r| aegis_scan::RegionMem {
+                base: r.start,
+                len: r.len(),
+                etiqueta: format!("pid {} {:#x}", self.pid, r.start),
+            })
+            .collect()
+    }
+
+    fn leer(&self, base: u64, len: usize) -> Result<Vec<u8>, aegis_scan::MemScanError> {
+        aegis_scal::linux::memory::read_memory(self.pid as i32, base, len)
+            .map_err(|e| aegis_scan::MemScanError::Lectura(base, e.to_string()))
+    }
+}
+
+/// Fila de la tabla `memory`: un proceso y el conjunto de reglas YARA que
+/// coincidieron en su memoria. `yara_match` es multi-valor, asi que el filtro lo
+/// trata como cuantificador existencial (igual que `network.port`).
+struct FilaMemoriaYara {
+    pid: u32,
+    reglas: Vec<String>,
+}
+
+impl Fila for FilaMemoriaYara {
+    fn valor(&mut self, columna: &str) -> Valor {
+        match columna {
+            "pid" => Valor::Entero(i64::from(self.pid)),
+            // Para la PROYECCION, una celda no puede tener N valores: se da la
+            // primera regla que coincidio (o ausente). El FILTRO usa `alguno`.
+            "yara_match" => match self.reglas.first() {
+                Some(regla) => Valor::Texto(regla.clone()),
+                None => Valor::Ausente,
+            },
+            _ => Valor::Ausente,
+        }
+    }
+
+    fn alguno(&mut self, columna: &str, pred: &mut dyn FnMut(&Valor) -> bool) -> bool {
+        if columna == "yara_match" {
+            // Cuantificador existencial sobre las reglas que coincidieron.
+            return self
+                .reglas
+                .iter()
+                .any(|regla| pred(&Valor::Texto(regla.clone())));
+        }
+        pred(&self.valor(columna))
+    }
+}
+
 struct FilaRegion<'a> {
     pid: u32,
     region: &'a MemoryRegion,
@@ -816,4 +968,38 @@ fn hash_de_fichero(ruta: &std::path::Path) -> Option<String> {
     let mut h = Sha256::new();
     h.update(&datos);
     Some(format!("{:x}", h.finalize()))
+}
+
+#[cfg(test)]
+mod pruebas_yara {
+    use super::{Fila, FilaMemoriaYara};
+    use crate::valor::Valor;
+
+    #[test]
+    fn yara_match_es_existencial_sobre_las_reglas_que_coincidieron() {
+        // Un proceso con dos coincidencias: APT29_Core y Cobalt.
+        let mut fila = FilaMemoriaYara {
+            pid: 42,
+            reglas: vec!["APT29_Core".to_string(), "Cobalt".to_string()],
+        };
+        // `yara_match = 'APT29_Core'`: alguna regla coincide -> cierto.
+        assert!(fila.alguno("yara_match", &mut |v| *v
+            == Valor::Texto("APT29_Core".into())));
+        // `yara_match = 'Mimikatz'`: ninguna -> falso.
+        assert!(!fila.alguno("yara_match", &mut |v| *v == Valor::Texto("Mimikatz".into())));
+        // La proyeccion de pid es directa.
+        assert_eq!(fila.valor("pid"), Valor::Entero(42));
+    }
+
+    #[test]
+    fn sin_coincidencias_el_conjunto_vacio_no_satisface_el_filtro() {
+        let mut fila = FilaMemoriaYara {
+            pid: 7,
+            reglas: Vec::new(),
+        };
+        assert_eq!(fila.valor("yara_match"), Valor::Ausente);
+        // Un cuantificador existencial sobre un conjunto vacio es falso: un
+        // proceso sin coincidencias no aparece en `WHERE yara_match = 'X'`.
+        assert!(!fila.alguno("yara_match", &mut |_| true));
+    }
 }

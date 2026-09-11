@@ -374,6 +374,27 @@ const COLUMNAS_ARISTAS: &[Columna] = &[
     },
 ];
 
+// ---------------------------------------------------------------------------
+// memory (escaneo YARA sobre la memoria del proceso, FASE 57)
+// ---------------------------------------------------------------------------
+const COLUMNAS_MEMORIA_YARA: &[Columna] = &[
+    Columna {
+        nombre: "pid",
+        tipo: Tipo::Entero,
+        coste: Coste::Trivial,
+        descripcion: "proceso cuya memoria se escaneo",
+    },
+    Columna {
+        nombre: "yara_match",
+        tipo: Tipo::Texto,
+        // Caro a proposito: escanear la memoria con YARA lee y procesa contenido,
+        // como el hash o la entropia. El planificador lo evalua el ultimo, solo
+        // sobre las filas que ya pasaron los predicados baratos.
+        coste: Coste::Caro,
+        descripcion: "alguna region de la memoria del proceso coincide con esta regla YARA",
+    },
+];
+
 /// Todas las tablas que AegisQL conoce.
 pub const TABLAS: &[Tabla] = &[
     Tabla {
@@ -395,6 +416,11 @@ pub const TABLAS: &[Tabla] = &[
         nombre: "graph_edges",
         columnas: COLUMNAS_ARISTAS,
         descripcion: "una relacion causal del grafo de comportamiento",
+    },
+    Tabla {
+        nombre: "memory",
+        columnas: COLUMNAS_MEMORIA_YARA,
+        descripcion: "un proceso cuya memoria se escanea con reglas YARA (RAM hunting de la flota)",
     },
 ];
 

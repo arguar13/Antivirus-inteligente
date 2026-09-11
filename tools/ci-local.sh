@@ -211,6 +211,22 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "itdr" ]; then
     fi
 fi
 
+# Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
+# solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
+# tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena
+# necesita privilegios/driver, y el estrangulado real lo pone el SO (cgroups).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "memhunt" ]; then
+    printf '%s==>%s RAM YARA · forense de memoria a escala (nucleo probado; lectura fisica gated)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-memscanner.sh > /tmp/aegis-memscanner-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-memscanner-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-memscanner-ci.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Flota: la pila de gestion de flota (mTLS mutuo, certificados rotativos, claves
 # en memoria) es criptografia de espacio de usuario y opera en cualquier maquina;
 # el informe lo confirma donde corre la puerta de calidad.

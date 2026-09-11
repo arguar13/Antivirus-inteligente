@@ -233,6 +233,7 @@ dependencies = [
  "aegis-fleet",
  "aegis-parser",
  "aegis-scal",
+ "aegis-scan",
  "libc",
  "sha2",
 ]

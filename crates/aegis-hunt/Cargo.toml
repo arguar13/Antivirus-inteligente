@@ -13,6 +13,10 @@ workspace = true
 [dependencies]
 aegis-parser = { path = "../aegis-parser" }
 aegis-scal = { path = "../aegis-scal" }
+# Motor YARA para la tabla `memory` (FASE 57): SELECT pid FROM memory WHERE
+# yara_match = 'RULE'. aegis-scan (y su yara-x) ya esta en el arbol del agente,
+# asi que no suma superficie nueva.
+aegis-scan = { path = "../aegis-scan" }
 aegis-behavior = { path = "../aegis-behavior" }
 # El lado del agente traduce entre el protocolo de flota y el ejecutor. Ver
 # `agente.rs`: es codigo del ENDPOINT, no del plano de control.
