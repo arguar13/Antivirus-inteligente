@@ -13,6 +13,7 @@ use crate::cpu::{bit_signo, mascara, Cpu, RSP};
 use crate::decodificador::{decodificar, Cond, Mem, Op, Operando};
 use crate::memoria::Memoria;
 use crate::syscalls::{self, EventoComportamiento};
+use crate::taint::{DeteccionDop, DetectorDop, EstadoTaint, UMBRAL_DOP_BYTES};
 use crate::EmuError;
 
 /// El ejecutor: CPU + memoria + la traza de comportamiento observada.
@@ -30,6 +31,14 @@ pub struct Ejecutor {
     /// empaquetadores que reservan, escriben y saltan funcionan de verdad en el
     /// sandbox, no solo se observan).
     proxima_reserva: u64,
+    /// Estado de contaminacion (taint) del flujo de datos, para detectar DOP.
+    taint: EstadoTaint,
+    /// Detector de programacion orientada a datos (FASE 63): escrituras masivas
+    /// de datos contaminados sobre una estructura del sistema protegida.
+    dop: DetectorDop,
+    /// Acumulador de contaminacion de la instruccion en curso: el OR del taint de
+    /// todos los operandos leidos, que se aplica al operando que se escribe.
+    taint_acc: bool,
 }
 
 /// Base del espacio que reparte el `mmap` emulado.
@@ -39,6 +48,11 @@ const BASE_MMAP: u64 = 0x5000_0000;
 const MAX_RESERVA: u64 = 16 * 1024 * 1024;
 /// Numero de syscall de `mmap` en x86-64.
 const SYS_MMAP: u64 = 9;
+/// Numero de syscall de `read` en x86-64: la fuente de datos del atacante.
+const SYS_READ: u64 = 0;
+/// Tope de bytes que un solo `read` contamina, para que un `count` absurdo no
+/// haga crecer el seguimiento sin limite.
+const MAX_CONTAMINAR: u64 = 64 * 1024;
 
 impl Ejecutor {
     /// Un ejecutor sobre la CPU y la memoria dadas.
@@ -52,7 +66,23 @@ impl Ejecutor {
             desempaquetados: Vec::new(),
             terminado: false,
             proxima_reserva: BASE_MMAP,
+            taint: EstadoTaint::nuevo(),
+            dop: DetectorDop::nuevo(UMBRAL_DOP_BYTES),
+            taint_acc: false,
         }
+    }
+
+    /// Protege una region `[base, fin)` (una estructura del sistema) para la
+    /// deteccion de DOP: una escritura masiva de datos contaminados sobre ella se
+    /// declarara como un intento de programacion orientada a datos.
+    pub fn proteger_region(&mut self, base: u64, fin: u64, nombre: &'static str) {
+        self.dop.proteger(base, fin, nombre);
+    }
+
+    /// La deteccion de DOP, si el binario emulado la disparo.
+    #[must_use]
+    pub fn deteccion_dop(&self) -> Option<DeteccionDop> {
+        self.dop.detectado()
     }
 
     /// Los eventos de comportamiento observados, en orden.
@@ -96,6 +126,9 @@ impl Ejecutor {
     /// Cualquier error de acceso a memoria o de decodificacion.
     pub fn paso(&mut self) -> Result<(), EmuError> {
         let rip = self.cpu.rip;
+        // Cada instruccion empieza sin contaminacion acumulada; los `leer_op` la
+        // van sumando y el `escribir_op` la aplica al destino.
+        self.taint_acc = false;
 
         // Deteccion de desempaquetado: se va a ejecutar codigo que se escribio en
         // tiempo de ejecucion (self-modifying / carga desplegada por el packer).
@@ -232,6 +265,13 @@ impl Ejecutor {
                 ];
                 let ev = syscalls::clasificar(numero, &args);
                 self.registrar_syscall(ev);
+                // Un `read` mete en memoria datos que controla el atacante: se
+                // contamina el buffer de destino (rsi), la fuente del taint para
+                // la deteccion de DOP. El volumen se acota para no crecer sin fin.
+                if numero == SYS_READ {
+                    let n = args[2].min(MAX_CONTAMINAR);
+                    self.taint.contaminar_entrada(args[1], n);
+                }
                 if numero == SYS_MMAP {
                     let dir = self.reservar(args[1], args[2]);
                     self.cpu.escribir64(0, dir);
@@ -274,7 +314,7 @@ impl Ejecutor {
 
     /// La direccion de destino de un salto/llamada: relativa (a la siguiente
     /// instruccion) o el valor de un registro/memoria.
-    fn objetivo_salto(&self, op: Operando, sig: u64) -> Result<u64, EmuError> {
+    fn objetivo_salto(&mut self, op: Operando, sig: u64) -> Result<u64, EmuError> {
         match op {
             Operando::Rel(rel) => Ok(sig.wrapping_add(rel as u64)),
             otro => self.leer_op(otro, 8, sig),
@@ -516,12 +556,25 @@ impl Ejecutor {
         dir
     }
 
-    fn leer_op(&self, op: Operando, tam: u8, sig: u64) -> Result<u64, EmuError> {
+    fn leer_op(&mut self, op: Operando, tam: u8, sig: u64) -> Result<u64, EmuError> {
         match op {
-            Operando::Reg(i) => Ok(self.cpu.leer(i, tam)),
-            Operando::Reg8Alto(i) => Ok(self.cpu.leer8_alto(i)),
+            Operando::Reg(i) => {
+                if self.taint.reg_contaminado(i) {
+                    self.taint_acc = true;
+                }
+                Ok(self.cpu.leer(i, tam))
+            }
+            Operando::Reg8Alto(i) => {
+                if self.taint.reg_contaminado(i & 0x3) {
+                    self.taint_acc = true;
+                }
+                Ok(self.cpu.leer8_alto(i))
+            }
             Operando::Mem(m) => {
                 let d = self.dir_efectiva(&m, sig);
+                if self.taint.mem_contaminada(d, tam) {
+                    self.taint_acc = true;
+                }
                 self.mem.leer(d, tam as usize)
             }
             Operando::Imm(v) => Ok(v & mascara(tam)),
@@ -530,18 +583,30 @@ impl Ejecutor {
     }
 
     fn escribir_op(&mut self, op: Operando, tam: u8, sig: u64, val: u64) -> Result<(), EmuError> {
+        // La contaminacion acumulada por los `leer_op` de esta instruccion es la
+        // que hereda el destino.
+        let contaminado = self.taint_acc;
         match op {
             Operando::Reg(i) => {
                 self.cpu.escribir(i, tam, val);
+                self.taint.marcar_reg(i, contaminado);
                 Ok(())
             }
             Operando::Reg8Alto(i) => {
                 self.cpu.escribir8_alto(i, val);
+                self.taint.marcar_reg(i & 0x3, contaminado);
                 Ok(())
             }
             Operando::Mem(m) => {
                 let d = self.dir_efectiva(&m, sig);
-                self.mem.escribir(d, val, tam as usize)
+                self.mem.escribir(d, val, tam as usize)?;
+                self.taint.marcar_mem(d, tam, contaminado);
+                // El corazon de la deteccion de DOP: datos contaminados escritos,
+                // en masa, sobre una estructura del sistema protegida.
+                if contaminado {
+                    self.dop.observar_escritura_contaminada(d, tam);
+                }
+                Ok(())
             }
             Operando::Imm(_) | Operando::Rel(_) | Operando::Ninguno => Ok(()),
         }
@@ -649,6 +714,76 @@ mod tests {
         let mut e = con_codigo(&[0xEB, 0xFE]);
         assert_eq!(e.ejecutar(500), Err(EmuError::PresupuestoAgotado(500)));
         assert_eq!(e.instrucciones(), 500);
+    }
+
+    /// Monta el escenario del exploit DOP: codigo en 0x1000, un buffer de entrada
+    /// en 0x2000, una "estructura del sistema" en 0x9000 y una pila. `con_read`
+    /// decide si el binario arranca con la syscall `read` (la fuente del taint).
+    fn escenario_dop(codigo: &[u8]) -> Ejecutor {
+        let mut mem = Memoria::nueva();
+        mem.mapear(0x1000, codigo.to_vec(), true, false, true)
+            .unwrap();
+        mem.mapear_vacia(0x2000, 0x1000, true, true, false).unwrap(); // buffer de entrada
+        mem.mapear_vacia(0x9000, 0x1000, true, true, false).unwrap(); // "estructura del SO"
+        mem.mapear_vacia(0x7000, 0x1000, true, true, false).unwrap(); // pila
+        let mut cpu = Cpu::nueva();
+        cpu.rip = 0x1000;
+        cpu.escribir64(RSP, 0x7F00);
+        cpu.escribir64(6, 0x2000); // rsi = buffer (destino de read, origen de la copia)
+        cpu.escribir64(2, 64); // rdx = count del read
+        cpu.escribir64(8, 0x9000); // r8 = destino: la region protegida
+        cpu.escribir64(1, 8); // rcx = 8 iteraciones del bucle de copia
+        let mut e = Ejecutor::nuevo(cpu, mem);
+        e.proteger_region(0x9000, 0x9100, "tabla del sistema");
+        e
+    }
+
+    #[test]
+    fn un_exploit_dop_escribe_datos_del_atacante_sobre_una_estructura_protegida() {
+        // read() contamina el buffer, y el bucle copia esos datos contaminados EN
+        // MASA sobre la region protegida, byte a byte, SIN ninguna syscall que
+        // autorice tocar esa estructura. Eso es DOP.
+        //   syscall            ; rax=0 (read), rsi=buf, rdx=64 -> contamina [buf,buf+64)
+        // copia:
+        //   mov rax, [rsi] ; mov [r8], rax ; add rsi,8 ; add r8,8 ; loop copia ; hlt
+        let codigo = [
+            0x0F, 0x05, // syscall
+            0x48, 0x8B, 0x06, // mov rax, [rsi]
+            0x49, 0x89, 0x00, // mov [r8], rax
+            0x48, 0x83, 0xC6, 0x08, // add rsi, 8
+            0x49, 0x83, 0xC0, 0x08, // add r8, 8
+            0xE2, 0xF0, // loop -16 (a la copia, en 0x1002)
+            0xF4, // hlt
+        ];
+        let mut e = escenario_dop(&codigo);
+        e.ejecutar(10_000).unwrap();
+        let dop = e
+            .deteccion_dop()
+            .expect("una escritura masiva contaminada sobre la region protegida es DOP");
+        assert_eq!(dop.region, "tabla del sistema");
+        assert!(dop.bytes >= 64, "al menos 64 bytes contaminados escritos");
+    }
+
+    #[test]
+    fn la_misma_copia_pero_sin_datos_del_atacante_no_es_dop() {
+        // Identico bucle de copia a la region protegida, pero SIN el read: los
+        // datos no estan contaminados, asi que escribir la estructura no es un
+        // ataque (es codigo legitimo copiando datos limpios). El bucle arranca en
+        // 0x1000, asi que el loop vuelve a 0x1000.
+        let codigo = [
+            0x48, 0x8B, 0x06, // mov rax, [rsi]
+            0x49, 0x89, 0x00, // mov [r8], rax
+            0x48, 0x83, 0xC6, 0x08, // add rsi, 8
+            0x49, 0x83, 0xC0, 0x08, // add r8, 8
+            0xE2, 0xF0, // loop -16 (a 0x1000)
+            0xF4, // hlt
+        ];
+        let mut e = escenario_dop(&codigo);
+        e.ejecutar(10_000).unwrap();
+        assert!(
+            e.deteccion_dop().is_none(),
+            "copiar datos limpios a la estructura no es DOP"
+        );
     }
 
     #[test]

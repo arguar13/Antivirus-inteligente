@@ -59,6 +59,7 @@ pub mod ejecutor;
 pub mod heuristica;
 pub mod memoria;
 pub mod syscalls;
+pub mod taint;
 
 use cpu::{Cpu, RSP};
 use ejecutor::Ejecutor;
@@ -67,6 +68,7 @@ use thiserror::Error;
 
 pub use heuristica::{ClaseComportamiento, Severidad, Veredicto};
 pub use syscalls::{Categoria, EventoComportamiento};
+pub use taint::{DeteccionDop, RegionProtegida};
 
 /// El micro-sandbox de emulacion: se le da un blob de codigo desconocido y
 /// devuelve un informe de lo que hace, sin que ninguna de sus instrucciones haya
@@ -119,6 +121,11 @@ pub struct InformeSandbox {
     /// honestidad de declarar que no se pudo seguir emulando, con la traza
     /// obtenida hasta ese punto intacta.
     pub error: Option<String>,
+    /// Si el binario intento una programacion orientada a datos (DOP): escribio,
+    /// en masa, datos contaminados (derivados de un `read`) sobre una region del
+    /// sistema protegida. `None` si no se declaro ninguna region protegida o no
+    /// se disparo la deteccion.
+    pub dop: Option<DeteccionDop>,
 }
 
 impl AegisSandbox {
@@ -132,6 +139,20 @@ impl AegisSandbox {
     /// desconocido, o el shellcode extraido) y devuelve el informe.
     #[must_use]
     pub fn analizar(&self, codigo: &[u8]) -> InformeSandbox {
+        self.analizar_protegido(codigo, &[])
+    }
+
+    /// Como [`AegisSandbox::analizar`], pero declarando regiones del sistema
+    /// PROTEGIDAS (estructuras que ningun codigo legitimo reescribe con datos
+    /// crudos del exterior). Si el binario escribe, en masa, datos contaminados
+    /// —derivados de un `read`— sobre una de ellas, el informe lo marca como un
+    /// intento de programacion orientada a datos ([`InformeSandbox::dop`]).
+    #[must_use]
+    pub fn analizar_protegido(
+        &self,
+        codigo: &[u8],
+        regiones: &[RegionProtegida],
+    ) -> InformeSandbox {
         let mut mem = Memoria::nueva();
         let tam_cod = ((codigo.len() + 0xFFF) & !0xFFF).max(0x1000);
         let mut bytes = codigo.to_vec();
@@ -149,6 +170,9 @@ impl AegisSandbox {
         cpu.escribir64(RSP, self.base_pila + 0x8000);
 
         let mut e = Ejecutor::nuevo(cpu, mem);
+        for r in regiones {
+            e.proteger_region(r.base, r.fin, r.nombre);
+        }
         let error = match e.ejecutar(self.presupuesto) {
             Ok(()) => None,
             Err(err) => Some(err.to_string()),
@@ -164,6 +188,7 @@ impl AegisSandbox {
         });
 
         let veredicto = heuristica::evaluar(&eventos);
+        let dop = e.deteccion_dop();
         InformeSandbox {
             veredicto,
             eventos,
@@ -171,6 +196,7 @@ impl AegisSandbox {
             instrucciones: e.instrucciones(),
             termino: e.termino(),
             error,
+            dop,
         }
     }
 }
