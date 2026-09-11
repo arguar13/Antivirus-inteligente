@@ -158,6 +158,15 @@ fn el_sistema_completo_aguanta_cien_mil_eventos_por_segundo() {
     let parar_trabajadores = Arc::new(AtomicBool::new(false));
     let consumidos = Arc::new(AtomicU64::new(0));
     let rss_max = Arc::new(AtomicU64::new(0));
+    // Progreso observable de los hilos de YARA y ML. Sirve para no pararlos
+    // antes de que el planificador les diera siquiera un turno: cuando este test
+    // corre junto a otros binarios (`cargo test --all`) en una maquina con pocos
+    // nucleos, un trabajador —que ademas arranca compilando reglas o cargando el
+    // modelo— puede tardar en hacer su primera vuelta. Esperar a que la haga
+    // mide la propiedad real (los hilos no colapsan) en vez de una carrera con
+    // el planificador.
+    let yara_vivo = Arc::new(AtomicU64::new(0));
+    let ml_vivo = Arc::new(AtomicU64::new(0));
     let rss_inicial = rss_kb();
 
     // --- Hilo productor: 100k+ eventos/seg por el ring real ------------------
@@ -252,6 +261,7 @@ fn el_sistema_completo_aguanta_cien_mil_eventos_por_segundo() {
 
     // --- Hilo YARA: escaneo continuo mientras el ring esta a tope -----------
     let parar_yara = parar_trabajadores.clone();
+    let yara_vivo_c = yara_vivo.clone();
     let yara = std::thread::spawn(move || {
         let motor = YaraEngine::with_base_rules().expect("las reglas base compilan");
         let mut f = Flujo::nuevo(0x5A5A_9A9A);
@@ -269,12 +279,14 @@ fn el_sistema_completo_aguanta_cien_mil_eventos_por_segundo() {
                 detecciones_eicar += 1;
             }
             escaneos += 1;
+            yara_vivo_c.fetch_add(1, Ordering::Relaxed);
         }
         (escaneos, detecciones_eicar)
     });
 
     // --- Hilo ML: inferencia continua ---------------------------------------
     let parar_ml = parar_trabajadores.clone();
+    let ml_vivo_c = ml_vivo.clone();
     let ml = std::thread::spawn(move || {
         let modelo = MalwareModel::embedded().expect("el modelo empotrado carga");
         let extractor = FeatureExtractor::default();
@@ -286,6 +298,7 @@ fn el_sistema_completo_aguanta_cien_mil_eventos_por_segundo() {
             let vector = aegis_ml::features::to_vector(&feats);
             let _ = modelo.predict(&vector).expect("la inferencia no falla");
             inferencias += 1;
+            ml_vivo_c.fetch_add(1, Ordering::Relaxed);
         }
         inferencias
     });
@@ -305,7 +318,22 @@ fn el_sistema_completo_aguanta_cien_mil_eventos_por_segundo() {
     let (enviados, soltados, dur_prod) = productor.join().unwrap();
     let (leidos, recibidos_pipeline) = consumidor.join().unwrap();
 
-    // Los trabajadores paran una vez drenado el ring.
+    // Antes de pararlos, se espera a que YARA y ML hayan hecho AL MENOS una
+    // vuelta: es la prueba de que no colapsaron bajo carga. El plazo (el mismo
+    // anti-cuelgue que el del productor) convierte un colapso real —un hilo que
+    // de verdad no avanza— en un fallo, sin depender de que el planificador les
+    // diera CPU justo dentro de la ventana del productor (que es lo que, con
+    // `cargo test --all`, hacia fallar esta prueba de forma intermitente).
+    let plazo_vivos = Instant::now();
+    while yara_vivo.load(Ordering::Relaxed) == 0 || ml_vivo.load(Ordering::Relaxed) == 0 {
+        assert!(
+            plazo_vivos.elapsed() < Duration::from_secs(60),
+            "un trabajador (YARA/ML) no completo ni una vuelta en 60 s: colapso real, no falta de CPU"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    // Los trabajadores paran una vez drenado el ring y demostrada su vida.
     parar_trabajadores.store(true, Ordering::Relaxed);
     let (escaneos_yara, eicar_detectado) = yara.join().unwrap();
     let inferencias_ml = ml.join().unwrap();
