@@ -52,8 +52,11 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 2. Pruebas del workspace sobre una matriz de toolchains. El MSRV no es
-  #    decorativo: si el codigo deja de compilar con 1.82, los clientes que fijan
-  #    esa version se quedan fuera y hay que saberlo aqui, no en su despliegue.
+  #    decorativo: si el codigo deja de compilar con el piso declarado, los
+  #    clientes que fijan esa version se quedan fuera y hay que saberlo aqui, no
+  #    en su despliegue. El piso subio a 1.85 en la FASE 59: el crate `ml-dsa`
+  #    (FIPS 204, edicion 2024) lo exige, y el agente que verifica updates depende
+  #    de el.
   # ---------------------------------------------------------------------------
   test:
     name: Pruebas (${{ matrix.toolchain }})
@@ -62,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, "1.82"]
+        toolchain: [stable, "1.85"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master

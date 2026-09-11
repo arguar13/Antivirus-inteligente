@@ -23,8 +23,8 @@
 //! rollback: Grover solo lo baja a ~128 bits efectivos, que siguen siendo
 //! seguros, asi que lo simetrico no se migra.
 
-use crate::kem_hibrido::{ClavePublicaHibrida, EncapsuladoHibrido, ParHibrido, SecretoSesion};
 use crate::kem_hibrido::ENCAPSULADO_LEN;
+use crate::kem_hibrido::{ClavePublicaHibrida, EncapsuladoHibrido, ParHibrido, SecretoSesion};
 use crate::PqcError;
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -120,7 +120,13 @@ pub fn sellar(
     getrandom::getrandom(&mut nonce).map_err(|_| PqcError::Entropia)?;
 
     let ct = cifrador
-        .encrypt(Nonce::from_slice(&nonce), Payload { msg: plaintext, aad })
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
         .map_err(|_| PqcError::MaterialInvalido("cifrado AES-GCM fallido"))?;
     clave.zeroize();
 
@@ -220,7 +226,12 @@ mod tests {
     #[test]
     fn wire_roundtrip() {
         let receptor = ParHibrido::generar_aleatorio().expect("entropia");
-        let sobre = sellar(&receptor.publica, b"aad", b"un mensaje mas largo que un bloque AES").expect("sellar");
+        let sobre = sellar(
+            &receptor.publica,
+            b"aad",
+            b"un mensaje mas largo que un bloque AES",
+        )
+        .expect("sellar");
         let bytes = sobre.a_bytes();
         let sobre2 = SobreSellado::desde_bytes(&bytes).expect("desde_bytes");
         let abierto = abrir(&receptor, b"aad", &sobre2).expect("abrir");
