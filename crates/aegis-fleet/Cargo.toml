@@ -23,6 +23,10 @@ rustls-pki-types = "1"
 zeroize = "1"
 sha2 = "0.10"
 time = { version = "0.3", default-features = false }
+# Capa PQC del canal C2 (FASE 59): sella el payload con el KEM hibrido
+# X25519MLKEM768 POR ENCIMA del mTLS. Solo la feature `kem` (no la de firma), asi
+# que no arrastra ml-dsa: el canal intercambia claves, no firma binarios.
+aegis-pqc = { path = "../aegis-pqc", default-features = false, features = ["kem"] }
 
 [[bin]]
 name = "aegis-fleet"

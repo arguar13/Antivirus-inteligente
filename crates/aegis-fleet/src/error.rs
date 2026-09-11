@@ -55,6 +55,10 @@ pub enum FleetError {
     /// El agente no esta enrolado en la flota.
     #[error("agente no enrolado: {0}")]
     NoEnrolado(String),
+
+    /// Fallo de la capa post-cuantica del canal (sellado/apertura, FASE 59).
+    #[error("fallo de la capa PQC del canal: {0}")]
+    Pqc(#[from] aegis_pqc::PqcError),
 }
 
 /// Alias de resultado del crate.

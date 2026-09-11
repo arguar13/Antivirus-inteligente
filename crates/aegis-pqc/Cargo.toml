@@ -34,6 +34,10 @@ libcrux-ml-kem = { version = "0.0.10", default-features = false, features = ["ml
 x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize"], optional = true }
 # Combinador: HKDF-SHA256 ata los dos secretos (clasico y PQC) al transcript.
 hkdf = { version = "0.12", optional = true }
+# AEAD del canal sellado (capa HPKE sobre el mTLS). AES-256-GCM es el mismo stack
+# que ya usan la cuarentena y el rollback; Grover solo lo baja a ~128 bits
+# efectivos, que siguen siendo seguros, asi que no se migra lo simetrico.
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"], optional = true }
 
 # --- feature `sign`: firma hibrida Ed25519 + ML-DSA-65 -----------------------
 # ML-DSA-65 (FIPS 204; ex CRYSTALS-Dilithium). RustCrypto, la misma familia que
@@ -50,7 +54,7 @@ sha2 = { version = "0.10", optional = true }
 
 [features]
 default = ["kem", "sign"]
-kem = ["dep:libcrux-ml-kem", "dep:x25519-dalek", "dep:hkdf", "dep:sha2", "dep:zeroize", "dep:getrandom"]
+kem = ["dep:libcrux-ml-kem", "dep:x25519-dalek", "dep:hkdf", "dep:sha2", "dep:zeroize", "dep:getrandom", "dep:aes-gcm"]
 sign = ["dep:ml-dsa", "dep:ed25519-dalek", "dep:sha2", "dep:zeroize", "dep:getrandom"]
 
 [dev-dependencies]

@@ -60,6 +60,8 @@
 pub mod suite;
 
 #[cfg(feature = "kem")]
+pub mod canal;
+#[cfg(feature = "kem")]
 pub mod kem;
 #[cfg(feature = "kem")]
 pub mod kem_hibrido;
@@ -118,4 +120,10 @@ pub enum PqcError {
     /// seria peor que fallar (un atacante podria predecirla).
     #[error("no se pudo obtener entropia del sistema")]
     Entropia,
+
+    /// La apertura de un sobre sellado (capa HPKE del canal C2) fallo: el AEAD
+    /// no autentica. El sobre fue manipulado, va con datos asociados distintos,
+    /// o se abre con la clave equivocada. Ante la duda, no se entrega nada.
+    #[error("apertura de sobre sellado fallida: el AEAD no autentica")]
+    AperturaInvalida,
 }

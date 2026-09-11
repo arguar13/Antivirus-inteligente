@@ -36,6 +36,7 @@ pub mod heuristicas;
 pub mod notificador;
 pub mod panel;
 pub mod pizarra;
+pub mod pqc;
 pub mod reglas;
 
 /// Codigo generado por tonic a partir de `proto/aegis_fleet.proto`.

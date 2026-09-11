@@ -28,6 +28,11 @@ aegis-firehose = { path = "../../../crates/aegis-firehose" }
 # agente y esta gated; aqui solo se verifica, que es cripto pura.
 aegis-attest = { path = "../../../crates/aegis-attest" }
 aegis-firmware = { path = "../../../crates/aegis-firmware" }
+# Capa PQC del canal C2 (FASE 59): el plano de control guarda su par hibrido,
+# abre los sobres sellados que suben los agentes y sella los comandos de vuelta.
+# Solo la feature `kem` (intercambio de claves), no la de firma: no arrastra
+# ml-dsa y el canal sigue compilando con el MSRV del servidor.
+aegis-pqc = { path = "../../../crates/aegis-pqc", default-features = false, features = ["kem"] }
 getrandom = "0.2"
 
 # --- Runtime asincrono ------------------------------------------------------
