@@ -105,6 +105,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-predict"
+version = "0.1.0"
+dependencies = [
+ "aegis-itdr",
+ "aegis-orchestrator",
+ "petgraph",
+ "serde",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-selfdefense"
 version = "0.1.0"
 dependencies = [
@@ -126,6 +137,7 @@ dependencies = [
  "aegis-orchestrator",
  "aegis-parser",
  "aegis-pqc",
+ "aegis-predict",
  "aegis-selfdefense",
  "async-trait",
  "axum",

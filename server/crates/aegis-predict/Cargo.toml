@@ -1,0 +1,28 @@
+[package]
+name = "aegis-predict"
+description = "AegisPredict: caminos de ataque mas probables, radio de explosion y contencion preventiva acotada"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Errores nombrados, igual que el resto del plano de control.
+thiserror = "2"
+# El grafo de identidad de la FASE 58 es la entrada principal de este motor.
+aegis-itdr = { path = "../aegis-itdr" }
+# Las acciones de contencion las define el orquestador (FASE 64): este motor
+# PROPONE, y quien ejecuta es el mismo motor de remediacion que ya existe. No se
+# duplica el vocabulario de acciones, porque dos listas de acciones que hay que
+# mantener sincronizadas acaban divergiendo y el dia que diverjan la prediccion
+# pedira algo que el ejecutor no sabe hacer.
+aegis-orchestrator = { path = "../aegis-orchestrator" }
+# Salida del informe hacia la API del panel y el firehose. De ENTRADA no: ver la
+# asimetria documentada en aegis-itdr.
+serde = { version = "1", features = ["derive"] }
+# Misma version que aegis-itdr a proposito: una sola copia en el arbol.
+petgraph = { version = "0.7", default-features = false }

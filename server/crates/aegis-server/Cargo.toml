@@ -45,6 +45,7 @@ aegis-itdr = { path = "../aegis-itdr" }
 # al flujo vivo (ver `crate::remediacion`), de modo que un veredicto del motor
 # ITDR dispara el playbook sobre la flota sin que intervenga un humano.
 aegis-orchestrator = { path = "../aegis-orchestrator" }
+aegis-predict = { path = "../aegis-predict" }
 getrandom = "0.2"
 # Las dos fronteras de la remediacion (el registro y la flota) son traits
 # asincronos usados por `dyn`/generico, y las remediaciones de un lote se lanzan

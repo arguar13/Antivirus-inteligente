@@ -303,6 +303,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "swarm" ]; then
     fi
 fi
 
+# AegisPredict (prediccion y contencion preventiva, FASE 69): este motor no
+# escribe informes, PROPONE AISLAR MAQUINAS DE PRODUCCION, y eso gobierna su
+# diseno: nada esta entrenado —las probabilidades y los pesos estan a mano, con
+# su razon, para que el resultado se pueda leer y rebatir— y todo es
+# determinista. No hay muro: es matematica sobre un grafo y se comprueba entera,
+# incluso contra valores analiticos calculados a mano. Los dos peligros de la
+# contencion preventiva —que la cura sea la enfermedad, y que el atacante dirija
+# la prediccion fabricando aristas— se ejercen los dos.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "predict" ]; then
+    printf '%s==>%s AegisPredict · caminos de ataque, radio de explosion y contencion preventiva\n' "$GRIS" "$FIN"
+    if ./tools/verificar-predict.sh > /tmp/aegis-predict-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-predict-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-predict-ci.log | tail -25
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena

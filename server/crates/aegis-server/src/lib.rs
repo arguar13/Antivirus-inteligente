@@ -39,6 +39,7 @@ pub mod notificador;
 pub mod panel;
 pub mod pizarra;
 pub mod pqc;
+pub mod prediccion;
 pub mod reglas;
 pub mod remediacion;
 
