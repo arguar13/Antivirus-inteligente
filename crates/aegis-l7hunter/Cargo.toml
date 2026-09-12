@@ -1,0 +1,22 @@
+[package]
+name = "aegis-l7hunter"
+description = "AegisL7Hunter: extraccion de telemetria L7 en claro por uprobes de eBPF sobre SSL_read/SSL_write, y caza de balizas C2 sin romper el certificate pinning"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# El motor de inferencia que ya usa el resto del producto: Rust puro, sin libs
+# nativas de C, corre en el borde sin conexion. La clasificacion de una baliza
+# ocurre EN EL AGENTE porque un C2 con jitter solo se distingue mirando la serie
+# temporal completa, y esa serie no se puede subir entera a la nube.
+tract-onnx = "0.21"
+# Solo para la ruta EN VIVO (enganchar el uprobe y leer el ring buffer). El
+# resolutor de simbolos, el parseo L7 y la matematica de balizas no usan libc.
+libc = "0.2"

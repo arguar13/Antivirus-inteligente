@@ -284,6 +284,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-l7hunter"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "thiserror 2.0.20",
+ "tract-onnx",
+]
+
+[[package]]
 name = "aegis-memhunter"
 version = "0.1.0"
 dependencies = [

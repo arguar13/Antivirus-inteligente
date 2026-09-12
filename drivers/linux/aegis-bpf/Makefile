@@ -41,6 +41,7 @@ BUILD      := out
 BPF_OBJ    := $(BUILD)/aegis_probes.bpf.o
 XDP_OBJ    := $(BUILD)/aegis_xdp.bpf.o
 KI_OBJ     := $(BUILD)/aegis_kintegrity.bpf.o
+SSL_OBJ    := $(BUILD)/aegis_sslsniff.bpf.o
 VERIFIER   := $(BUILD)/aegis_bpf_verify
 CORECHECK  := $(BUILD)/aegis_core_check
 
@@ -75,7 +76,7 @@ VERIFY_LDLIBS := -lbpf -lelf -lz
 
 .PHONY: build verify core-check core-matrix sign check-integrity clean dump
 
-build: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ)
+build: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
 
 $(BUILD):
 	@mkdir -p $(BUILD)
@@ -114,6 +115,13 @@ $(KI_OBJ): src/aegis_kintegrity.bpf.c include/aegis_bpf_common.h include/aegis_k
 	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
 	@echo "  BPF   $@"
 
+# Uprobes de TLS en Ring 3 (FASE 66). No lee estructuras del kernel salvo
+# task_struct via el helper comun, asi que su dependencia de vmlinux.h es la
+# misma que la del resto.
+$(SSL_OBJ): src/aegis_sslsniff.bpf.c include/aegis_bpf_common.h include/aegis_sslsniff.h $(VMLINUX_H) | $(BUILD)
+	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+	@echo "  BPF   $@"
+
 $(VERIFIER): tools/aegis_bpf_verify.c | $(BUILD)
 	$(CC) $(VERIFY_CFLAGS) $< -o $@ $(VERIFY_LDLIBS)
 
@@ -125,17 +133,18 @@ $(CORECHECK): tools/aegis_core_check.c | $(BUILD)
 # Compilar no demuestra nada en eBPF: el verificador del kernel rechaza
 # programas que compilan perfectamente (accesos no acotados, bucles que no
 # puede probar que terminan, punteros sin comprobar). Esta es la prueba real.
-verify: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(VERIFIER)
+verify: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(VERIFIER)
 	@./$(VERIFIER) $(BPF_OBJ)
 	@./$(VERIFIER) $(XDP_OBJ)
 	@./$(VERIFIER) $(KI_OBJ)
+	@./$(VERIFIER) $(SSL_OBJ)
 
 # Comprueba, sobre los bytes del objeto, que el bytecode lleva reubicaciones
 # CO-RE bien formadas. Compilar con vmlinux.h no lo garantiza: un objeto puede
 # llevar los desplazamientos del kernel de construccion grabados y fallar en
 # silencio en cualquier otro. Ver tools/aegis_core_check.c.
-core-check: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(CORECHECK)
-	@./$(CORECHECK) $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ)
+core-check: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(CORECHECK)
+	@./$(CORECHECK) $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
 
 # Prueba CRUZADA: reubica los programas contra el BTF de otros kernels.
 #
@@ -166,8 +175,8 @@ core-matrix: $(BPF_OBJ) $(XDP_OBJ) $(VERIFIER)
 
 # Firma HMAC-SHA256 del bytecode. Se ejecuta tras compilar: el manifiesto que
 # produce lo verifica el agente antes de cargar cada programa en el kernel.
-sign: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ)
-	@python3 tools/sign_bytecode.py sign $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ)
+sign: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
+	@python3 tools/sign_bytecode.py sign $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
 
 # Firma los objetos y comprueba que la firma vuelve a cuadrar.
 #
@@ -181,9 +190,9 @@ sign: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ)
 # entregar el programa al kernel (modulo 14). Este paso del CI comprueba que los
 # tres objetos se firman y se re-verifican de forma consistente con la misma
 # clave, que es lo que puede hacer sin un estado versionado.
-check-integrity: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ)
-	@python3 tools/sign_bytecode.py sign $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ)
-	@python3 tools/sign_bytecode.py check $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ)
+check-integrity: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
+	@python3 tools/sign_bytecode.py sign $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
+	@python3 tools/sign_bytecode.py check $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
 
 dump: $(BPF_OBJ)
 	llvm-objdump -S --no-show-raw-insn $(BPF_OBJ)
