@@ -1209,6 +1209,25 @@ mod pruebas {
     /// El requisito de rendimiento de la fase, comprobado y no prometido: el
     /// decisor tiene que resolver un proceso REAL grande en latencias de un
     /// digito en milisegundos. Dos mil regiones es un navegador.
+    ///
+    /// # Por que el MINIMO de varias repeticiones y no una sola medida
+    ///
+    /// Una sola medida de reloj de pared no mide el decisor: mide el decisor MAS
+    /// lo que el planificador decida robarle. Bajo `cargo test --workspace` hay
+    /// decenas de binarios de prueba compitiendo por 4 CPU, y una expropiacion a
+    /// mitad del analisis multiplica el tiempo observado sin que el codigo haya
+    /// cambiado. Eso no es un defecto del producto y no debe poder tumbar la CI.
+    ///
+    /// La respuesta correcta NO es aflojar el umbral —eso renuncia al requisito—
+    /// sino medir bien. El ruido del planificador solo puede SUMAR tiempo, nunca
+    /// restarlo, asi que el **minimo** de varias repeticiones es la estimacion
+    /// mas limpia del coste real del trabajo. Con esa medida el umbral se puede
+    /// apretar en vez de relajarlo: de los 10 ms originales a 5 ms, que es de
+    /// verdad "un digito", y sigue siendo un tope holgado frente al coste medido.
+    ///
+    /// La primera pasada se descarta a proposito: paga los fallos de pagina y el
+    /// calentamiento de cache de la evidencia recien construida, que en
+    /// produccion ya estan pagados cuando llega la segunda region.
     #[test]
     fn el_decisor_resuelve_un_proceso_grande_en_menos_de_diez_milisegundos() {
         let evidencia: Vec<EvidenciaRegion> = (0..2000u64)
@@ -1229,20 +1248,37 @@ mod pruebas {
             })
             .collect();
 
-        let cazador = AegisMemHunter::nuevo();
-        let t0 = std::time::Instant::now();
-        let inf = cazador.analizar(&proc("chrome"), &evidencia);
-        let transcurrido = t0.elapsed();
+        /// Repeticiones cronometradas, sin contar el calentamiento.
+        const REPETICIONES: usize = 9;
+        /// Tope del coste propio del decisor sobre 2000 regiones.
+        const TOPE: std::time::Duration = std::time::Duration::from_millis(5);
 
+        let cazador = AegisMemHunter::nuevo();
+
+        // Calentamiento, descartado.
+        let inf = cazador.analizar(&proc("chrome"), &evidencia);
         assert_eq!(inf.regiones_examinadas, 2000);
         assert!(!inf.anomalias.is_empty());
-        // Holgado a proposito: en una maquina de CI cargada, un umbral justo
-        // produce fallos que no son defectos. Diez milisegundos siguen siendo
-        // dos ordenes de magnitud por debajo de lo que costaria leer y comparar
-        // la memoria, que es la alternativa que esta fase evita.
+
+        let mut mejor = std::time::Duration::MAX;
+        let mut peor = std::time::Duration::ZERO;
+        for _ in 0..REPETICIONES {
+            let t0 = std::time::Instant::now();
+            let inf = cazador.analizar(&proc("chrome"), &evidencia);
+            let transcurrido = t0.elapsed();
+            // El resultado se usa para que el optimizador no pueda eliminar la
+            // llamada entera: un cronometro alrededor de codigo muerto mide cero
+            // y la prueba pasaria sin haber ejercido nada.
+            assert_eq!(inf.regiones_examinadas, 2000);
+            mejor = mejor.min(transcurrido);
+            peor = peor.max(transcurrido);
+        }
+
         assert!(
-            transcurrido.as_millis() < 10,
-            "el decisor tardo {transcurrido:?} sobre 2000 regiones"
+            mejor < TOPE,
+            "el decisor tardo {mejor:?} en su mejor pasada de {REPETICIONES} sobre 2000 \
+             regiones (peor pasada {peor:?}); el tope del coste propio es {TOPE:?}. \
+             Que el MINIMO se pase no es ruido del planificador: es el decisor."
         );
     }
 
