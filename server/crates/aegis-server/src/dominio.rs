@@ -88,6 +88,36 @@ pub fn clasificar_mitre(categoria: &str) -> Option<ClaseMitre> {
             tecnica: "T1041",
             tactica: "Exfiltracion",
         },
+        // --- Identidad (ITDR, FASE 58) -----------------------------------
+        // Estas cuatro entran con el nombre EXACTO con el que
+        // `crate::itdr::categoria_y_mitre` las anuncia en el bus del panel. Si
+        // no estuvieran, la misma deteccion saldria al WebSocket con tecnica y
+        // se persistiria sin ella: las heuristicas globales (FASE 45) agrupan
+        // por tecnica, asi que media campana caeria en un grupo y media en
+        // ninguno, y ninguno alcanzaria el minimo de endpoints para disparar.
+        "kerberoasting" => ClaseMitre {
+            tecnica: "T1558.003",
+            tactica: "Acceso a credenciales",
+        },
+        "golden ticket" | "golden_ticket" => ClaseMitre {
+            tecnica: "T1558.001",
+            tactica: "Acceso a credenciales",
+        },
+        "silver ticket" | "silver_ticket" => ClaseMitre {
+            tecnica: "T1558.002",
+            tactica: "Acceso a credenciales",
+        },
+        // OJO: no es la misma tecnica que `escalada_privilegios` de arriba, y no
+        // es un descuido. Aquella es la escalada LOCAL que ve el agente
+        // (explotacion de una vulnerabilidad, T1068); esta es la escalada por
+        // IMPERSONACION que ve el grafo de identidad del plano de control
+        // (manipulacion de token de acceso, T1134). Colapsarlas en una sola
+        // tecnica haria que un exploit local y un robo de identidad de dominio
+        // se agruparan como la misma campana.
+        "escalada de privilegios" => ClaseMitre {
+            tecnica: "T1134",
+            tactica: "Escalada de privilegios",
+        },
         "movimiento_lateral" | "smb" => ClaseMitre {
             tecnica: "T1021",
             tactica: "Movimiento lateral",
@@ -383,6 +413,33 @@ mod pruebas {
         // Una categoria desconocida no inventa una tecnica: se guarda sin mapeo
         // antes que con un mapeo falso que enganaria al analista.
         assert!(clasificar_mitre("categoria_que_no_existe").is_none());
+    }
+
+    /// Las categorias con las que el motor ITDR anuncia en el bus tienen que
+    /// tener tecnica TAMBIEN al persistirse. Es la prueba que ata los dos
+    /// caminos de la misma deteccion: si alguien renombra una categoria en
+    /// `itdr::categoria_y_mitre` y no la anade aqui, esta prueba lo para antes
+    /// de que la correlacion de la FASE 45 se quede a medias en produccion.
+    #[test]
+    fn toda_categoria_del_motor_de_identidad_tiene_tecnica_al_persistirse() {
+        use aegis_itdr::ClaseAmenaza::{
+            EscaladaPrivilegios, GoldenTicket, Kerberoasting, SilverTicket,
+        };
+        for clase in [
+            Kerberoasting,
+            GoldenTicket,
+            SilverTicket,
+            EscaladaPrivilegios,
+        ] {
+            let (categoria, mitre) = crate::itdr::categoria_y_mitre_publica(clase);
+            let clasificada = clasificar_mitre(categoria).unwrap_or_else(|| {
+                panic!("la categoria '{categoria}' del motor ITDR no se clasifica al persistirse")
+            });
+            assert_eq!(
+                clasificada.tecnica, mitre,
+                "la tecnica de '{categoria}' difiere entre el bus y la persistencia"
+            );
+        }
     }
 
     #[test]

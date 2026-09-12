@@ -77,7 +77,30 @@ impl Orquestador {
     /// `true` si esta deteccion merece remediacion automatica (supera el umbral).
     #[must_use]
     fn debe_remediar(&self, disparador: &Disparador) -> bool {
-        disparador.severidad >= self.umbral
+        self.remediaria(disparador.severidad)
+    }
+
+    /// `true` si una deteccion de esta severidad se remediaria automaticamente.
+    ///
+    /// Es el mismo predicado que aplica [`Orquestador::remediar`], expuesto para
+    /// que quien integra el orquestador en un flujo vivo pueda FILTRAR antes de
+    /// actuar. Sin el, el integrador tendria que llamar a `remediar` para
+    /// descubrir que la deteccion no procedia, y para entonces ya habria abierto
+    /// un registro de remediacion, publicado un evento en la consola y
+    /// consumido el cerrojo de una respuesta que nunca iba a ocurrir.
+    ///
+    /// Que la respuesta la de el propio orquestador —y no una copia del umbral
+    /// en el integrador— es deliberado: dos sitios que deciden lo mismo acaban
+    /// decidiendo distinto.
+    #[must_use]
+    pub fn remediaria(&self, severidad: Severidad) -> bool {
+        severidad >= self.umbral
+    }
+
+    /// El umbral de severidad a partir del cual se remedia.
+    #[must_use]
+    pub const fn umbral(&self) -> Severidad {
+        self.umbral
     }
 
     /// Remedia una deteccion sobre `host`: elige el playbook y lo ejecuta ENTERO
@@ -332,6 +355,35 @@ mod tests {
             ej.llamadas().is_empty(),
             "no se toca la flota por una sospecha debil"
         );
+    }
+
+    #[tokio::test]
+    async fn el_predicado_publico_y_la_decision_interna_no_pueden_divergir() {
+        // Quien integra el orquestador en un flujo vivo filtra con `remediaria`
+        // ANTES de abrir registros y publicar eventos. Si ese predicado y el que
+        // aplica `remediar` divergieran, el integrador abriria remediaciones que
+        // el orquestador descarta —o peor, descartaria las que si procedian—.
+        let orq = Orquestador::con_umbral(Severidad::Alta);
+        for sev in [
+            Severidad::Informativa,
+            Severidad::Baja,
+            Severidad::Media,
+            Severidad::Alta,
+            Severidad::Critica,
+        ] {
+            let ej = EjecutorDoble::nuevo();
+            let inf = orq
+                .remediar(&disp(ClaseAmenaza::GoldenTicket, sev), "host-7", &ej)
+                .await;
+            let actuo = inf.estado != EstadoPlaybook::NoAplica;
+            assert_eq!(
+                orq.remediaria(sev),
+                actuo,
+                "el predicado publico y la decision real divergen en {sev:?}"
+            );
+            assert_eq!(actuo, !ej.llamadas().is_empty());
+        }
+        assert_eq!(orq.umbral(), Severidad::Alta);
     }
 
     #[tokio::test]

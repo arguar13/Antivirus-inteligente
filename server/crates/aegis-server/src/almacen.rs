@@ -155,6 +155,29 @@ impl Almacen {
         Ok(Almacen { pool })
     }
 
+    /// Un almacen cuyo pool apunta a una base de datos que NO existe.
+    ///
+    /// No es una imitacion de `Almacen`: es un `PgPool` de verdad, con la misma
+    /// implementacion y el mismo codigo de consulta, cuyas escrituras fallan
+    /// porque al otro lado no hay nadie. Sirve para ejercer exactamente eso —que
+    /// el ciclo de remediacion (`crate::remediacion`) sobreviva a un fallo REAL
+    /// de la base de datos y no abandone la respuesta— sin tener que tirar una
+    /// base de datos abajo a mitad de una prueba.
+    ///
+    /// `connect_lazy` no toca la red al construir, asi que no hay espera: el
+    /// fallo aparece en la primera consulta, que es cuando interesa.
+    #[cfg(test)]
+    pub(crate) fn desconectado() -> Almacen {
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_millis(50))
+            // Puerto 1 en loopback: reservado y sin escucha posible, asi que el
+            // fallo es inmediato (ECONNREFUSED) y no una espera de red.
+            .connect_lazy("postgres://aegis@127.0.0.1:1/no_existe")
+            .expect("una cadena de conexion valida no puede fallar al construir el pool");
+        Almacen { pool }
+    }
+
     /// Referencia al pool, para las pruebas y las metricas.
     pub fn pool(&self) -> &PgPool {
         &self.pool
@@ -509,6 +532,22 @@ impl Almacen {
             accion: f.get("accion"),
             parametros: f.get("parametros"),
         }))
+    }
+
+    /// Si un endpoint esta dado de alta en el inventario.
+    ///
+    /// Existe porque la respuesta automatica necesita SABERLO antes de intentar
+    /// nada: `comandos.cn_agente` tiene clave foranea contra `agentes`, asi que
+    /// encolar una orden a un endpoint desconocido no falla "un poco", falla con
+    /// una violacion de integridad referencial. Sin esta comprobacion, el
+    /// informe que lee el analista llevaria cuatro errores de SQL en crudo en
+    /// vez de un motivo que se entienda.
+    pub async fn existe_agente(&self, cn: &str) -> Resultado<bool> {
+        let fila = sqlx::query("SELECT 1 AS x FROM agentes WHERE cn = $1")
+            .bind(cn)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(fila.is_some())
     }
 
     /// Marca un endpoint como aislado o lo libera.
@@ -2190,5 +2229,230 @@ fn fila_a_correlacion(f: &sqlx::postgres::PgRow) -> VistaCorrelacion {
         ultima_en: f.get("ultima_en"),
         abierta_en: f.get("abierta_en"),
         vista_en: f.get("vista_en"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FASE 64 (integracion viva): remediacion automatica de flota
+// ---------------------------------------------------------------------------
+
+/// Vista de una remediacion automatica para el panel y la API.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VistaRemediacion {
+    /// Identificador.
+    pub id: Uuid,
+    /// Familia de amenaza que la disparo.
+    pub clase: String,
+    /// Identidad implicada.
+    pub sujeto: String,
+    /// Endpoint sobre el que se actuo.
+    pub cn_agente: String,
+    /// Severidad 0..4 de la deteccion.
+    pub severidad: i16,
+    /// Evidencia con la que el motor la justifico.
+    pub evidencia: String,
+    /// `en_curso` | `completado` | `completado_con_fallos`.
+    pub estado: String,
+    /// Cuando se lanzo.
+    pub lanzada_en: DateTime<Utc>,
+    /// Cuando concluyo, si concluyo.
+    pub concluida_en: Option<DateTime<Utc>>,
+    /// Quien la ordeno (`ai-ro` o el operador).
+    pub ordenada_por: String,
+    /// Detalle por accion del playbook.
+    pub acciones: Vec<AccionRemediada>,
+}
+
+/// El resultado de UNA accion del playbook, tal como quedo registrado.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AccionRemediada {
+    /// Nombre estable de la accion.
+    pub accion: String,
+    /// Si se consiguio.
+    pub exito: bool,
+    /// Motivo del fallo, vacio si tuvo exito.
+    pub motivo: String,
+    /// Veces que se ha intentado (crece con cada reintento).
+    pub intentos: i32,
+}
+
+impl Almacen {
+    /// Abre una remediacion si —y solo si— procede.
+    ///
+    /// Devuelve `Ok(None)` cuando NO procede: ya hay una abierta para la misma
+    /// terna `(clase, sujeto, endpoint)`, o la ultima concluyo dentro del
+    /// enfriamiento. Es el **cerrojo distribuido** de la respuesta automatica, y
+    /// esta aqui —y no en memoria del proceso— por dos motivos que se refuerzan:
+    ///
+    /// - El motor ITDR es sin estado por lote, asi que un ataque largo produce la
+    ///   misma deteccion en lotes consecutivos.
+    /// - El plano de control corre en varias instancias tras un balanceador, y
+    ///   dos instancias en memoria no se ven entre si.
+    ///
+    /// La atomicidad la da la combinacion de dos mecanismos, y hacen falta LOS
+    /// DOS: el `WHERE NOT EXISTS` aplica el enfriamiento (que mira filas ya
+    /// cerradas, invisibles para el indice parcial), y el `ON CONFLICT DO
+    /// NOTHING` contra `idx_remediacion_abierta_unica` resuelve la carrera de dos
+    /// instancias que pasan el `WHERE` a la vez. Con solo el primero, dos
+    /// instancias abririan dos; con solo el segundo, el enfriamiento no existiria.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn abrir_remediacion(
+        &self,
+        clase: &str,
+        sujeto: &str,
+        cn: &str,
+        severidad: i16,
+        evidencia: &str,
+        ordenada_por: &str,
+        enfriamiento_seg: i64,
+    ) -> Resultado<Option<Uuid>> {
+        let id = Uuid::new_v4();
+        let fila = sqlx::query(
+            r#"
+            INSERT INTO remediaciones
+                (id, clase, sujeto, cn_agente, severidad, evidencia, ordenada_por)
+            SELECT $1, $2, $3, $4, $5, $6, $7
+             WHERE NOT EXISTS (
+                   SELECT 1 FROM remediaciones
+                    WHERE clase = $2 AND sujeto = $3 AND cn_agente = $4
+                      AND (concluida_en IS NULL
+                           OR concluida_en > now() - make_interval(secs => $8::double precision))
+             )
+            ON CONFLICT DO NOTHING
+            RETURNING id
+            "#,
+        )
+        .bind(id)
+        .bind(clase)
+        .bind(sujeto)
+        .bind(cn)
+        .bind(severidad)
+        .bind(evidencia)
+        .bind(ordenada_por)
+        .bind(enfriamiento_seg.max(0) as f64)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(fila.map(|f| f.get("id")))
+    }
+
+    /// Cierra una remediacion con su informe: el estado global y el resultado de
+    /// cada accion.
+    ///
+    /// Todo en UNA transaccion. Si el estado se escribiera fuera de ella, un
+    /// corte entre ambas escrituras dejaria una remediacion marcada como
+    /// concluida sin el detalle de que se consiguio, y el reintento idempotente
+    /// —que se apoya justo en ese detalle— repetiria acciones ya hechas.
+    ///
+    /// El `ON CONFLICT` de las acciones INCREMENTA `intentos` en vez de insertar
+    /// otra fila: un reintento sobre la misma accion es el mismo hecho visto dos
+    /// veces, no dos hechos.
+    pub async fn cerrar_remediacion(
+        &self,
+        id: Uuid,
+        estado: &str,
+        acciones: &[(&str, bool, String)],
+    ) -> Resultado<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"UPDATE remediaciones
+                  SET estado = $2, concluida_en = now()
+                WHERE id = $1"#,
+        )
+        .bind(id)
+        .bind(estado)
+        .execute(&mut *tx)
+        .await?;
+
+        for (accion, exito, motivo) in acciones {
+            sqlx::query(
+                r#"INSERT INTO remediacion_acciones (id_remediacion, accion, exito, motivo)
+                   VALUES ($1, $2, $3, $4)
+                   ON CONFLICT (id_remediacion, accion) DO UPDATE
+                      SET exito = EXCLUDED.exito,
+                          motivo = EXCLUDED.motivo,
+                          intentos = remediacion_acciones.intentos + 1,
+                          actualizada_en = now()"#,
+            )
+            .bind(id)
+            .bind(accion)
+            .bind(exito)
+            .bind(motivo)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Las remediaciones mas recientes con su detalle, para la consola.
+    pub async fn listar_remediaciones(&self, limite: i64) -> Resultado<Vec<VistaRemediacion>> {
+        // Una sola consulta con agregacion JSON en vez de N+1: con el listado
+        // paginado de la consola, una consulta por remediacion para traer sus
+        // cuatro acciones multiplicaria por cinco los viajes a la base de datos
+        // para devolver la misma pantalla.
+        let filas = sqlx::query(
+            r#"
+            SELECT r.id, r.clase, r.sujeto, r.cn_agente, r.severidad, r.evidencia,
+                   r.estado, r.lanzada_en, r.concluida_en, r.ordenada_por,
+                   COALESCE(
+                       (SELECT json_agg(json_build_object(
+                                   'accion', a.accion, 'exito', a.exito,
+                                   'motivo', a.motivo, 'intentos', a.intentos)
+                                ORDER BY a.accion)
+                          FROM remediacion_acciones a
+                         WHERE a.id_remediacion = r.id),
+                       '[]'::json) AS acciones
+              FROM remediaciones r
+             ORDER BY r.lanzada_en DESC
+             LIMIT $1
+            "#,
+        )
+        .bind(limite.clamp(1, 500))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(filas
+            .iter()
+            .map(|f| {
+                let acciones: serde_json::Value = f.get("acciones");
+                VistaRemediacion {
+                    id: f.get("id"),
+                    clase: f.get("clase"),
+                    sujeto: f.get("sujeto"),
+                    cn_agente: f.get("cn_agente"),
+                    severidad: f.get("severidad"),
+                    evidencia: f.get("evidencia"),
+                    estado: f.get("estado"),
+                    lanzada_en: f.get("lanzada_en"),
+                    concluida_en: f.get("concluida_en"),
+                    ordenada_por: f.get("ordenada_por"),
+                    acciones: serde_json::from_value(acciones).unwrap_or_default(),
+                }
+            })
+            .collect())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AccionRemediada {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Cruda {
+            accion: String,
+            exito: bool,
+            #[serde(default)]
+            motivo: String,
+            #[serde(default = "uno")]
+            intentos: i32,
+        }
+        fn uno() -> i32 {
+            1
+        }
+        let c = Cruda::deserialize(d)?;
+        Ok(AccionRemediada {
+            accion: c.accion,
+            exito: c.exito,
+            motivo: c.motivo,
+            intentos: c.intentos,
+        })
     }
 }

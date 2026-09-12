@@ -40,6 +40,7 @@ pub mod panel;
 pub mod pizarra;
 pub mod pqc;
 pub mod reglas;
+pub mod remediacion;
 
 /// Codigo generado por tonic a partir de `proto/aegis_fleet.proto`.
 pub mod pb {

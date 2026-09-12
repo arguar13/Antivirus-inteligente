@@ -41,7 +41,16 @@ aegis-selfdefense = { path = "../../../crates/aegis-selfdefense" }
 # escaladas de privilegio sobre el grafo de identidad de la flota. Vive en este
 # mismo workspace (el motor de grafos es cosa del Control Plane, no del agente).
 aegis-itdr = { path = "../aegis-itdr" }
+# Orquestador de remediacion (FASE 64). El servidor no solo lo aloja: lo CONECTA
+# al flujo vivo (ver `crate::remediacion`), de modo que un veredicto del motor
+# ITDR dispara el playbook sobre la flota sin que intervenga un humano.
+aegis-orchestrator = { path = "../aegis-orchestrator" }
 getrandom = "0.2"
+# Las dos fronteras de la remediacion (el registro y la flota) son traits
+# asincronos usados por `dyn`/generico, y las remediaciones de un lote se lanzan
+# concurrentemente entre si.
+async-trait = "0.1"
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 
 # --- Runtime asincrono ------------------------------------------------------
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time", "sync"] }

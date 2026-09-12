@@ -143,8 +143,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tarea_correlador = tokio::spawn(correlador.correr());
 
     // --- API REST del panel -------------------------------------------------
+    // --- Respuesta automatica: ITDR -> AI-RO (integracion viva de la FASE 64) -
+    //
+    // El motor se construye UNA vez y se comparte: el grafo de identidad de la
+    // flota tiene que ser uno solo. Dos motores con dos grafos verian cada uno
+    // media escalada de privilegios y ninguno la veria entera.
+    let motor_remediacion = Arc::new(aegis_server::remediacion::MotorVivo::de_produccion(
+        servicio.clone(),
+        almacen.clone(),
+    ));
+    tracing::info!(
+        umbral = ?aegis_orchestrator::Orquestador::nuevo().umbral(),
+        enfriamiento_seg = aegis_server::remediacion::ENFRIAMIENTO_SEG,
+        "respuesta automatica activa: una deteccion de identidad por encima del umbral \
+         lanza su playbook sobre el endpoint sin intervencion humana"
+    );
+
     let estado_api = api::EstadoApi {
         servicio: servicio.clone(),
+        remediacion: Some(motor_remediacion),
         cache: cache.clone(),
         margen_desconexion_seg: cfg.margen_desconexion.as_secs() as i64,
         difusion: Some(difusion_cuarentena),

@@ -143,6 +143,46 @@ pub enum EventoPanel {
         /// Operador que lo ordeno.
         por: String,
     },
+    /// El orquestador ha LANZADO un playbook de remediacion automatica sobre un
+    /// endpoint.
+    ///
+    /// Se publica al empezar y no al terminar, a proposito: un playbook tarda lo
+    /// que tarde el endpoint mas lento en contestar, y el analista tiene que ver
+    /// que la maquina se esta remediando MIENTRAS ocurre. Enterarse al final es
+    /// como dos operadores acaban actuando a ciegas sobre el mismo incidente.
+    RemediacionLanzada {
+        /// Identificador de la remediacion en el registro duradero.
+        id: String,
+        /// Endpoint sobre el que se actua.
+        cn: String,
+        /// Familia de amenaza que la disparo.
+        clase: String,
+        /// Identidad implicada.
+        sujeto: String,
+        /// Severidad 0..4 de la deteccion.
+        severidad: i16,
+        /// Acciones del playbook, en el orden en que se lanzaron.
+        acciones: Vec<String>,
+    },
+    /// Un playbook de remediacion ha concluido.
+    RemediacionConcluida {
+        /// Identificador de la remediacion.
+        id: String,
+        /// Endpoint sobre el que se actuo.
+        cn: String,
+        /// Familia de amenaza.
+        clase: String,
+        /// Identidad implicada.
+        sujeto: String,
+        /// Estado global: `completado` o `completado_con_fallos`.
+        estado: String,
+        /// Acciones que se consiguieron.
+        exitos: usize,
+        /// Acciones que fallaron. Un numero distinto de cero significa que el
+        /// endpoint quedo PARCIALMENTE remediado, que es justo lo que no puede
+        /// pasar desapercibido.
+        fallos: usize,
+    },
     /// Ha llegado inteligencia nueva.
     InteligenciaNueva {
         /// Agente que la entrego.

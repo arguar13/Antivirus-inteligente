@@ -43,6 +43,13 @@ pub struct EstadoApi {
     /// la API sola): el endpoint responde 503 en vez de inventar un cero, que
     /// se leeria como "se difundio al instante".
     pub difusion: Option<Arc<crate::flota::DifusionCuarentena>>,
+    /// El puente vivo entre el motor ITDR y el orquestador de remediacion.
+    ///
+    /// `None` cuando el plano de control arranca sin respuesta automatica (o en
+    /// pruebas de la API sola): la ruta de ingesta responde 503 en vez de
+    /// aceptar telemetria que nadie va a analizar. Aceptarla y descartarla seria
+    /// peor que rechazarla, porque el colector creeria estar cubierto.
+    pub remediacion: Option<Arc<crate::remediacion::MotorVivo>>,
 }
 
 /// Construye el enrutador de la API.
@@ -82,6 +89,9 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         )
         .route("/api/agentes/{cn}/cuarentena", post(cuarentena_de_enjambre))
         .route("/api/cuarentena/difusion", get(difusion_cuarentena))
+        // --- Respuesta automatica: ITDR -> AI-RO (FASES 58 + 64) ---
+        .route("/api/agentes/{cn}/itdr/telemetria", post(ingerir_identidad))
+        .route("/api/remediaciones", get(listar_remediaciones))
         // --- Heuristicas globales: APT distribuida (FASE 45) ---
         .route(
             "/api/heuristicas",
@@ -197,6 +207,116 @@ fn error_500(e: crate::error::ErrorServidor) -> impl IntoResponse {
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(serde_json::json!({"error": "fallo interno"})),
     )
+}
+
+/// Ingiere un lote de telemetria de identidad y DISPARA la respuesta automatica.
+///
+/// Es la entrada viva del circuito ITDR -> AI-RO: el lote se analiza contra el
+/// grafo de identidad de toda la flota, cada deteccion se persiste como alerta y
+/// las que superan el umbral lanzan su playbook sobre el endpoint.
+///
+/// Devuelve 202 y NO 200 a proposito: la respuesta describe lo que se ORDENO,
+/// no lo que el endpoint ya aplico. El aislamiento lo aplica el agente en su
+/// proximo latido, y confundir "ordenado" con "aplicado" es como se acaba
+/// creyendo aislada una maquina que sigue hablando con el atacante.
+async fn ingerir_identidad(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(cn): Path<String>,
+    Json(lote): Json<crate::remediacion::dto::LoteIdentidad>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let Some(motor) = estado.remediacion.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "error": "la respuesta automatica no esta activa en este plano de control"
+            })),
+        )
+            .into_response();
+    };
+    // Las cotas se comprueban ANTES de tocar el motor: un lote desmesurado no
+    // puede convertirse en memoria del plano de control.
+    if let Err(e) = lote.validar() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response();
+    }
+
+    let telemetria = crate::itdr::TelemetriaIdentidad::from(&lote);
+    match motor.analizar_y_remediar(&cn, &telemetria).await {
+        Ok(ciclo) => {
+            let detecciones: Vec<serde_json::Value> = ciclo
+                .detecciones
+                .iter()
+                .map(|d| {
+                    let (categoria, mitre) = crate::itdr::categoria_y_mitre_publica(d.clase);
+                    serde_json::json!({
+                        "clase": crate::remediacion::clave_clase(d.clase),
+                        "categoria": categoria,
+                        "tecnica_mitre": mitre,
+                        "severidad": crate::remediacion::severidad_num(d.severidad),
+                        "sujeto": d.sujeto,
+                        "evidencia": d.evidencia,
+                    })
+                })
+                .collect();
+            let remediaciones: Vec<serde_json::Value> = ciclo
+                .remediaciones
+                .iter()
+                .map(|(id, inf)| {
+                    serde_json::json!({
+                        "id": id,
+                        "clase": crate::remediacion::clave_clase(inf.clase),
+                        "estado": crate::remediacion::clave_estado(inf.estado),
+                        "acciones": inf.resultados.iter().map(|r| serde_json::json!({
+                            "accion": crate::remediacion::clave_accion(r.accion),
+                            "exito": r.exito(),
+                        })).collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "agente": cn,
+                    "detecciones": detecciones,
+                    "remediaciones": remediaciones,
+                    // Se expone a proposito: si este numero crece, el cerrojo
+                    // esta conteniendo un ataque que vuelve una y otra vez, y
+                    // eso el analista tiene que verlo.
+                    "omitidas_por_cerrojo": ciclo.omitidas_por_cerrojo,
+                    "incidencias": ciclo.incidencias,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+/// Lista las remediaciones automaticas mas recientes con su detalle por accion.
+async fn listar_remediaciones(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Query(q): Query<Limite>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let limite = q.limite.unwrap_or(50).clamp(1, 500);
+    match estado.servicio.almacen().listar_remediaciones(limite).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
 }
 
 /// Resumen agregado de la flota.

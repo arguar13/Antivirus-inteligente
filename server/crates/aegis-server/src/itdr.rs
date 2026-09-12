@@ -174,6 +174,19 @@ fn severidad_num(s: Severidad) -> i16 {
     }
 }
 
+/// La categoria legible y la tecnica MITRE ATT&CK de una clase de amenaza.
+///
+/// Se expone para que la remediacion automatica ([`crate::remediacion`]) persista
+/// la alerta con EXACTAMENTE la misma categoria con la que el bus del panel la
+/// anuncia. Dos categorias distintas para el mismo hecho romperian las
+/// heuristicas globales de la FASE 45, que agrupan por categoria: la mitad de la
+/// evidencia de una campana caeria en un grupo y la otra mitad en otro, y
+/// ninguno de los dos alcanzaria el minimo de endpoints para disparar.
+#[must_use]
+pub fn categoria_y_mitre_publica(clase: ClaseAmenaza) -> (&'static str, &'static str) {
+    categoria_y_mitre(clase)
+}
+
 /// La categoria legible y la tecnica MITRE ATT&CK de cada clase de amenaza.
 fn categoria_y_mitre(clase: ClaseAmenaza) -> (&'static str, &'static str) {
     match clase {
