@@ -13,6 +13,18 @@ workspace = true
 [dependencies]
 # Errores nombrados y sin ambiguedad, igual que el resto del proyecto.
 thiserror = "2"
+# Serializacion de SALIDA de los tipos de identidad (Identidad, EventoKdc,
+# UsoServicio, Deteccion...): exportar una deteccion al SIEM por el firehose, y
+# entregar el grafo de identidad al motor de prediccion del Control Plane.
+#
+# DE ENTRADA NO. La telemetria que sube un colector es dato NO confiable, y no
+# se deserializa jamas directamente en los tipos del motor: entra por el DTO
+# acotado de `aegis_server::remediacion::dto`, que valida tamanos ANTES de
+# construir nada. La asimetria es deliberada: hacia fuera, el tipo del motor es
+# el contrato; hacia dentro, el contrato es explicito y con cotas, porque un
+# colector comprometido no puede convertir un lote en una via de agotamiento de
+# memoria del plano de control.
+serde = { version = "1", features = ["derive"] }
 # Grafo de identidad en memoria (motor del Control Plane, item 2 de la FASE 58).
 # petgraph es Rust puro y estable. Se fija en la 0.7 A PROPOSITO: `prost-build`
 # (build-dependency de aegis-server via tonic-build) YA arrastra petgraph 0.7.1,

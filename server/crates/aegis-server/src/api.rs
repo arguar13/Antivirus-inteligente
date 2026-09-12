@@ -68,6 +68,8 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         // Respuesta de un clic
         .route("/api/agentes/{cn}/aislar", post(aislar))
         .route("/api/agentes/{cn}/liberar", post(liberar))
+        // Ingesta del colector de identidad (eventos 4769 normalizados): el motor
+        // ITDR corre en vivo y el orquestador remedia solo las detecciones criticas.
         // Politica global y motor de reglas
         .route("/api/politicas", post(publicar_politica))
         .route("/api/reglas", get(listar_reglas).post(crear_regla))
