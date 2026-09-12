@@ -20,12 +20,17 @@ use serde::Deserialize;
 
 use crate::cache::Cache;
 use crate::dominio::ServicioFlota;
+use crate::remediacion::{EjecutorFlota, RespondedorItdr};
 
 /// Estado compartido por los manejadores de la API.
 #[derive(Clone)]
 pub struct EstadoApi {
     /// Nucleo de dominio.
     pub servicio: Arc<ServicioFlota>,
+    /// Puente vivo ITDR -> orquestador de remediacion (FASE 64 / AI-RO): corre el
+    /// motor de identidad sobre la telemetria que sube el colector y remedia
+    /// automaticamente las detecciones criticas.
+    pub respondedor: Arc<RespondedorItdr<EjecutorFlota>>,
     /// Cache de sesiones y reputacion.
     pub cache: Cache,
     /// Margen en segundos para considerar conectado a un agente.
@@ -61,6 +66,9 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         // Respuesta de un clic
         .route("/api/agentes/{cn}/aislar", post(aislar))
         .route("/api/agentes/{cn}/liberar", post(liberar))
+        // Ingesta del colector de identidad (eventos 4769 normalizados): el motor
+        // ITDR corre en vivo y el orquestador remedia solo las detecciones criticas.
+        .route("/api/itdr/telemetria", post(ingerir_telemetria_identidad))
         // Politica global y motor de reglas
         .route("/api/politicas", post(publicar_politica))
         .route("/api/reglas", get(listar_reglas).post(crear_regla))
@@ -417,6 +425,68 @@ async fn liberar(
     Path(cn): Path<String>,
 ) -> axum::response::Response {
     cambiar_aislamiento(estado, cabeceras, cn, false).await
+}
+
+/// Cuerpo de la ingesta de telemetria de identidad que sube el colector del
+/// Controlador de Dominio.
+#[derive(Deserialize)]
+struct IngestaIdentidad {
+    /// Agente/DC que aporta la telemetria (el `cn` de origen).
+    origen: String,
+    /// El lote de telemetria de identidad a correlacionar.
+    telemetria: crate::itdr::TelemetriaIdentidad,
+}
+
+/// Ingiere un lote de telemetria de identidad (eventos 4769 normalizados), lo
+/// correlaciona EN VIVO con el motor ITDR y remedia automaticamente las
+/// detecciones criticas via el orquestador.
+///
+/// Es el seam del colector: la captura real de los eventos de la KDC en un
+/// Controlador de Dominio es el muro declarado del ITDR; este endpoint es donde
+/// ese colector los sube para cerrar el lazo deteccion -> respuesta.
+async fn ingerir_telemetria_identidad(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Json(cuerpo): Json<IngestaIdentidad>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    match estado
+        .respondedor
+        .procesar(&cuerpo.telemetria, &cuerpo.origen)
+        .await
+    {
+        Ok(informes) => {
+            let remediaciones: Vec<serde_json::Value> = informes
+                .iter()
+                .map(|inf| {
+                    let ok = inf.resultados.iter().filter(|r| r.exito()).count();
+                    serde_json::json!({
+                        "clase": format!("{:?}", inf.clase),
+                        "objetivo": inf.objetivo.host,
+                        "sujeto": inf.objetivo.sujeto,
+                        "estado": format!("{:?}", inf.estado),
+                        "acciones_ok": ok,
+                        "acciones_fallidas": inf.resultados.len() - ok,
+                    })
+                })
+                .collect();
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "remediaciones_lanzadas": remediaciones.len(),
+                    "remediaciones": remediaciones,
+                })),
+            )
+                .into_response()
+        }
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 /// Cambia el aislamiento de un endpoint y encola el comando correspondiente.

@@ -142,9 +142,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
     let tarea_correlador = tokio::spawn(correlador.correr());
 
+    // --- Lazo de defensa: ITDR -> orquestador de remediacion (AI-RO) --------
+    // El puente vivo entre el motor de identidad y la respuesta automatica: la
+    // telemetria que sube el colector por /api/itdr/telemetria correlaciona en
+    // vivo, y las detecciones criticas disparan el playbook sobre la flota sin
+    // esperar a un humano. El ejecutor real ordena via `encolar_comando`, el mismo
+    // mecanismo que el aislamiento manual del panel.
+    let ejecutor_flota =
+        aegis_server::remediacion::EjecutorFlota::nuevo(servicio.almacen().clone());
+    let respondedor = Arc::new(aegis_server::remediacion::RespondedorItdr::nuevo(
+        aegis_server::itdr::MotorItdr::nuevo(),
+        aegis_orchestrator::Orquestador::nuevo(),
+        servicio.bus().clone(),
+        ejecutor_flota,
+    ));
+
     // --- API REST del panel -------------------------------------------------
     let estado_api = api::EstadoApi {
         servicio: servicio.clone(),
+        respondedor,
         cache: cache.clone(),
         margen_desconexion_seg: cfg.margen_desconexion.as_secs() as i64,
         difusion: Some(difusion_cuarentena),

@@ -66,6 +66,7 @@ name = "aegis-itdr"
 version = "0.1.0"
 dependencies = [
  "petgraph",
+ "serde",
  "thiserror 2.0.20",
 ]
 
@@ -122,9 +123,11 @@ dependencies = [
  "aegis-firmware",
  "aegis-fleet",
  "aegis-itdr",
+ "aegis-orchestrator",
  "aegis-parser",
  "aegis-pqc",
  "aegis-selfdefense",
+ "async-trait",
  "axum",
  "chrono",
  "ed25519-dalek",

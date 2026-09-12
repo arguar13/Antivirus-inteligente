@@ -73,6 +73,20 @@ pub enum EventoPanel {
         /// Operador que lo ordeno.
         por: String,
     },
+    /// El orquestador de remediacion (AI-RO) lanzo un playbook automatico ante
+    /// una deteccion critica del motor ITDR.
+    RemediacionAutomatica {
+        /// Endpoint sobre el que se actuo.
+        cn: String,
+        /// Clase de amenaza que lo disparo (Golden Ticket, ...).
+        clase: String,
+        /// Cuenta o identidad implicada.
+        sujeto: String,
+        /// Acciones del playbook que se ordenaron con exito.
+        acciones_ok: usize,
+        /// Acciones que fallaron (el playbook es resiliente a fallos parciales).
+        acciones_fallidas: usize,
+    },
     /// Una heuristica global ha encontrado una campana distribuida.
     ///
     /// Se publica SOLO cuando la correlacion se abre por primera vez, no en

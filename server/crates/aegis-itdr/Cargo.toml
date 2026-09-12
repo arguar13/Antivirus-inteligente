@@ -13,6 +13,10 @@ workspace = true
 [dependencies]
 # Errores nombrados y sin ambiguedad, igual que el resto del proyecto.
 thiserror = "2"
+# La telemetria de identidad (Identidad, EventoKdc, UsoServicio, ...) viaja por el
+# wire desde el colector del Controlador de Dominio hasta el plano de control: son
+# tipos de wire y se (de)serializan con serde.
+serde = { version = "1", features = ["derive"] }
 # Grafo de identidad en memoria (motor del Control Plane, item 2 de la FASE 58).
 # petgraph es Rust puro y estable. Se fija en la 0.7 A PROPOSITO: `prost-build`
 # (build-dependency de aegis-server via tonic-build) YA arrastra petgraph 0.7.1,

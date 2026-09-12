@@ -42,7 +42,9 @@ use crate::{ClaseAmenaza, Deteccion, ItdrError, Severidad};
 /// Nivel de privilegio de una identidad. El orden de declaracion es el orden de
 /// privilegio: `Usuario` es el mas bajo, `AdminDominio` el mas alto. Una escalada
 /// es alcanzar un nivel estrictamente mayor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum Nivel {
     /// Usuario raso.
     Usuario,
@@ -55,7 +57,7 @@ pub enum Nivel {
 }
 
 /// Clase de una identidad, para dar contexto legible a la evidencia.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ClaseIdentidad {
     /// Una persona.
     Usuario,
@@ -68,7 +70,7 @@ pub enum ClaseIdentidad {
 }
 
 /// Una identidad: el nodo del grafo.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Identidad {
     /// Nombre unico (p. ej. `alice`, `svc-backup`, `Domain Admins`).
     pub nombre: String,
@@ -92,7 +94,7 @@ impl Identidad {
 
 /// Una relacion observada entre dos identidades: la arista dirigida `origen ->
 /// destino` significa "controlar `origen` permite obtener/actuar como `destino`".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Relacion {
     /// El proceso corre como esta identidad (token primario, `euid`).
     ActuaComo,

@@ -28,7 +28,7 @@ use aegis_itdr::{ClaseAmenaza, Deteccion, ItdrError, Severidad};
 use crate::eventos::EventoPanel;
 
 /// Una relacion de identidad observada en la flota (una arista del grafo).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AristaObservada {
     /// Identidad de origen (la que gana el acceso).
     pub origen: String,
@@ -55,7 +55,7 @@ impl AristaObservada {
 }
 
 /// Un lote de telemetria de identidad que sube la flota al plano de control.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct TelemetriaIdentidad {
     /// Identidades a dar de alta o refrescar en el grafo antes de correlacionar.
     pub identidades: Vec<Identidad>,

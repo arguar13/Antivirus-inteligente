@@ -25,7 +25,7 @@ use crate::ItdrError;
 /// La distincion que importa para la deteccion: **RC4 es crackeable offline**
 /// mucho mas rapido que AES, asi que un atacante que va a robar un ticket para
 /// romperlo pide RC4 a proposito (un "degradado"). DES esta roto de fabrica.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TipoCifrado {
     /// `des-cbc-crc` (etype 1). Legado, roto.
     DesCbcCrc,
@@ -97,7 +97,7 @@ impl TipoCifrado {
 
 /// Clase de evento que registra la KDC. Se corresponde con los eventos del
 /// Registro de Seguridad de Windows en un Controlador de Dominio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TipoEventoKdc {
     /// Se pidio un TGT: el usuario se autentico (evento 4768, `AS-REQ`).
     SolicitudTgt,
@@ -111,7 +111,7 @@ pub enum TipoEventoKdc {
 }
 
 /// Un evento de la KDC, normalizado desde el Registro de Seguridad / ETW.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EventoKdc {
     /// Que clase de operacion de Kerberos.
     pub tipo: TipoEventoKdc,
@@ -169,7 +169,7 @@ impl EventoKdc {
 /// El uso de un ticket de servicio contra un recurso, observado en el propio
 /// servicio (no en la KDC). Es la contraparte que permite ver un Silver Ticket:
 /// un ticket que se USA sin que la KDC lo haya EMITIDO.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UsoServicio {
     /// Cuenta que presenta el ticket.
     pub cuenta: String,

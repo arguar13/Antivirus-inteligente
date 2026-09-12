@@ -41,6 +41,12 @@ aegis-selfdefense = { path = "../../../crates/aegis-selfdefense" }
 # escaladas de privilegio sobre el grafo de identidad de la flota. Vive en este
 # mismo workspace (el motor de grafos es cosa del Control Plane, no del agente).
 aegis-itdr = { path = "../aegis-itdr" }
+# Orquestador de remediacion (FASE 64): la maquina de estados que, ante una
+# deteccion critica del ITDR, dispara el playbook de respuesta sobre la flota.
+aegis-orchestrator = { path = "../aegis-orchestrator" }
+# El trait EjecutorRemediacion del orquestador es asincrono y se implementa aqui
+# contra el almacen real (encolar_comando).
+async-trait = "0.1"
 getrandom = "0.2"
 
 # --- Runtime asincrono ------------------------------------------------------
