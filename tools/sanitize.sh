@@ -27,6 +27,8 @@ CRATES=(
     aegis-syscallguard # ptrace, perf_event_open
     aegis-firmware    # parsers de bytes de firmware
     aegis-fleet       # parsers de red y cripto
+    aegis-memhunter   # pread sobre pagemap, process_vm_readv, mmap/mprotect en las
+                      # pruebas vivas: toda la ruta unsafe de la FASE 65
 )
 
 if ! rustup toolchain list 2>/dev/null | grep -q nightly; then

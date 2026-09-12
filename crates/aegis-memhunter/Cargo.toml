@@ -1,0 +1,24 @@
+[package]
+name = "aegis-memhunter"
+description = "AegisMemHunter: analisis de VAD y de la tabla de paginas (PTE) para delatar codigo sin fichero, inyeccion reflexiva y module stomping, sin leer la memoria del proceso"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# Solo para las rutas EN VIVO: `pread` sobre /proc/<pid>/pagemap y la lectura de
+# memoria ajena para confirmar una cabecera de imagen. El decisor —lo que puede
+# estar mal de forma peligrosa— no usa libc para nada.
+libc = "0.2"
+
+[dev-dependencies]
+# Las pruebas EN VIVO construyen las anomalias de verdad en el propio proceso:
+# mapean una region RWX anonima, y fuerzan un copy-on-write sobre una pagina de
+# codigo respaldada por fichero. No hay imitacion posible de eso.
+libc = "0.2"

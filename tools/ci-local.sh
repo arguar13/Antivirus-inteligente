@@ -229,6 +229,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "orchestrator" ]; then
     fi
 fi
 
+# AegisMemHunter (VAD/PTE, FASE 65): a diferencia del resto de fases de hardware,
+# esta NO tiene muro en Linux. El contrato con el kernel —la semantica del bit 61
+# de pagemap, de la que depende TODA la deteccion de module stomping— se comprueba
+# construyendo cada estado de pagina de verdad, y las dos tecnicas (carga reflexiva
+# y sobrescritura de codigo de un modulo) se construyen enteras en un proceso vivo
+# y se cazan leyendo /proc autentico. Lo unico gated son los VAD de Windows, cuyo
+# ABI si se verifica en compilacion.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "memhunter" ]; then
+    printf '%s==>%s AegisMemHunter · VAD/PTE contra codigo sin fichero y module stomping\n' "$GRIS" "$FIN"
+    if ./tools/verificar-memhunter.sh > /tmp/aegis-memhunter-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-memhunter-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-memhunter-ci.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena
