@@ -29,6 +29,8 @@ CRATES=(
     aegis-fleet       # parsers de red y cripto
     aegis-memhunter   # pread sobre pagemap, process_vm_readv, mmap/mprotect en las
                       # pruebas vivas: toda la ruta unsafe de la FASE 65
+    aegis-l7hunter    # parseo de ELF de ficheros arbitrarios y decodificacion de
+                      # registros del ring buffer: los dos son entrada hostil
 )
 
 if ! rustup toolchain list 2>/dev/null | grep -q nightly; then

@@ -8,7 +8,16 @@ pub mod abi;
 pub mod baliza;
 pub mod elf;
 pub mod l7;
+pub mod modelo;
 pub mod objetivo;
+
+/// El clasificador de canales C2 empotrado en el binario del agente.
+///
+/// Poco mas de un kilobyte: cabe de sobra y no necesita un fichero externo que
+/// un atacante pueda borrar o sustituir. El modelo de PRODUCCION —entrenado
+/// sobre la telemetria real de la flota— llega por el canal firmado de
+/// `aegis-update` con la misma forma de grafo y la misma dimension de entrada.
+pub const MODELO_C2: &[u8] = include_bytes!("../models/aegis-c2-l7-v1.onnx");
 
 /// Error del cazador L7.
 #[derive(Debug, thiserror::Error)]

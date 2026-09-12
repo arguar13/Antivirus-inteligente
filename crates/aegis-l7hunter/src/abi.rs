@@ -26,9 +26,13 @@ pub const CARGA_MAX: usize = 1024;
 pub const COMM_MAX: usize = 16;
 
 /// Direccion del trafico respecto al proceso observado.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Direccion {
     /// El proceso ENVIA: capturado en la entrada de `SSL_write`, en claro.
+    ///
+    /// Es el valor por defecto porque es el lado que INICIA, y es sobre el que
+    /// se mide el ritmo de una sesion (ver `crate::modelo`).
+    #[default]
     Saliente,
     /// El proceso RECIBE: capturado en el retorno de `SSL_read`, ya descifrado.
     Entrante,

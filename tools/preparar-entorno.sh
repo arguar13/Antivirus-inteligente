@@ -127,5 +127,7 @@ generar_modelo crates/aegis-ml/models/aegis-static-v1.onnx \
     crates/aegis-ml/tools/build_model.py "modelo estatico (aegis-ml)"
 generar_modelo crates/aegis-edgeml/models/aegis-behavior-v1.onnx \
     crates/aegis-edgeml/tools/build_behavior_model.py "modelo de comportamiento (aegis-edgeml)"
+generar_modelo crates/aegis-l7hunter/models/aegis-c2-l7-v1.onnx \
+    crates/aegis-l7hunter/tools/build_c2_model.py "modelo de canales C2 (aegis-l7hunter)"
 
 echo "== Entorno listo. Ya se puede correr 'make ci'. =="

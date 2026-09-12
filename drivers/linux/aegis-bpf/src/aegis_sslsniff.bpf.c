@@ -100,11 +100,12 @@ struct {
 /*
  * Filtro de PIDs a observar.
  *
- * Vacio = observar TODO. Con entradas, solo esos procesos. El filtrado ocurre
+ * La entrada 0 es un COMODIN que significa "observar todo". El filtrado ocurre
  * DENTRO del kernel a proposito: emitir todo el trafico TLS de una maquina y
- * filtrar en Ring 3 desperdiciaria el ancho de banda del ring, que es el
- * recurso escaso, y ademas obligaria a que el texto plano de procesos que no
- * interesan cruzara la frontera al espacio de usuario sin necesidad.
+ * filtrar en Ring 3 desperdiciaria el ancho de banda del ring, que es el recurso
+ * escaso, y ademas haria que el texto plano de procesos que no interesan cruzara
+ * al espacio de usuario sin necesidad. Eso ultimo no es solo rendimiento: es el
+ * correo, la banca y las sesiones de trabajo de la persona que usa la maquina.
  */
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -112,6 +113,29 @@ struct {
     __type(key, __u32);   /* PID */
     __type(value, __u8);  /* 1 = observar */
 } aegis_l7_objetivos SEC(".maps");
+
+/*
+ * PIDs que NUNCA se observan, comprobado ANTES que el comodin.
+ *
+ * POR QUE ESTO NO ES OPCIONAL
+ * --------------------------
+ * El propio agente habla TLS con su Control Plane. Con el comodin activo se
+ * observaria a si mismo: cada evento que emite viaja por TLS, ese envio dispara
+ * el uprobe, que emite otro evento, que viaja por TLS... Es una realimentacion
+ * positiva que satura el ring, la CPU y el enlace, y que ademas mete el contenido
+ * del canal de gestion —incluidos los veredictos— dentro de la propia telemetria.
+ *
+ * No se resuelve "acordandose" de excluirlo desde Ring 3: si el agente engancha
+ * primero y puebla el filtro despues, la realimentacion ya arranco. Por eso la
+ * exclusion es un mapa aparte que se consulta PRIMERO y que el agente escribe
+ * ANTES de adjuntar ninguna sonda.
+ */
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 64);
+    __type(key, __u32);   /* PID excluido */
+    __type(value, __u8);
+} aegis_l7_excluidos SEC(".maps");
 
 /*
  * Contadores de salud. Un EDR tiene que saber cuanto NO vio: un ring que
@@ -139,14 +163,15 @@ static __always_inline void contar(__u32 cual)
         __sync_fetch_and_add(c, 1);
 }
 
-/* `true` si este PID hay que observarlo. Mapa vacio = observar todo. */
+/* `true` si este PID hay que observarlo. */
 static __always_inline int observado(__u32 pid)
 {
-    /* Una sola busqueda: si el mapa esta vacio, `lookup` falla igual que si el
-     * PID no esta. Para distinguir "vacio" de "no esta" habria que llevar la
-     * cuenta aparte, y no compensa: el agente puebla el mapa con los procesos
-     * que hablan TLS antes de enganchar, asi que el caso normal es que este
-     * poblado. La entrada 0 actua de comodin. */
+    /* La EXCLUSION va primero, y gana siempre. Es lo que impide que el agente se
+     * observe a si mismo y entre en realimentacion (ver `aegis_l7_excluidos`). */
+    if (bpf_map_lookup_elem(&aegis_l7_excluidos, &pid))
+        return 0;
+
+    /* La entrada 0 es el comodin "observar todo". */
     __u32 comodin = 0;
     if (bpf_map_lookup_elem(&aegis_l7_objetivos, &comodin))
         return 1;

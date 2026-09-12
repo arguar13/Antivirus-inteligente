@@ -163,6 +163,29 @@ impl Metricas {
         self.media_seg * self.intervalos as f64
     }
 
+    /// Estimacion robusta del **jitter configurado** en el implante: `2·MAD/mediana`.
+    ///
+    /// Es evidencia de primer orden para el analista: no solo "esto es una
+    /// baliza", sino "esta configurada con un 40 % de jitter y un sueno de 60 s",
+    /// que es un indicador de campana cotejable con inteligencia externa.
+    ///
+    /// La estimacion es **exacta** para el modelo simetrico `U[S(1-j), S(1+j)]`:
+    /// ahi la mediana es `S` y la MAD es `S·j/2`, luego `2·MAD/mediana = j`. Para
+    /// el modelo de un solo lado `U[S(1-J), S]` devuelve `J/(2-J)`, que no es `J`
+    /// pero SI es monotona creciente en `J`, asi que ordena correctamente. Se
+    /// documenta la diferencia en vez de afirmar una exactitud que solo tiene en
+    /// uno de los dos casos.
+    ///
+    /// Robusta por construccion: usa MAD y mediana, asi que un corte de red no la
+    /// falsea.
+    #[must_use]
+    pub fn jitter_estimado(&self) -> f64 {
+        if self.mediana_seg <= 0.0 {
+            return 0.0;
+        }
+        (2.0 * self.mad_seg / self.mediana_seg).clamp(0.0, 1.0)
+    }
+
     /// Calcula las metricas a partir de los intervalos ya medidos, en segundos.
     ///
     /// Devuelve `None` con menos de un intervalo, o si la media es cero (todos
@@ -239,9 +262,13 @@ fn mediana_de(v: &[f64]) -> f64 {
 }
 
 /// Lo que se concluye de una serie.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum Veredicto {
     /// No hay muestra suficiente para afirmar nada.
+    ///
+    /// Es el valor POR DEFECTO a proposito: ante la ausencia de datos, un
+    /// detector tiene que decir "no se", nunca "no hay nada".
+    #[default]
     SinMuestra,
     /// La serie es irregular: trafico normal.
     Irregular,
@@ -443,6 +470,56 @@ mod pruebas {
                     analizar(&marcas).veredicto.es_baliza(),
                     "sueno={sueno}s jitter={jitter} tiene que detectarse (CV={})",
                     m.cv
+                );
+            }
+        }
+    }
+
+    /// LA COTA VALE PARA LOS DOS MODELOS DE JITTER QUE SE USAN EN LA PRACTICA.
+    ///
+    /// Un implante puede implementar el jitter de dos formas: restando
+    /// (`U[S(1-j), S]`, que es lo que hace Cobalt Strike) o alrededor del sueno
+    /// (`U[S(1-j), S(1+j)]`). Las dos llegan al MISMO maximo, y no por casualidad:
+    ///
+    /// - un solo lado: `CV_max = 2/sqrt(12)`
+    /// - simetrico:    `CV_max = 1/sqrt(3)`
+    ///
+    /// y `2/sqrt(12) = 2/(2·sqrt(3)) = 1/sqrt(3)`. Son el mismo numero. Por eso la
+    /// cota no depende de como el atacante haya decidido implementar su jitter,
+    /// que es justo lo que hace util a esta deteccion.
+    #[test]
+    fn la_cota_vale_igual_para_el_jitter_simetrico() {
+        // Identidad algebraica, para que quede fijada y no se pierda.
+        assert!((2.0 / 12f64.sqrt() - 1.0 / 3f64.sqrt()).abs() < 1e-15);
+        assert!((CV_MAXIMO_BALIZA - 1.0 / 3f64.sqrt()).abs() < 1e-15);
+
+        // Y sobre series generadas con el modelo simetrico.
+        for sueno in [1.0, 30.0, 600.0] {
+            for j in [0.1, 0.3, 0.5, 0.8, 1.0] {
+                let mut azar = Azar::nuevo(0x5157);
+                let mut t = 1_000_000_000u64;
+                let mut marcas = vec![t];
+                for _ in 0..300 {
+                    // U[S(1-j), S(1+j)]
+                    let d = sueno * (1.0 - j + 2.0 * j * azar.uniforme());
+                    t += (d * 1e9) as u64;
+                    marcas.push(t);
+                }
+                let m = Metricas::de_marcas_ns(&marcas).expect("serie valida");
+                assert!(
+                    m.cv <= CV_MAXIMO_BALIZA * MARGEN_MUESTRAL,
+                    "simetrico sueno={sueno}s j={j}: CV={} supera la cota",
+                    m.cv
+                );
+                assert!(
+                    analizar(&marcas).veredicto.es_baliza(),
+                    "simetrico sueno={sueno}s j={j} tiene que detectarse"
+                );
+                // Y el estimador recupera el jitter configurado.
+                assert!(
+                    (m.jitter_estimado() - j).abs() < 0.12,
+                    "j real={j}, estimado={}",
+                    m.jitter_estimado()
                 );
             }
         }

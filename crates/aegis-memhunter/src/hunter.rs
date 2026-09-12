@@ -1424,16 +1424,42 @@ mod pruebas_vivas {
         };
         let pid = hijo.id() as i32;
 
-        let resultado = cazar(pid, &AegisMemHunter::nuevo());
+        // SE ESPERA A QUE EL HIJO ESTE EN PIE, y esto no es defensivo de adorno:
+        // entre `spawn` y que el enlazador dinamico haya mapeado las bibliotecas
+        // pasa un intervalo, y durante el /proc/<pid>/smaps del hijo tiene cuatro
+        // regiones. Sin la espera, la prueba pasa al ejecutarla sola y falla bajo
+        // la carga de `cargo test --all`, que es la peor clase de prueba: una que
+        // falla por el planificador y no por el producto.
+        let cazador = AegisMemHunter::nuevo();
+        let mut resultado = None;
+        for _ in 0..100 {
+            match cazar(pid, &cazador) {
+                Ok(i) if i.regiones_examinadas > 5 => {
+                    resultado = Some(Ok(i));
+                    break;
+                }
+                // Todavia arrancando: se reintenta.
+                Ok(_) => {}
+                Err(e) => {
+                    resultado = Some(Err(e));
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
         let _ = hijo.kill();
         let _ = hijo.wait();
 
         let inf = match resultado {
-            Ok(i) => i,
-            Err(e) => {
+            Some(Ok(i)) => i,
+            Some(Err(e)) => {
                 // Leer la memoria y la tabla de paginas de otro proceso necesita
                 // privilegios. Donde no los haya se DICE, no se finge que paso.
                 eprintln!("OMITIDA: no se pudo inspeccionar el proceso hijo: {e}");
+                return;
+            }
+            None => {
+                eprintln!("OMITIDA: el proceso hijo no llego a mapear sus bibliotecas");
                 return;
             }
         };

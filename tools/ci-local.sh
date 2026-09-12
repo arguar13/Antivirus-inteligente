@@ -229,6 +229,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "orchestrator" ]; then
     fi
 fi
 
+# AegisL7Hunter (uprobes de TLS, FASE 66): los nueve programas eBPF ante el
+# verificador REAL del kernel, el ABI del evento cotejado C<->Rust con los dos
+# compiladores, la resolucion del objetivo del uprobe contra los binarios reales
+# de esta maquina y la matematica de balizas con su cota teorica. El muro es
+# enganchar en un proceso vivo que hable TLS.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "l7hunter" ]; then
+    printf '%s==>%s AegisL7Hunter · inspeccion L7 de TLS por uprobes y caza de balizas C2\n' "$GRIS" "$FIN"
+    if ./tools/verificar-l7hunter.sh > /tmp/aegis-l7hunter-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-l7hunter-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-l7hunter-ci.log | tail -25
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemHunter (VAD/PTE, FASE 65): a diferencia del resto de fases de hardware,
 # esta NO tiene muro en Linux. El contrato con el kernel —la semantica del bit 61
 # de pagemap, de la que depende TODA la deteccion de module stomping— se comprueba
