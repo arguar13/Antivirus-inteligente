@@ -1,0 +1,30 @@
+[package]
+name = "aegis-fwaudit"
+description = "AegisFirmwareAudit: auditoria estrictamente de solo lectura del firmware — tablas ACPI (WPBT) y ROM SPI (descriptor Intel, volumenes UEFI y ficheros FFS) contra implantes de plataforma"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# El tri-estado del informe (Ok / Fallo / NoAplicable / Indeterminado) y el tipo
+# Guid ya existen en la FASE 26 y se reutilizan: dos escalas de veredicto para el
+# mismo subsistema harian que "no aplicable" y "fallo" se confundieran, que es
+# justo el falso positivo que ese enumerado existe para impedir.
+aegis-firmware = { path = "../aegis-firmware" }
+# SHA-256 de cada fichero FFS, para cotejarlo con la linea base conocida.
+sha2 = "0.10"
+thiserror = "2"
+# SOLO para las banderas de apertura (O_RDONLY|O_CLOEXEC|O_NOFOLLOW). No se usa
+# para escribir nada: ver `solo_lectura`.
+libc = "0.2"
+
+[dev-dependencies]
+# La prueba de la garantia de solo lectura SI necesita intentar escribir de
+# verdad sobre el descriptor y comprobar que el KERNEL lo rechaza. Afirmar la
+# garantia sin ejercerla contra el kernel seria afirmarla sobre el papel.
+libc = "0.2"

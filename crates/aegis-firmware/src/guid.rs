@@ -10,7 +10,15 @@
 //! aqui, en un solo sitio con pruebas.
 
 /// Un GUID de EFI, guardado en su forma de cable (los 16 bytes tal cual).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Lleva `Ord` porque un GUID es, en el fondo, un array de bytes ordenable, y
+/// eso permite indexar por el en un `BTreeMap` — que es lo que hace la linea base
+/// de firmware de la FASE 67—. El orden es el de los bytes de cable, no el del
+/// texto con guiones: no se usa para presentar nada, solo para indexar de forma
+/// DETERMINISTA. Con un mapa de dispersion, dos auditorias de la misma maquina
+/// recorrerian los ficheros en ordenes distintos y compararlas dejaria de ser
+/// trivial.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Guid(pub [u8; 16]);
 
 impl Guid {

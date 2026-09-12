@@ -31,6 +31,12 @@ CRATES=(
                       # pruebas vivas: toda la ruta unsafe de la FASE 65
     aegis-l7hunter    # parseo de ELF de ficheros arbitrarios y decodificacion de
                       # registros del ring buffer: los dos son entrada hostil
+    aegis-fwaudit     # el crate es #![forbid(unsafe_code)], pero lo que analiza
+                      # —tablas ACPI del firmware, imagenes de ROM SPI, volumenes
+                      # UEFI y ficheros FFS— es la entrada mas hostil que hay: la
+                      # escribe algo que se ejecuta ANTES que el sistema operativo.
+                      # ASan aqui no busca unsafe propio, busca que ningun indice
+                      # calculado a partir de esos bytes se salga de su buffer
 )
 
 if ! rustup toolchain list 2>/dev/null | grep -q nightly; then

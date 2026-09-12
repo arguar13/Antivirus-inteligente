@@ -48,6 +48,7 @@ members = [
     "crates/aegis-cloudnative",
     "crates/aegis-memhunter",
     "crates/aegis-l7hunter",
+    "crates/aegis-fwaudit",
 ]
 
 [workspace.package]

@@ -265,6 +265,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "memhunter" ]; then
     fi
 fi
 
+# AegisFirmwareAudit (ROM SPI y tablas ACPI, FASE 67): la unica fase donde el
+# riesgo no es dejar de detectar sino ESCRIBIR —una escritura en la ROM SPI deja
+# la placa inservible sin recuperacion por software—, asi que lo primero que el
+# script ejerce no es deteccion, es inocuidad: write, pwrite y ftruncate sobre el
+# descriptor que usa el crate tienen que dar EBADF, llamados de verdad al kernel.
+# Las tablas ACPI REALES de esta maquina se parsean y sus checksums cuadran; el
+# muro es LEER la ROM, que exige que el kernel exponga la flash como MTD.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fwaudit" ]; then
+    printf '%s==>%s AegisFirmwareAudit · auditoria de ROM SPI y ACPI, estrictamente de solo lectura\n' "$GRIS" "$FIN"
+    if ./tools/verificar-fwaudit.sh > /tmp/aegis-fwaudit-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-fwaudit-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-fwaudit-ci.log | tail -25
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena
