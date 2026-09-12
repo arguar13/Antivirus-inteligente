@@ -1,0 +1,24 @@
+[package]
+name = "aegis-swarm"
+description = "Enjambre autonomo: nucleo sans-io del protocolo de reparto de inteligencia y ordenes de contencion entre agentes aislados del plano de control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# SIN DEPENDENCIAS EXTERNAS NUEVAS, a proposito. Este crate se enlaza dentro del
+# agente, que corre con privilegios en cada endpoint y cuyo arbol de dependencias
+# ES superficie de ataque. El transporte —libp2p, con sus 340 crates y su runtime
+# async— vive fuera, en `swarm-net/`, y consume este nucleo. Ver el modulo raiz.
+[dependencies]
+aegis-sync = { path = "../aegis-sync" }
+aegis-update = { path = "../aegis-update" }
+sha2 = "0.10"
+thiserror = "2"
+
+[dev-dependencies]
+aegis-pqc = { path = "../aegis-pqc" }

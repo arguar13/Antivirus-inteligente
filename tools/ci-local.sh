@@ -284,6 +284,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fwaudit" ]; then
     fi
 fi
 
+# AegisSwarm (enjambre autonomo, FASE 68): la pregunta que decide la fase es que
+# consigue el atacante que comprometa UN endpoint si un agente puede decirle al
+# enjambre "aisla al equipo X". La respuesta del diseno —el enjambre TRANSPORTA
+# autoridad, no la CONCEDE— se ejerce entera, incluido el ataque central:
+# reproducir una orden ANTIGUA Y AUTENTICA durante el corte, que ninguna firma
+# puede distinguir y que corta la epoca monotona. El transporte libp2p no se da
+# por bueno porque compile: dos nodos reales por loopback.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "swarm" ]; then
+    printf '%s==>%s AegisSwarm · enjambre autonomo con el plano de control caido\n' "$GRIS" "$FIN"
+    if ./tools/verificar-swarm.sh > /tmp/aegis-swarm-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-swarm-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-swarm-ci.log | tail -25
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena

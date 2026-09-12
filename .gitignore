@@ -51,3 +51,6 @@ tools/toolchain/imagen/ca/*.crt
 
 # Artefactos de la construccion hermetica (FASE 42).
 dist-hermetico/
+
+# Artefactos de compilacion del transporte del enjambre (workspace aparte).
+/swarm-net/target/

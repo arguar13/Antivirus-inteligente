@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["fuzz"]
+exclude = ["fuzz", "swarm-net"]
 members = [
     "crates/aegis-parser",
     "crates/aegis-hunt",
@@ -49,6 +49,7 @@ members = [
     "crates/aegis-memhunter",
     "crates/aegis-l7hunter",
     "crates/aegis-fwaudit",
+    "crates/aegis-swarm",
 ]
 
 [workspace.package]

@@ -1,0 +1,54 @@
+# Workspace APARTE, excluido del workspace del agente a proposito.
+#
+# Aqui vive el transporte libp2p de la FASE 68: gossipsub sobre TCP con Noise y
+# Yamux, y mDNS para descubrir vecinos en una red local sin infraestructura.
+#
+# POR QUE NO ESTA EN EL WORKSPACE DEL AGENTE, medido y no opinado:
+#
+#   este arbol            340 crates transitivos, runtime tokio
+#   el agente             presupuesto de 45 MB de RSS, sincrono, panic=abort,
+#                         y el arbol de dependencias tratado como superficie de
+#                         ataque
+#
+# El agente corre con privilegios en CADA endpoint. Meterle 340 crates que
+# analizan entrada hostil de la red es el riesgo de cadena de suministro que un
+# fabricante de seguridad no puede asumir; es la misma razon por la que la malla
+# de la FASE 23 se escribio con UDP y un AEAD auditable en un fichero en vez de
+# con QUIC.
+#
+# Lo que se enlaza aqui es `aegis-swarm`, el nucleo sans-io: TODAS las decisiones
+# —confianza, quorum, reproduccion, cotas— viven alli y se prueban alli sin red.
+# Este binario solo mueve bytes.
+[workspace]
+resolver = "2"
+members = ["."]
+
+[package]
+name = "aegis-swarm-net"
+description = "Transporte libp2p (gossipsub) para el enjambre AegisSwarm: mueve bytes, no toma decisiones"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "AGPL-3.0-only"
+repository = "https://github.com/arguar13/Antivirus-inteligente"
+
+[dependencies]
+aegis-swarm = { path = "../crates/aegis-swarm" }
+libp2p = { version = "0.56", default-features = false, features = [
+    "gossipsub",
+    "identify",
+    "macros",
+    "mdns",
+    "noise",
+    "tcp",
+    "tokio",
+    "yamux",
+] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+futures = "0.3"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+aegis-pqc = { path = "../crates/aegis-pqc" }
+aegis-update = { path = "../crates/aegis-update" }

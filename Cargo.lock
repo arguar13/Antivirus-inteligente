@@ -453,6 +453,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-swarm"
+version = "0.1.0"
+dependencies = [
+ "aegis-pqc",
+ "aegis-sync",
+ "aegis-update",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-sync"
 version = "0.1.0"
 dependencies = [
