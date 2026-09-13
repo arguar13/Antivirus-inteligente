@@ -1,0 +1,24 @@
+[package]
+name = "aegis-enrich"
+description = "Orquestacion de enriquecimiento con declaracion obligatoria de exposicion de datos y modo sin salida"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# El plazo por analizador tiene que cortar a uno que se cuelga SIN esperar a que
+# termine, y eso necesita un runtime: `tokio::time::timeout` sobre las tareas
+# cooperativas y un hilo de bloqueo acotado para las que no lo son.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros", "sync"] }
+# La clave de cache es un resumen del observable, no el observable: una clave que
+# lleva el valor en claro convierte el volcado de la cache en una lista de todo lo
+# que se ha mirado, con rutas y cuentas incluidas.
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "macros", "sync", "test-util"] }

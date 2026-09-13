@@ -458,6 +458,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "case" ]; then
     fi
 fi
 
+# Enriquecimiento con privacidad (FASE 77): consultar por un resumen le dice al
+# proveedor que ese fichero esta en tu red — no es un efecto secundario de la
+# consulta, ES la consulta—, y no se puede retirar. Casi siempre compensa, pero
+# «casi siempre» es una decision, y una decision que nadie ve es un valor por
+# defecto. Se comprueban las cinco cosas que hacen falta para que el marco sirva:
+# el corte de un analizador colgado, el modo sin salida cumplido POR
+# CONSTRUCCION, el saneado de una respuesta manipulada, la cuota bajo
+# concurrencia y una fusion determinista y explicable.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "enrich" ]; then
+    printf '%s==>%s AegisEnrich · preguntar a muchas fuentes sin contar lo que no toca\n' "$GRIS" "$FIN"
+    if ./tools/verificar-enrich.sh > /tmp/aegis-enrich-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-enrich-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-enrich-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena
