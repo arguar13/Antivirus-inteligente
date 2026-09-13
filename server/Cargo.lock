@@ -207,6 +207,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-scale"
+version = "0.1.0"
+dependencies = [
+ "aegis-ingest",
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "aegis-selfdefense"
 version = "0.1.0"
 dependencies = [
@@ -1062,6 +1071,9 @@ name = "fleet-simulator"
 version = "0.1.0"
 dependencies = [
  "aegis-fleet",
+ "aegis-ingest",
+ "aegis-pipeline",
+ "aegis-scale",
  "rustls",
  "rustls-pki-types",
  "tokio",

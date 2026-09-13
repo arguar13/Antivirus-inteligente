@@ -11,6 +11,16 @@ repository.workspace = true
 name = "fleet_simulator"
 path = "src/main.rs"
 
+# La prueba de carga de cien mil agentes va en un binario APARTE y no en un modo
+# del otro, y por una razon concreta: el otro necesita un plano de control
+# levantado, con su CA y su PostgreSQL. Este mide la parte que decide el
+# resultado a esa escala —el reparto, las conexiones y la canalizacion— y corre
+# en cualquier maquina de integracion, que es lo que hace que la cifra este en la
+# puerta de calidad en vez de en un documento que nadie vuelve a reproducir.
+[[bin]]
+name = "escala"
+path = "src/bin/escala.rs"
+
 [lints]
 workspace = true
 
@@ -19,6 +29,11 @@ workspace = true
 # protocolo de cable, con los mismos bytes. Lo unico que cambia es que el
 # transporte es asincrono, que es lo que permite miles de agentes en una maquina.
 aegis-fleet = { path = "../../../crates/aegis-fleet" }
+# Las cuatro piezas que deciden si el plano de control aguanta la flota. La
+# prueba de carga las ejercita de verdad, no una imitacion suya.
+aegis-scale = { path = "../aegis-scale" }
+aegis-pipeline = { path = "../aegis-pipeline" }
+aegis-ingest = { path = "../../../crates/aegis-ingest", default-features = false }
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util", "signal"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

@@ -1,0 +1,23 @@
+[package]
+name = "aegis-scale"
+description = "Plano de control para 100.000 agentes: particionado de flota, conexiones, base de datos y actualizacion progresiva"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# El sorteo y el desfase de reconexion se calculan con un resumen criptografico y
+# no con una mezcla aritmetica barata: una funcion debil CORRELACIONA los pesos de
+# nodos con nombres parecidos —`nodo-1`, `nodo-2`— y entonces el reparto deja de
+# ser uniforme justo en el caso normal, que es nombrar los nodos con un contador.
+sha2 = "0.10"
+# El calendario de particiones reutiliza el de la ingesta en vez de tener otro:
+# dos implementaciones del mismo calendario es la forma de que un dia una
+# particion cubra un rango que la otra no.
+aegis-ingest = { path = "../../../crates/aegis-ingest", default-features = false }
+serde = { version = "1", features = ["derive"] }

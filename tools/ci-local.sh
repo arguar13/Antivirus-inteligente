@@ -399,6 +399,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "detonate" ]; then
     fi
 fi
 
+# Plano de control para 100.000 agentes (FASE 75): la diferencia entre diez
+# agentes y cien mil no es un factor de escala, es un diseno distinto, y los
+# sistemas que no se disenaron para ello no se arreglan anadiendo maquinas. Se
+# comprueban las cuatro cosas que fallan —el reparto que rebaraja la flota al
+# ampliar, la purga que un dia no acaba, la manada que tira al nodo que vuelve, y
+# la actualizacion progresiva que rompe en silencio— con numeros y no con
+# afirmaciones, incluida una prueba de carga de cien mil agentes.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "scale" ]; then
+    printf '%s==>%s AegisScale · plano de control para 100.000 agentes\n' "$GRIS" "$FIN"
+    if ./tools/verificar-scale.sh > /tmp/aegis-scale-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-scale-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-scale-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Ingesta de registros a escala (FASE 74): tragarse lo que ya escribe el resto de
 # la casa —syslog, journald, EVTX, ficheros planos y los planos de control de las
 # nubes— y correlacionarlo con lo propio. Es la superficie MAS ANCHA del
