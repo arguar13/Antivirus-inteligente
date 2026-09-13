@@ -38,6 +38,15 @@ pub enum Componente {
     /// Lo que no cabe aqui no se pierde: vive en disco y se pagina a demanda.
     /// Por eso es el primero en soltarse cuando aprieta.
     Corpus,
+    /// Colas de ingesta de registros y estado de seguimiento de ficheros.
+    /// Elastico.
+    ///
+    /// Es el segundo componente que un atacante empuja a voluntad —el primero
+    /// es la red—: elige cuantas lineas manda a un puerto 514 abierto. Su cuota
+    /// es el techo de las colas en memoria, y cuando se llena la ingesta aplica
+    /// contrapresion y descarta por prioridad CONTANDO lo que tira, en vez de
+    /// comerse la cuota de la deteccion.
+    Ingesta,
     /// Reserva sin asignar. Elastico.
     ///
     /// No es desperdicio: es lo que absorbe la fragmentacion del asignador y
@@ -73,15 +82,23 @@ pub const FIJO_TOTAL: u64 = FIJO_NUCLEO + FIJO_MODELO;
 pub const LINEA_BASE_ARRANQUE: u64 = 32 * 1024 * 1024;
 
 /// Partes de lo elastico que se lleva YARA.
-pub const PARTES_YARA: u64 = 30;
+pub const PARTES_YARA: u64 = 28;
 /// Partes de lo elastico que se lleva la red.
-pub const PARTES_RED: u64 = 25;
+pub const PARTES_RED: u64 = 22;
 /// Partes de lo elastico que se lleva el corpus.
-pub const PARTES_CORPUS: u64 = 30;
+pub const PARTES_CORPUS: u64 = 26;
+/// Partes de lo elastico que se lleva la ingesta de registros.
+///
+/// Doce partes y no mas: la ingesta de registros de terceros es valiosa, pero
+/// no puede comerse la deteccion propia. Un cliente que encamine el syslog de
+/// mil aparatos a un endpoint tiene que notar contrapresion mucho antes de que
+/// el motor de comportamiento empiece a soltar estado.
+pub const PARTES_INGESTA: u64 = 12;
 /// Partes de lo elastico que quedan sin asignar.
-pub const PARTES_MARGEN: u64 = 15;
+pub const PARTES_MARGEN: u64 = 12;
 /// Suma de las partes elasticas.
-pub const PARTES_TOTAL: u64 = PARTES_YARA + PARTES_RED + PARTES_CORPUS + PARTES_MARGEN;
+pub const PARTES_TOTAL: u64 =
+    PARTES_YARA + PARTES_RED + PARTES_CORPUS + PARTES_INGESTA + PARTES_MARGEN;
 
 impl Componente {
     /// Nombre estable para logs y metricas.
@@ -93,6 +110,7 @@ impl Componente {
             Componente::Yara => "yara",
             Componente::Red => "red",
             Componente::Corpus => "corpus",
+            Componente::Ingesta => "ingesta",
             Componente::Margen => "margen",
         }
     }
@@ -105,13 +123,14 @@ impl Componente {
 
     /// Todos los componentes, en orden estable.
     #[must_use]
-    pub fn todos() -> [Componente; 6] {
+    pub fn todos() -> [Componente; 7] {
         [
             Componente::Nucleo,
             Componente::Modelo,
             Componente::Yara,
             Componente::Red,
             Componente::Corpus,
+            Componente::Ingesta,
             Componente::Margen,
         ]
     }
@@ -148,11 +167,16 @@ impl Presupuesto {
             Componente::Yara => parte(PARTES_YARA),
             Componente::Red => parte(PARTES_RED),
             Componente::Corpus => parte(PARTES_CORPUS),
+            Componente::Ingesta => parte(PARTES_INGESTA),
             // El margen recoge el resto de la division entera ademas de su
             // parte, para que el reparto sea exacto y no se pierdan bytes por
             // redondeo en cada consulta.
             Componente::Margen => {
-                elastico - parte(PARTES_YARA) - parte(PARTES_RED) - parte(PARTES_CORPUS)
+                elastico
+                    - parte(PARTES_YARA)
+                    - parte(PARTES_RED)
+                    - parte(PARTES_CORPUS)
+                    - parte(PARTES_INGESTA)
             }
         }
     }
@@ -171,6 +195,7 @@ impl Presupuesto {
             Componente::Yara => PARTES_YARA,
             Componente::Red => PARTES_RED,
             Componente::Corpus => PARTES_CORPUS,
+            Componente::Ingesta => PARTES_INGESTA,
             _ => PARTES_MARGEN,
         };
         (u128::from(elastico_pico) * u128::from(partes) / u128::from(PARTES_TOTAL)) as u64
@@ -218,9 +243,11 @@ mod pruebas {
         assert_eq!(p.elastico(), 48 * MIB - FIJO_TOTAL); // 18 MiB
         assert_eq!(p.cuota(Componente::Nucleo), FIJO_NUCLEO);
         assert_eq!(p.cuota(Componente::Modelo), FIJO_MODELO);
-        // 18 MiB repartidos: YARA 30 %, red 25 %, corpus 30 %, margen 15 %.
-        assert_eq!(p.cuota(Componente::Yara), 18 * MIB * 30 / 100);
-        assert_eq!(p.cuota(Componente::Corpus), 18 * MIB * 30 / 100);
+        // 18 MiB repartidos: YARA 28 %, red 22 %, corpus 26 %, ingesta 12 %,
+        // margen 12 %.
+        assert_eq!(p.cuota(Componente::Yara), 18 * MIB * 28 / 100);
+        assert_eq!(p.cuota(Componente::Corpus), 18 * MIB * 26 / 100);
+        assert_eq!(p.cuota(Componente::Ingesta), 18 * MIB * 12 / 100);
     }
 
     #[test]
@@ -230,8 +257,14 @@ mod pruebas {
         let servidor = Presupuesto::para(768 * GIB).cuota(Componente::Corpus);
         assert!(estacion > pasarela * 2, "{estacion} vs {pasarela}");
         assert!(servidor > estacion * 4, "{servidor} vs {estacion}");
-        // Y en el servidor son mas de 100 MiB de firmas sin tocar disco.
-        assert!(servidor > 100 * MIB, "{servidor}");
+        // Y en el servidor son mas de 90 MiB de firmas sin tocar disco.
+        //
+        // Eran mas de 100 hasta que la ingesta de registros entro en el reparto
+        // con doce partes propias. El numero baja porque hay un consumidor mas
+        // REAL, no porque el corpus encoja: antes esa memoria tambien se usaba,
+        // solo que sin cuota y sin medirse, que es la forma de que un componente
+        // se coma el presupuesto de otro sin que nadie lo vea.
+        assert!(servidor > 90 * MIB, "{servidor}");
     }
 
     #[test]

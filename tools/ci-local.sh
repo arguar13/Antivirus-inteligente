@@ -399,6 +399,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "detonate" ]; then
     fi
 fi
 
+# Ingesta de registros a escala (FASE 74): tragarse lo que ya escribe el resto de
+# la casa —syslog, journald, EVTX, ficheros planos y los planos de control de las
+# nubes— y correlacionarlo con lo propio. Es la superficie MAS ANCHA del
+# producto: un registro lo escribe cualquiera, incluido el atacante, y un puerto
+# 514 abierto no tiene autenticacion ni la va a tener. Lo que se comprueba no es
+# que los formatos se lean, sino las cuatro cosas que separan una canalizacion de
+# un tubo: entrega al-menos-una-vez con punto de control durable, memoria acotada
+# de extremo a extremo, orden por OCURRENCIA y no por llegada, y perdida contada.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ingest" ]; then
+    printf '%s==>%s AegisIngest · registros de cualquier origen, sin perder ni inventar\n' "$GRIS" "$FIN"
+    if ./tools/verificar-ingest.sh > /tmp/aegis-ingest-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-ingest-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-ingest-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena

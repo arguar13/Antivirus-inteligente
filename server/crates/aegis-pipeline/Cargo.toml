@@ -1,0 +1,35 @@
+[package]
+name = "aegis-pipeline"
+description = "Canalizacion de registros del plano de control: nubes, deduplicacion, orden por ocurrencia y cuotas por inquilino"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# EL ESQUEMA ES UNO SOLO.
+#
+# El plano de control habla EXACTAMENTE el mismo esquema que el agente. Si cada
+# lado tuviera su definicion, el dia que divergieran se correlacionarian cosas
+# distintas creyendo que son la misma, y el sintoma serian alertas que no cuadran
+# con la evidencia sin que nadie sepa por que.
+#
+# La caracteristica `endpoint` se apaga: el plano de control no sigue ficheros,
+# no lee /var/log/journal y no tiene el presupuesto de memoria de un endpoint. Lo
+# que se lleva es el esquema, el reloj, el clasificador y los analizadores de
+# syslog y EVTX.
+#
+# La direccion de la dependencia importa y es la correcta: el servidor puede
+# depender del agente porque lo que hay que proteger es que el arbol del AGENTE
+# siga siendo corto y auditable. Al reves contaminaria el endpoint con tokio,
+# axum y trescientos crates mas.
+aegis-ingest = { path = "../../../crates/aegis-ingest", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]

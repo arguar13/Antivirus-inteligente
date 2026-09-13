@@ -1,0 +1,61 @@
+[package]
+name = "aegis-ingest"
+description = "Ingesta y normalizacion de registros de cualquier origen, con contrapresion y punto de control durable"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# UN REGISTRO LO ESCRIBE CUALQUIERA, INCLUIDO EL ATACANTE.
+#
+# Esta es la superficie mas ancha del producto: syslog abierto a la red, ficheros
+# que escriben aplicaciones de terceros, diarios binarios, EVTX de una maquina
+# comprometida. Todo analizador de aqui procesa entrada hostil, asi que se escribe
+# a proposito con topes en cada longitud y sin reservar nunca memoria por lo que
+# declare un campo.
+[dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+# El evento viaja al diario y al plano de control en JSON. serde_json YA esta en
+# el arbol de este workspace (lo usan aegis-cloudnative y aegis-intel), asi que
+# no suma superficie de ataque nueva al agente, y es el mismo formato que ya
+# habla el plano de control: una representacion menos que mantener.
+serde_json = "1"
+# El identificador de un evento se deriva de su CONTENIDO y no de un contador:
+# la entrega es al-menos-una-vez, asi que el mismo hecho puede llegar dos veces
+# por caminos distintos y solo un identificador derivado del contenido los une.
+sha2 = "0.10"
+# El diario durable de la FASE 46 ya resuelve la entrega al-menos-una-vez con
+# acuse y punto de control: un registro se admite cuando esta EN DISCO y se borra
+# solo cuando el destino lo acusa. Reimplementarlo aqui seria tener dos verdades
+# sobre la durabilidad, y el dia que divergieran se perderia evidencia.
+aegis-firehose = { path = "../aegis-firehose", default-features = false, optional = true }
+# La cuota de memoria de la ingesta sale del presupuesto del host, no de una
+# constante inventada en este crate.
+aegis-presupuesto = { path = "../aegis-presupuesto", optional = true }
+
+# POR QUE HAY UNA CARACTERISTICA «endpoint»
+#
+# El plano de control tiene que hablar EXACTAMENTE el mismo esquema que el
+# agente: si cada lado tuviera su definicion, el dia que divergieran se
+# correlacionarian cosas distintas creyendo que son la misma. Asi que
+# `server/crates/aegis-pipeline` depende de este crate.
+#
+# Pero el plano de control no sigue ficheros, no lee `/var/log/journal` y no
+# tiene el presupuesto de memoria de un endpoint. Con la caracteristica apagada
+# se lleva el esquema, el reloj, el clasificador y los analizadores de syslog y
+# EVTX, y NO se lleva el diario ni el presupuesto.
+#
+# La direccion importa: el servidor puede depender del agente, porque lo que se
+# protege es que el arbol de dependencias del AGENTE siga siendo corto y
+# auditable. Al reves no.
+[features]
+default = ["endpoint"]
+endpoint = ["dep:aegis-firehose", "dep:aegis-presupuesto"]
+
+[dev-dependencies]
+tempfile = "3"
