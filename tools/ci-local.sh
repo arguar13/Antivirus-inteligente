@@ -382,6 +382,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ruleforge" ]; then
     fi
 fi
 
+# Detonacion en microVM (FASE 73): ejecutar malware A PROPOSITO para ver que
+# hace. Todo lo demas vale cero si esa ejecucion puede tocar algo real, asi que
+# la frontera no es una capa: es la unica razon por la que el resto existe. Y no
+# se declara, se COMPRUEBA — hay una prueba que intenta una conexion de verdad a
+# una direccion de verdad desde dentro y no la alcanza.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "detonate" ]; then
+    printf '%s==>%s AegisDetonate · detonacion con invitado hostil e informe que no puede mentir\n' "$GRIS" "$FIN"
+    if ./tools/verificar-detonate.sh > /tmp/aegis-detonate-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-detonate-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-detonate-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena

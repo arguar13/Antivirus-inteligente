@@ -53,6 +53,7 @@ members = [
     "crates/aegis-wire",
     "crates/aegis-ips",
     "crates/aegis-presupuesto",
+    "crates/aegis-invitado",
 ]
 
 [workspace.package]

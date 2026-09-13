@@ -1,0 +1,42 @@
+[package]
+name = "aegis-detonate"
+description = "Detonacion de muestras en microVM con invitado hostil e informe de comportamiento determinista"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# EL ANFITRION TRATA TODO LO QUE SUBE EL INVITADO COMO ENTRADA HOSTIL.
+#
+# No es una postura defensiva generica: la traza la escribe literalmente un
+# proceso que corre en una maquina que se esta infectando a proposito. Por eso el
+# decodificador del canal es el de `aegis-invitado` —escrito para eso, con topes
+# en cada longitud— y no un formato de serializacion generico que acepte lo que
+# le echen.
+[dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+# La configuracion del hipervisor se le entrega en JSON: es su formato, no una
+# eleccion nuestra.
+serde_json = "1"
+sha2 = "0.10"
+libc = "0.2"
+# El protocolo del canal y los tipos de la traza. Compartirlo —en vez de
+# duplicarlo— es lo que garantiza que el anfitrion lee exactamente lo que el
+# invitado escribe: dos definiciones del mismo formato acaban divergiendo, y el
+# dia que diverjan la traza se interpretara mal en silencio.
+aegis-invitado = { path = "../../../crates/aegis-invitado" }
+# El trafico del invitado se diseca con el MISMO motor que el trafico real del
+# endpoint. Aqui se cobra haber hecho la FASE 70 antes: lo que el malware manda
+# por la red se analiza con el disector de produccion, no con uno de juguete.
+aegis-wire = { path = "../../../crates/aegis-wire" }
+# El reparto de memoria por clase de host: la detonacion tiene cuota como todo
+# lo demas.
+aegis-presupuesto = { path = "../../../crates/aegis-presupuesto" }
+
+[dev-dependencies]
+tempfile = "3"

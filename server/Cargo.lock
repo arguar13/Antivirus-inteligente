@@ -28,6 +28,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-detonate"
+version = "0.1.0"
+dependencies = [
+ "aegis-invitado",
+ "aegis-presupuesto",
+ "aegis-wire",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-firehose"
 version = "0.1.0"
 dependencies = [
@@ -59,6 +74,13 @@ dependencies = [
  "thiserror 2.0.20",
  "time",
  "zeroize",
+]
+
+[[package]]
+name = "aegis-invitado"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
