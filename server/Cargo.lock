@@ -285,6 +285,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-share"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "aegis-sync"
 version = "0.1.0"
 dependencies = [

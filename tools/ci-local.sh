@@ -478,6 +478,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "enrich" ]; then
     fi
 fi
 
+# Inteligencia con difusion controlada (FASE 78): compartir es IRREVERSIBLE, y
+# los errores se propagan. Los dos fallos que importan no son de formato: que
+# salga algo que no debia —y basta un filtro que se quedo atras al añadir un
+# camino nuevo—, y que entre algo envenenado y no se pueda deshacer. Se comprueba
+# que hay UN solo estrangulamiento de salida por el que pasan los cuatro canales,
+# que un canal envenenado se revierte por procedencia, que un ciclo de federacion
+# no es un bucle pero una correccion si circula, y que la doctrina del enjambre
+# de la FASE 68 sigue intacta: transporta autoridad, no la concede.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "share" ]; then
+    printf '%s==>%s AegisShare · STIX/TAXII con difusion impuesta en el codigo\n' "$GRIS" "$FIN"
+    if ./tools/verificar-share.sh > /tmp/aegis-share-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-share-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-share-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena
