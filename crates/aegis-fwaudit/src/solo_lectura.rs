@@ -43,8 +43,9 @@ pub const BANDERAS_SOLO_LECTURA: i32 = libc::O_RDONLY | libc::O_CLOEXEC | libc::
 /// Tamano de la ventana de lectura por defecto, en bytes.
 ///
 /// La ROM se recorre por ventanas y no se carga entera: son hasta 32 MiB, y el
-/// agente tiene un presupuesto de memoria de 45 MiB para TODO. Cargar la ROM
-/// completa lo reventaria por si sola.
+/// presupuesto de memoria del agente en reposo son 48 MiB en una pasarela y 81
+/// en una estacion, para TODO. Cargar la ROM completa lo reventaria por si sola
+/// en las dos, y en la pasarela ni siquiera cabria.
 pub const TAMANO_VENTANA: usize = 64 * 1024;
 
 /// Error de lectura.

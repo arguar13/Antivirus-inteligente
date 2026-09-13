@@ -46,10 +46,16 @@ pub const MAX_FLUJOS: usize = 100_000;
 ///
 /// # De donde sale el numero
 ///
-/// El presupuesto del agente entero son 46080 KB. AegisWire es un subsistema
-/// entre varios, asi que ocho megas es la parte que puede gastar sin comprometer
-/// al resto. Con esto, el peor caso real deja de ser el producto de las cotas
-/// por flujo y pasa a ser este numero, que es el que se puede defender.
+/// Es el caso de la estacion tipica: la cuota de red de un host de 16 GiB son
+/// 12 MiB, de los que dos tercios van al reensamblado. Con esto, el peor caso
+/// real deja de ser el producto de las cotas por flujo y pasa a ser este numero,
+/// que es el que se puede defender.
+///
+/// En el agente **no se usa esta constante**: se usa
+/// [`crate::motor::ConfigMotor::para_presupuesto`], que pide la cuota al host.
+/// Una pasarela de 1 GiB no puede gastar ocho megas aqui, y un servidor de
+/// 768 GiB no tiene por que quedarse en ellos —cada flujo que expulsa por falta
+/// de sitio es un trozo de conversacion que deja de ver.
 ///
 /// Cuando se llega al tope se expulsa por inactividad igual que por falta de
 /// sitio, y se CUENTA: ver caer este contador es ver al sensor quedarse ciego.

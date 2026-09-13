@@ -54,6 +54,55 @@ pub enum Criterio {
     Anomalia(String),
     /// Un certificado TLS autofirmado.
     CertificadoAutofirmado,
+
+    // ---------------------------------------------------------------------
+    // Criterios sobre los «sticky buffers» que usa el contenido publico
+    // ---------------------------------------------------------------------
+    //
+    // Las reglas de red modernas —Emerging Threats y companeras— ya casi no
+    // buscan bytes en la carga cruda: buscan en el campo semantico concreto
+    // (`http.uri`, `tls.sni`, `http.user_agent`). Eso es exactamente lo que
+    // produce aegis-wire, asi que soportar estos criterios NO es ampliar por
+    // ampliar: es lo que hace que el corpus publico se pueda compilar de verdad
+    // en vez de rechazarse regla por regla.
+    /// Metodo HTTP exacto, sin distinguir mayusculas.
+    MetodoHttp(String),
+    /// Subcadena dentro de la URI de una peticion HTTP.
+    ContenidoUriHttp {
+        /// Lo que se busca.
+        aguja: String,
+        /// Si se distingue mayusculas.
+        distingue_mayusculas: bool,
+    },
+    /// Cabecera `Host` exacta.
+    HostHttp(String),
+    /// Sufijo de la cabecera `Host`, con corte en el punto.
+    SufijoHostHttp(String),
+    /// Subcadena dentro del `User-Agent`.
+    AgenteHttp(String),
+    /// Subcadena dentro del valor de una cabecera HTTP concreta.
+    CabeceraHttp {
+        /// Nombre de la cabecera, sin distinguir mayusculas.
+        nombre: String,
+        /// Lo que tiene que contener su valor.
+        contiene: String,
+    },
+    /// Codigo de estado exacto de una respuesta HTTP.
+    EstadoHttp(u16),
+    /// Subcadena dentro del sujeto de un certificado TLS.
+    SujetoCertificado(String),
+    /// Huella SHA-256 exacta de un certificado TLS.
+    HuellaCertificado(String),
+    /// Huella JA3S exacta del saludo del servidor.
+    Ja3s(String),
+    /// Subcadena dentro de la cadena de version de SSH.
+    VersionSsh(String),
+    /// Subcadena dentro del recurso de una operacion SMB.
+    RecursoSmb(String),
+    /// Servicio Kerberos exacto solicitado.
+    ServicioKerberos(String),
+    /// Nombre distinguido LDAP que contiene una subcadena.
+    DnLdap(String),
 }
 
 /// Una regla de deteccion de red.
@@ -101,9 +150,99 @@ impl Regla {
             (Criterio::CertificadoAutofirmado, Hecho::CertificadoTls { autofirmado, .. }) => {
                 *autofirmado
             }
+
+            // --- Sticky buffers HTTP ---
+            (Criterio::MetodoHttp(m), Hecho::PeticionHttp { metodo, .. }) => {
+                metodo.eq_ignore_ascii_case(m)
+            }
+            (
+                Criterio::ContenidoUriHttp {
+                    aguja,
+                    distingue_mayusculas,
+                },
+                Hecho::PeticionHttp { uri, .. },
+            ) => contiene(uri, aguja, *distingue_mayusculas),
+            (Criterio::HostHttp(h), Hecho::PeticionHttp { host, .. }) => {
+                host.eq_ignore_ascii_case(h)
+            }
+            (Criterio::SufijoHostHttp(s), Hecho::PeticionHttp { host, .. }) => {
+                // El puerto no forma parte del nombre: `evil.com:8080` sigue
+                // siendo `evil.com`, y no recortarlo dejaria pasar la regla con
+                // solo anadir un puerto explicito.
+                es_subdominio(host.split(':').next().unwrap_or(host), s)
+            }
+            (Criterio::AgenteHttp(a), Hecho::PeticionHttp { agente, .. }) => {
+                contiene(agente, a, false)
+            }
+            (
+                Criterio::CabeceraHttp {
+                    nombre,
+                    contiene: c,
+                },
+                Hecho::PeticionHttp { cabeceras, .. },
+            ) => cabeceras
+                .iter()
+                .any(|(k, v)| k.eq_ignore_ascii_case(nombre) && contiene(v, c, false)),
+            (
+                Criterio::CabeceraHttp {
+                    nombre,
+                    contiene: c,
+                },
+                Hecho::RespuestaHttp { cabeceras, .. },
+            ) => cabeceras
+                .iter()
+                .any(|(k, v)| k.eq_ignore_ascii_case(nombre) && contiene(v, c, false)),
+            (Criterio::EstadoHttp(e), Hecho::RespuestaHttp { estado, .. }) => estado == e,
+
+            // --- Sticky buffers TLS ---
+            (Criterio::SujetoCertificado(s), Hecho::CertificadoTls { sujeto, .. }) => {
+                contiene(sujeto, s, false)
+            }
+            (Criterio::HuellaCertificado(h), Hecho::CertificadoTls { huella, .. }) => {
+                huella.eq_ignore_ascii_case(h)
+            }
+            (Criterio::Ja3s(h), Hecho::SaludoServidorTls { ja3s, .. }) => {
+                ja3s.eq_ignore_ascii_case(h)
+            }
+
+            // --- Otros protocolos ---
+            (Criterio::VersionSsh(v), Hecho::VersionSsh { version, .. }) => {
+                contiene(version, v, false)
+            }
+            (Criterio::RecursoSmb(r), Hecho::OperacionSmb { recurso, .. }) => {
+                contiene(recurso, r, false)
+            }
+            (Criterio::ServicioKerberos(s), Hecho::MensajeKerberos { servicio, .. }) => {
+                servicio.eq_ignore_ascii_case(s)
+            }
+            (Criterio::DnLdap(d), Hecho::OperacionLdap { dn, .. }) => contiene(dn, d, false),
+
             _ => false,
         }
     }
+}
+
+/// Si `heno` contiene `aguja`, distinguiendo mayusculas o no.
+///
+/// La version que no distingue no usa `to_lowercase` sobre el heno entero por
+/// cada comparacion: con miles de reglas y un hecho por paquete, eso es trabajo
+/// repetido en el camino caliente. Se compara byte a byte con la ventana del
+/// tamano de la aguja, que ademas es correcto para el ASCII que traen estos
+/// campos.
+#[must_use]
+fn contiene(heno: &str, aguja: &str, distingue_mayusculas: bool) -> bool {
+    if aguja.is_empty() {
+        return false;
+    }
+    if distingue_mayusculas {
+        return heno.contains(aguja);
+    }
+    let h = heno.as_bytes();
+    let a = aguja.as_bytes();
+    if a.len() > h.len() {
+        return false;
+    }
+    h.windows(a.len()).any(|v| v.eq_ignore_ascii_case(a))
 }
 
 /// Si `nombre` es el dominio `sufijo` o un subdominio suyo.
@@ -308,6 +447,156 @@ mod pruebas {
         assert!(r.casa(&f("script.ps1")));
         assert!(!r.casa(&f("informe.pdf")));
         assert!(!r.casa(&f("sin_extension")));
+    }
+
+    fn peticion(metodo: &str, uri: &str, host: &str, agente: &str) -> Hecho {
+        Hecho::PeticionHttp {
+            metodo: metodo.to_string(),
+            uri: uri.to_string(),
+            version: "HTTP/1.1".to_string(),
+            host: host.to_string(),
+            agente: agente.to_string(),
+            cabeceras: vec![
+                ("Host".to_string(), host.to_string()),
+                ("User-Agent".to_string(), agente.to_string()),
+                ("X-Custom".to_string(), "valor-secreto".to_string()),
+            ],
+        }
+    }
+
+    /// LOS STICKY BUFFERS son como se escriben hoy las reglas publicas. Si no
+    /// casaran, el corpus de Emerging Threats se rechazaria regla por regla.
+    #[test]
+    fn los_criterios_http_casan_sobre_su_campo_y_solo_sobre_el_suyo() {
+        let h = peticion("POST", "/admin/login.php", "victima.com", "curl/7.1");
+
+        assert!(regla(Criterio::MetodoHttp("post".into()), Confianza::Alta).casa(&h));
+        assert!(!regla(Criterio::MetodoHttp("GET".into()), Confianza::Alta).casa(&h));
+
+        assert!(regla(
+            Criterio::ContenidoUriHttp {
+                aguja: "/admin/".into(),
+                distingue_mayusculas: false
+            },
+            Confianza::Alta
+        )
+        .casa(&h));
+        assert!(regla(Criterio::HostHttp("VICTIMA.COM".into()), Confianza::Alta).casa(&h));
+        assert!(regla(Criterio::AgenteHttp("curl".into()), Confianza::Media).casa(&h));
+        assert!(regla(
+            Criterio::CabeceraHttp {
+                nombre: "x-custom".into(),
+                contiene: "secreto".into()
+            },
+            Confianza::Media
+        )
+        .casa(&h));
+
+        // Y NO casa por el campo equivocado: un criterio de URI no puede casar
+        // porque la cadena aparezca en el User-Agent.
+        let confuso = peticion("GET", "/", "x.com", "/admin/ en el agente");
+        assert!(!regla(
+            Criterio::ContenidoUriHttp {
+                aguja: "/admin/".into(),
+                distingue_mayusculas: false
+            },
+            Confianza::Alta
+        )
+        .casa(&confuso));
+    }
+
+    /// El modificador de mayusculas de `content` se respeta en los dos sentidos:
+    /// una regla que pide distincion NO puede casar sin ella.
+    #[test]
+    fn la_distincion_de_mayusculas_se_respeta_en_los_dos_sentidos() {
+        let h = peticion("GET", "/Admin/Panel", "x.com", "ua");
+        let sensible = Criterio::ContenidoUriHttp {
+            aguja: "/admin/".into(),
+            distingue_mayusculas: true,
+        };
+        let insensible = Criterio::ContenidoUriHttp {
+            aguja: "/admin/".into(),
+            distingue_mayusculas: false,
+        };
+        assert!(!regla(sensible, Confianza::Alta).casa(&h));
+        assert!(regla(insensible, Confianza::Alta).casa(&h));
+    }
+
+    /// Un `Host` con puerto explicito sigue siendo el mismo dominio. Si no se
+    /// recortara, anadir `:8080` bastaria para saltarse la regla.
+    #[test]
+    fn el_puerto_en_el_host_no_permite_saltarse_la_regla() {
+        let con_puerto = peticion("GET", "/", "a.evil.com:8080", "ua");
+        assert!(
+            regla(Criterio::SufijoHostHttp("evil.com".into()), Confianza::Alta).casa(&con_puerto)
+        );
+    }
+
+    /// Los criterios de TLS, SSH, SMB, Kerberos y LDAP casan sobre su hecho.
+    #[test]
+    fn los_criterios_de_los_demas_protocolos_casan_sobre_su_hecho() {
+        let cert = Hecho::CertificadoTls {
+            sujeto: "CN=malo.example.com, O=Nadie".to_string(),
+            emisor: "CN=CA".to_string(),
+            huella: "AABBCC".to_string(),
+            autofirmado: false,
+        };
+        assert!(regla(
+            Criterio::SujetoCertificado("malo.example".into()),
+            Confianza::Alta
+        )
+        .casa(&cert));
+        assert!(regla(
+            Criterio::HuellaCertificado("aabbcc".into()),
+            Confianza::Alta
+        )
+        .casa(&cert));
+
+        let ssh = Hecho::VersionSsh {
+            version: "SSH-2.0-libssh_0.9.6".to_string(),
+            implementacion: "libssh".to_string(),
+        };
+        assert!(regla(Criterio::VersionSsh("libssh".into()), Confianza::Media).casa(&ssh));
+
+        let smb = Hecho::OperacionSmb {
+            orden: "CREATE".to_string(),
+            recurso: "\\\\srv\\C$\\Windows\\Temp\\a.exe".to_string(),
+        };
+        assert!(regla(Criterio::RecursoSmb("C$".into()), Confianza::Media).casa(&smb));
+
+        let krb = Hecho::MensajeKerberos {
+            tipo: "TGS-REQ".to_string(),
+            cliente: "admin@DOM".to_string(),
+            servicio: "cifs/srv.dom".to_string(),
+            cifrado: "RC4-HMAC".to_string(),
+        };
+        assert!(regla(
+            Criterio::ServicioKerberos("CIFS/SRV.DOM".into()),
+            Confianza::Alta
+        )
+        .casa(&krb));
+
+        let ldap = Hecho::OperacionLdap {
+            operacion: "bind".to_string(),
+            dn: "CN=admin,DC=dom,DC=local".to_string(),
+        };
+        assert!(regla(Criterio::DnLdap("CN=admin".into()), Confianza::Media).casa(&ldap));
+    }
+
+    /// Una aguja vacia no puede casar con todo: seria una regla que corta la red
+    /// entera por un fallo de configuracion del feed.
+    #[test]
+    fn una_aguja_vacia_no_casa_con_nada() {
+        let h = peticion("GET", "/x", "a.com", "ua");
+        assert!(!regla(
+            Criterio::ContenidoUriHttp {
+                aguja: String::new(),
+                distingue_mayusculas: false
+            },
+            Confianza::Alta
+        )
+        .casa(&h));
+        assert!(!regla(Criterio::AgenteHttp(String::new()), Confianza::Alta).casa(&h));
     }
 
     /// Un sufijo vacio no puede casar con todo: seria una regla que corta la red

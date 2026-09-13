@@ -21,5 +21,10 @@ workspace = true
 # estandar y JA4 necesita SHA-256; se reutiliza el que el agente ya enlaza.
 [dependencies]
 aegis-net = { path = "../aegis-net", default-features = false }
+# El reparto de memoria por clase de host. No trae arbol ninguno —es un crate sin
+# dependencias— y evita que este modulo lleve su propia idea de cuanto puede
+# gastar: la cota por flujo no es una cota, y la cota global tiene que salir del
+# mismo sitio que la del resto del agente o el reparto deja de repartir.
+aegis-presupuesto = { path = "../aegis-presupuesto" }
 sha2 = "0.10"
 thiserror = "2"

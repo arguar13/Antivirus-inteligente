@@ -1,0 +1,16 @@
+[package]
+name = "aegis-presupuesto"
+description = "Presupuesto de memoria del agente: reparto por host, regimenes y obligacion desde el kernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# Sin dependencias a proposito. Este crate lo enlaza el agente, el watchdog y
+# las herramientas de despliegue: es el sitio donde menos se justifica traer
+# arbol ajeno, y todo lo que hace es leer /proc y /sys y hacer aritmetica.
+[dependencies]

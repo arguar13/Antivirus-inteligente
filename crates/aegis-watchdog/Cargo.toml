@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 thiserror = "2"
 libc = "0.2"
+aegis-presupuesto = { path = "../aegis-presupuesto" }
 
 [[bin]]
 name = "aegis-watchdog"

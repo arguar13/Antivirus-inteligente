@@ -62,11 +62,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-ipc"
+version = "0.1.0"
+
+[[package]]
+name = "aegis-ips"
+version = "0.1.0"
+dependencies = [
+ "aegis-net",
+ "aegis-wire",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-itdr"
 version = "0.1.0"
 dependencies = [
  "petgraph",
  "serde",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-net"
+version = "0.1.0"
+dependencies = [
+ "aegis-ipc",
+ "aegis-scal",
  "thiserror 2.0.20",
 ]
 
@@ -112,6 +134,33 @@ dependencies = [
  "aegis-orchestrator",
  "petgraph",
  "serde",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-presupuesto"
+version = "0.1.0"
+
+[[package]]
+name = "aegis-ruleforge"
+version = "0.1.0"
+dependencies = [
+ "aegis-ips",
+ "aegis-pqc",
+ "aegis-presupuesto",
+ "aegis-sync",
+ "aegis-update",
+ "serde",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-scal"
+version = "0.1.0"
+dependencies = [
+ "libc",
  "thiserror 2.0.20",
 ]
 
@@ -165,6 +214,35 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "aegis-sync"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-update"
+version = "0.1.0"
+dependencies = [
+ "aegis-pqc",
+ "ed25519-dalek",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-wire"
+version = "0.1.0"
+dependencies = [
+ "aegis-net",
+ "aegis-presupuesto",
+ "sha2",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

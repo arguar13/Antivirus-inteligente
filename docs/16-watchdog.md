@@ -66,11 +66,74 @@ autorizada nunca reinicia.
 
 ---
 
-## 16.4 El presupuesto de 45 MB
+## 16.4 El tercer fallo: el agente desbordado
 
-El presupuesto de memoria del agente en pico se fija en **45 MB** y se mide en
-cada `make ci` arrancando el binario de release y leyendo su RSS. Es un
-compromiso del producto, no una aspiración: un componente que se lo salta es un
-bug atribuible, y por eso se mide en la misma puerta que el resto. El agente
-arranca holgadamente por debajo, con el blindaje activo y el canal de control
-embebido.
+El watchdog original distinguía dos fallos: **muerto** y **colgado**. Falta un
+tercero, y es el que más cuesta reconocer:
+
+> **Desbordado.** El proceso existe, late con normalidad, y se está comiendo la
+> máquina.
+
+Una fuga lenta no mata ni cuelga a nadie. Llega a 2 GiB a las tres de la mañana,
+y para entonces el problema ya no es el agente: es el host de producción que se
+ha llevado por delante. Un watchdog que solo mira el latido da eso por bueno
+hasta el final, y **un EDR que tumba al host que protege es peor que un EDR
+ausente**, porque el ausente al menos no causa la caída.
+
+Es el patrón de `osquery`, que no se fía de su propio proceso: su watchdog tiene
+`--watchdog_memory_limit` y **mata y reinicia** al obrero que se pasa.
+
+### Las dos mitades que lo hacen desplegable
+
+**Una sola muestra sobre el techo no reinicia nada.** Reiniciar el EDR es en sí
+mismo un evento de seguridad: abre una ventana sin protección. Si bastara una
+lectura alta, un atacante capaz de provocar picos de memoria tendría ahí un
+interruptor para apagar la vigilancia a voluntad. Hacen falta
+`MUESTRAS_PARA_REINICIO` muestras **seguidas**, una por ciclo de supervisión.
+
+**El contador no sobrevive al reinicio.** Si lo hiciera, el proceso nuevo nacería
+condenado y el watchdog lo mataría en su primer ciclo, una y otra vez: una fuga
+acotada se convertiría en una máquina sin EDR, que es peor que la fuga.
+
+Dos decisiones más, ambas contra el mismo tipo de error:
+
+- **Se mide el proceso, no su cgroup.** En el despliegue real el watchdog lanza
+  al agente como hijo, así que comparten unidad. Preguntarle al cgroup cuánto
+  gasta el agente devolvería también lo que gasta el watchdog, y el reinicio —que
+  no libera nada de lo que de verdad sobraba— se repetiría sin converger.
+- **No poder medir no es una fuga.** Si `/proc` no se deja leer, no se acumula
+  nada. Tratarlo como desbordamiento haría que el watchdog reiniciase al agente
+  por no poder mirarlo, que es justo lo que un atacante querría provocar.
+- **Observar no muestrea.** `MUESTRAS_PARA_REINICIO` cuenta ciclos de
+  supervisión. Si cada consulta de estado contase como muestra, cualquiera que
+  sondease el watchdog en bucle acortaría a voluntad el plazo antes del reinicio.
+
+---
+
+## 16.5 El presupuesto de memoria
+
+El presupuesto ya no es una cifra fija. Es una **fracción de la RAM del host, con
+suelo y con techo**, repartida en tres regímenes y obligada por tres capas. El
+detalle completo —por qué «45 MB» estaba mal de tres maneras distintas, el
+reparto por clase de host y la comparativa con Defender, CrowdStrike, SentinelOne
+y Elastic Defend— está en el [README](../README.md#presupuesto-de-recursos) y en
+el crate `aegis-presupuesto`.
+
+Lo que toca a este documento es la tercera capa, la que convierte la promesa en
+un invariante: el kernel.
+
+| Directiva | Valor | Por qué |
+|---|---|---|
+| `MemoryHigh` | el **pico** | Límite **blando**: el kernel reclama y frena, pero el escaneo termina |
+| `MemoryMax` | el **techo** | Límite **duro**: OOM dentro del cgroup. Mata al agente, nunca al host |
+| `MemorySwapMax` | `0` | Un EDR paginado llega tarde, y sus estructuras no deben acabar escritas en el disco de la víctima |
+| `OOMScoreAdjust` | `-500` | Ante presión de memoria **ajena** el agente no es la víctima a sacrificar: su propia fuga ya la corta `MemoryMax`, que es local |
+| `Restart` | `always` | El OOM del cgroup no es el final: es un reinicio de un segundo |
+
+Confundir `MemoryHigh` con `MemoryMax` no es un detalle de estilo: intercambiados,
+el kernel **mata donde debería frenar**. Hay una prueba que comprueba que el
+blando lleva el pico y el duro el techo.
+
+`make ci` mide el arranque real del agente contra **dos puertas**: el presupuesto
+del host, que escala, y la línea base de arranque, que no escala con nada y es la
+única que caza una regresión en una máquina grande.

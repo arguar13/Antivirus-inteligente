@@ -541,3 +541,52 @@ fn ninguna_secuencia_arbitraria_de_paquetes_provoca_panico() {
     let _ = m.recolectar(u64::MAX);
     let _ = m.vaciar();
 }
+
+// ---------------------------------------------------------------------------
+// El techo global sale del host, no de una constante local
+// ---------------------------------------------------------------------------
+
+/// Una cota por flujo no es una cota, y una cota global igual en todas partes
+/// tampoco reparte nada. El tope del sensor tiene que salir del mismo sitio que
+/// el del resto del agente, o cada subsistema creera que su numero es pequeno y
+/// la suma se pasara del presupuesto.
+#[test]
+fn el_tope_de_memoria_del_sensor_lo_fija_la_clase_de_host() {
+    use aegis_presupuesto::{Componente, Presupuesto};
+    use aegis_wire::ConfigMotor;
+
+    const GIB: u64 = 1024 * 1024 * 1024;
+
+    let mut anterior = 0usize;
+    for memoria in [GIB, 8 * GIB, 16 * GIB, 64 * GIB, 768 * GIB] {
+        let presupuesto = Presupuesto::para(memoria);
+        let cfg = ConfigMotor::para_presupuesto(&presupuesto);
+        let cuota = usize::try_from(presupuesto.cuota(Componente::Red)).unwrap();
+
+        // Lo que el sensor se reserva no puede pasar de su cuota: si la pasara,
+        // el reparto por componente seria decorativo.
+        assert!(
+            cfg.max_memoria + cfg.max_memoria_app <= cuota,
+            "host de {memoria} B: {} + {} pasa de la cuota de red {cuota}",
+            cfg.max_memoria,
+            cfg.max_memoria_app
+        );
+        // Y ningun host se queda sin nada: un sensor con cero bytes no reensambla
+        // y por tanto no ve ninguna evasion por solape.
+        assert!(cfg.max_memoria > 0 && cfg.max_memoria_app > 0);
+
+        assert!(
+            cfg.max_memoria >= anterior,
+            "un host mayor no puede darle menos sitio al sensor"
+        );
+        anterior = cfg.max_memoria;
+    }
+
+    // La diferencia entre los extremos es real, no cosmetica.
+    let pasarela = ConfigMotor::para_presupuesto(&Presupuesto::para(GIB)).max_memoria;
+    let servidor = ConfigMotor::para_presupuesto(&Presupuesto::para(768 * GIB)).max_memoria;
+    assert!(
+        servidor > pasarela * 10,
+        "servidor {servidor} contra pasarela {pasarela}"
+    );
+}

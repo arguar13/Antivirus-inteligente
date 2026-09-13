@@ -32,7 +32,8 @@ pub trait StatusSource: Send + Sync {
 pub struct AgentControl<S: StatusSource> {
     // El motor YARA se construye la PRIMERA vez que se pide un escaneo, no al
     // arrancar: cargar las reglas cuesta memoria, y el presupuesto del agente en
-    // reposo (< 45 MB) no debe incluir un motor que quiza no se use en toda la
+    // reposo —81 MiB en una estacion, 48 en una pasarela— no debe incluir un
+    // motor que quiza no se use en toda la
     // vida del proceso. Un escaneo bajo demanda es ocasional; pagar su coste
     // cuando llega es lo correcto.
     yara: OnceLock<Arc<YaraEngine>>,

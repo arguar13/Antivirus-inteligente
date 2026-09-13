@@ -11,8 +11,9 @@ guarde las alertas y les entregue política. Este módulo es ese servidor.
 
 ## 32.1 Por qué es un workspace separado
 
-El agente es **síncrono, sin runtime asíncrono, con un presupuesto de memoria de
-menos de 45 MB y `panic = "abort"`**. El servidor es exactamente lo contrario:
+El agente es **síncrono, sin runtime asíncrono, con un presupuesto de memoria
+acotado por clase de host —48 MiB en reposo en una pasarela, impuesto por el
+kernel con `MemoryMax`— y `panic = "abort"`**. El servidor es exactamente lo contrario:
 asíncrono, con `tokio`, `axum`, `tonic` y pools de conexiones.
 
 Mezclarlos en un workspace contaminaría el árbol de dependencias del agente —que

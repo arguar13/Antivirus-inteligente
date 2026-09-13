@@ -93,7 +93,8 @@ fi
 # El transporte vive en un workspace APARTE (swarm-net/), fuera del workspace del
 # agente. No es un capricho de organizacion: son 340 crates transitivos y un
 # runtime tokio, y el agente corre con privilegios en cada endpoint con un
-# presupuesto de 45 MB de RSS y el arbol de dependencias tratado como superficie
+# presupuesto de memoria por clase de host (48 MiB en reposo en una pasarela) y
+# el arbol de dependencias tratado como superficie
 # de ataque.
 echo "==> AegisSwarm: el transporte libp2p, con DOS NODOS REALES por loopback"
 if [ ! -d swarm-net ]; then
@@ -122,7 +123,7 @@ if cargo tree -p aegis-swarm --edges normal 2>/dev/null | grep -qiE 'libp2p|toki
     echo "    ${ROJO}FALLO${FIN}: el nucleo del enjambre arrastra libp2p o tokio al agente."
     echo "    ${ROJO}     ${FIN} Eso mete cientos de crates que analizan entrada hostil de red en un"
     echo "    ${ROJO}     ${FIN} proceso privilegiado que corre en cada endpoint, y revienta el"
-    echo "    ${ROJO}     ${FIN} presupuesto de 45 MB de RSS."
+    echo "    ${ROJO}     ${FIN} presupuesto de memoria por clase de host."
     cargo tree -p aegis-swarm --edges normal 2>/dev/null | grep -iE 'libp2p|tokio' | head -5
     exit 1
 fi

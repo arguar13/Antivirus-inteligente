@@ -80,8 +80,16 @@ echo "  esperando..."
 wait "$PID_BUILD" "$PID_CLIPPY" "$PID_REDTEAM" "$PID_STRESS" "$PID_CHAOS"
 
 # --- Verificacion de recursos (secuencial: necesita el binario de release) ----
-titulo "Verificacion de recursos del agente (<= 45 MB)"
-PRESUPUESTO_KB=46080
+titulo "Verificacion de recursos del agente"
+# El presupuesto no es una cifra fija: es una fraccion de la RAM de este host con
+# suelo y con techo, y lo calcula el mismo codigo que lo obliga en produccion.
+# La linea base es la segunda puerta, la que no escala con el host y por tanto la
+# unica que caza una regresion en una maquina grande.
+PRESUPUESTO=$(cargo run -q -p aegis-presupuesto --example reparto -- --campo reposo 2>/dev/null)
+LINEA_BASE=$(cargo run -q -p aegis-presupuesto --example reparto -- --campo linea_base 2>/dev/null)
+PERFIL=$(cargo run -q -p aegis-presupuesto --example reparto -- --campo perfil 2>/dev/null)
+PRESUPUESTO_KB=$(( ${PRESUPUESTO:-0} / 1024 ))
+LINEA_BASE_KB=$(( ${LINEA_BASE:-0} / 1024 ))
 RSS_KB=""
 if cargo build --release -p aegis-agent -q 2>/dev/null && [ -x target/release/aegis-agent ]; then
     ./target/release/aegis-agent --stats-interval 300 >/dev/null 2>"$TMP/agent.err" &
@@ -127,14 +135,16 @@ CHAOS_RC=$(cat "$TMP/chaos.rc" 2>/dev/null || echo 1)
 CHAOS_INFO=$(grep -E "^test result" "$TMP/chaos.log" 2>/dev/null | tail -1)
 resultado "Caos (4 familias de fallo)" "$CHAOS_RC" "$CHAOS_INFO"
 
-if [ -n "$RSS_KB" ]; then
-    if [ "$RSS_KB" -le "$PRESUPUESTO_KB" ]; then
-        resultado "Recursos (RSS <= 45 MB)" 0 "$RSS_KB KB de $PRESUPUESTO_KB KB"
-    else
-        resultado "Recursos (RSS <= 45 MB)" 1 "$RSS_KB KB supera $PRESUPUESTO_KB KB"
-    fi
+if [ -z "$RSS_KB" ]; then
+    resultado "Recursos en reposo" skip "el agente no arranco en este entorno"
+elif [ "$PRESUPUESTO_KB" -eq 0 ]; then
+    resultado "Recursos en reposo" 1 "no se pudo calcular el presupuesto del host"
+elif [ "$RSS_KB" -gt "$PRESUPUESTO_KB" ]; then
+    resultado "Recursos en reposo" 1 "$RSS_KB KB supera el reposo de $PRESUPUESTO_KB KB (perfil $PERFIL)"
+elif [ "$RSS_KB" -gt "$LINEA_BASE_KB" ]; then
+    resultado "Recursos en reposo" 1 "$RSS_KB KB cabe en el presupuesto pero supera la linea base de $LINEA_BASE_KB KB: regresion"
 else
-    resultado "Recursos (RSS <= 45 MB)" skip "el agente no arranco en este entorno"
+    resultado "Recursos en reposo" 0 "$RSS_KB KB · reposo $PRESUPUESTO_KB KB · linea base $LINEA_BASE_KB KB · perfil $PERFIL"
 fi
 
 echo

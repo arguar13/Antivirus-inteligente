@@ -52,7 +52,8 @@ de lectura.
 - **`scan` exige ruta absoluta.** Una ruta relativa dependería del directorio
   de trabajo del agente, que no es predecible desde `aegisctl`.
 - **El motor YARA se carga en diferido.** Cargar las reglas cuesta memoria, y el
-  presupuesto del agente en reposo (< 45 MB) no debe incluir un motor que quizá
+  presupuesto del agente en reposo (48 MiB en una pasarela) no debe incluir un
+  motor que quizá
   no se use en toda la vida del proceso. La primera petición de escaneo paga su
   coste; las siguientes lo reutilizan.
 - **`isolate` aplica en una transacción.** El conjunto de reglas se aplica

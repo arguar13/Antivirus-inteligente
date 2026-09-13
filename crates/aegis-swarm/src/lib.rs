@@ -63,7 +63,8 @@
 //! | libp2p (gossipsub+noise+yamux+tcp+mdns) | **340 crates** | tokio | `swarm-net/`, fuera del agente |
 //!
 //! El agente corre con privilegios en cada endpoint, tiene un presupuesto de
-//! **45 MB de RSS** y trata su árbol de dependencias como superficie de ataque.
+//! memoria **acotado por clase de host** —48 MiB en reposo en una pasarela— y
+//! trata su árbol de dependencias como superficie de ataque.
 //! Meterle 340 crates de código **que analiza entrada hostil de la red** es
 //! precisamente el riesgo de cadena de suministro que un fabricante de seguridad
 //! no puede asumir: es la misma razón por la que la FASE 23 se escribió con UDP

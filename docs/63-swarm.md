@@ -160,8 +160,9 @@ agente, y la razón es medida, no opinada:
 | núcleo `aegis-swarm` | **0 nuevas** | ninguno (síncrono) | dentro del agente, en cada endpoint |
 | `swarm-net` con libp2p | **340 crates** | tokio | fuera del agente |
 
-El agente corre con privilegios en cada endpoint, tiene un presupuesto de **45 MB
-de RSS** y trata su árbol de dependencias como superficie de ataque. Meterle 340
+El agente corre con privilegios en cada endpoint, tiene un presupuesto de memoria
+**acotado por clase de host** —48 MiB en reposo en una pasarela— y trata su árbol
+de dependencias como superficie de ataque. Meterle 340
 crates de código **que analiza entrada hostil de la red** es precisamente el riesgo
 de cadena de suministro que un fabricante de seguridad no puede asumir. Es la misma
 razón por la que la FASE 23 se escribió con UDP y un AEAD auditable en un fichero

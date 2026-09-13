@@ -111,7 +111,8 @@ que se reserva de verdad es el producto:
 100.000 flujos × 2 sentidos × 1 MiB retenido = 200 GB
 ```
 
-en un agente cuyo presupuesto **entero** son 45 MB. Medido en la propia suite:
+en un agente cuya cuota de red **entera** son 12 MiB en una estación y 4 en una
+pasarela. Medido en la propia suite:
 3.000 flujos reteniendo **un solo** segmento de 1.400 bytes cada uno ya reservan
 4,2 MB, que extrapolados al tope de flujos son **133 MB** — con el atacante
 haciendo el mínimo esfuerzo posible.

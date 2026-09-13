@@ -1,7 +1,8 @@
 # Workspace del plano de control de AegisCore (FASE 37).
 #
 # Es un workspace SEPARADO del agente a proposito. El agente es sincrono, sin
-# runtime asincrono, con un presupuesto de memoria estricto (<45 MB) y
+# runtime asincrono, con un presupuesto de memoria acotado por clase de host
+# (48-384 MiB en reposo, impuesto por cgroup v2) y
 # `panic = "abort"`; el servidor es justo lo contrario: asincrono, con tokio,
 # axum, tonic y pools de conexiones. Mezclarlos contaminaria el arbol de
 # dependencias del agente —que en un EDR ES superficie de ataque— con cientos de
@@ -9,7 +10,7 @@
 # de suministro del endpoint sigue siendo corta y revisable.
 [workspace]
 resolver = "2"
-members = ["crates/aegis-server", "crates/aegis-itdr", "crates/aegis-orchestrator", "crates/aegis-predict", "crates/fleet-simulator"]
+members = ["crates/aegis-server", "crates/aegis-itdr", "crates/aegis-orchestrator", "crates/aegis-predict", "crates/aegis-ruleforge", "crates/fleet-simulator"]
 
 [workspace.package]
 version = "0.1.0"

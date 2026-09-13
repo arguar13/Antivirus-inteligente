@@ -1,0 +1,54 @@
+[package]
+name = "aegis-ruleforge"
+description = "La fabrica de contenido: compila el corpus mundial de deteccion en artefactos firmados"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# ANALIZADORES PROPIOS, Y NO ES SINDROME DE NO INVENTADO AQUI.
+#
+# Lo que entra por aqui son ficheros de reglas de feeds publicos: Emerging
+# Threats, el catalogo Sigma, las bases de ClamAV, colecciones de YARA de
+# terceros. Es contenido que NO controlamos y que, si el feed se compromete, lo
+# escribe el atacante. Un analizador generico de YAML o de expresiones regulares
+# metido en ese camino es codigo no auditado procesando entrada hostil con los
+# permisos del defensor, que es justo lo que la invariante 2 de esta fase
+# prohibe.
+#
+# Ademas, el subconjunto que estos formatos usan de verdad es pequeno y acotado,
+# y escribirlo a proposito permite hacer lo que un analizador generico no hace:
+# RECHAZAR CON NOMBRE lo que no se entiende, contarlo, y decir en el informe
+# cuantas reglas de cuantas se compilaron. Un analizador generico que acepta de
+# todo no puede dar esa cifra, y sin esa cifra nadie sabe que se esta perdiendo.
+[dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+# La firma hibrida del canal de actualizaciones. NO se reinventa: es la misma
+# clave y el mismo contexto de dominio que ya protege los binarios del agente.
+aegis-update = { path = "../../../crates/aegis-update", default-features = false }
+# El arbol de Merkle de la FASE 23, para distribuir por diferencias en vez de
+# mandar el corpus entero en cada actualizacion.
+aegis-sync = { path = "../../../crates/aegis-sync" }
+# El vocabulario de reglas del motor de prevencion. Se depende de el —y no se
+# duplica— para que lo que compila esta fabrica sea EXACTAMENTE lo que el motor
+# evalua: dos definiciones de «regla» que hay que mantener sincronizadas acaban
+# divergiendo, y el dia que diverjan la fabrica compilara algo que el endpoint no
+# sabe leer. Sin la caracteristica `kernel`: aqui se compilan reglas, no se carga
+# codigo en ningun kernel.
+aegis-ips = { path = "../../../crates/aegis-ips", default-features = false }
+# El reparto de memoria por clase de host. El indice del corpus pide aqui su
+# cuota de residencia en vez de llevar una constante propia: una constante en
+# cada consumidor es como un presupuesto repartido deja de estar repartido.
+aegis-presupuesto = { path = "../../../crates/aegis-presupuesto" }
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+# Solo para las pruebas de integracion: fabrican el par de claves con el que se
+# firma el corpus, que en produccion vive en el firmador del plano de control.
+aegis-pqc = { path = "../../../crates/aegis-pqc", default-features = false, features = ["sign"] }

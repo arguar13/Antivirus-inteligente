@@ -365,6 +365,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ips" ]; then
     fi
 fi
 
+# La fabrica de contenido (FASE 72): un motor de deteccion sin contenido no
+# detecta nada, y el contenido del mundo esta escrito en cuatro formatos por
+# gente que NO somos nosotros. Lo que gobierna el crate entero: si un feed se
+# compromete, quien escribe lo que entra por aqui es el atacante, y entra en el
+# proceso que compila el contenido de seguridad de la flota entera.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ruleforge" ]; then
+    printf '%s==>%s AegisRuleForge · el corpus mundial compilado, con canario y corpus firmado\n' "$GRIS" "$FIN"
+    if ./tools/verificar-ruleforge.sh > /tmp/aegis-ruleforge-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-ruleforge-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-ruleforge-ci.log | tail -25
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena
@@ -480,26 +497,21 @@ fi
 # El presupuesto de recursos es un compromiso del producto (ver README), no una
 # aspiracion. Un componente que se lo salta es un bug atribuible, y por eso se
 # mide en la misma puerta que el resto.
+#
+# Ya no es un numero fijo comparado durante cuatro segundos. Son TRES regimenes
+# repartidos como fraccion de la RAM del host, DOS puertas (el presupuesto del
+# host, que escala, y la linea base de arranque, que no escala y es la que caza
+# la regresion) y TRES capas que lo obligan, de las cuales la ultima es el kernel
+# via cgroup v2 y no depende de que el agente se porte bien.
 if [ -n "${SOLO:-}" ] && [ "$SOLO" != "budget" ]; then :; else
     printf '%s==>%s Presupuesto de memoria del agente\n' "$GRIS" "$FIN"
-    if cargo build --release -p aegis-agent -q 2>/dev/null && [ -x target/release/aegis-agent ]; then
-        ./target/release/aegis-agent --stats-interval 300 >/dev/null 2>/tmp/aegis-budget.err &
-        PID_AGENTE=$!
-        sleep 4
-        RSS=$(grep VmRSS "/proc/$PID_AGENTE/status" 2>/dev/null | awk '{print $2}')
-        kill -TERM "$PID_AGENTE" 2>/dev/null
-        wait "$PID_AGENTE" 2>/dev/null
-        if [ -z "$RSS" ]; then
-            printf '    %somitido: el agente no arranco%s\n' "$GRIS" "$FIN"
-            printf '    %s  causa: %s%s\n' "$GRIS" "$(tail -1 /tmp/aegis-budget.err 2>/dev/null | head -c 160)" "$FIN"
-        elif [ "$RSS" -lt 46080 ]; then
-            printf '    %sOK%s (%s KB de un presupuesto de 46080 KB)\n' "$VERDE" "$FIN" "$RSS"
-        else
-            printf '    %sFALLO%s: %s KB supera el presupuesto de 46080 KB\n' "$ROJO" "$FIN" "$RSS"
-            FALLOS=$((FALLOS + 1))
-        fi
+    if ./tools/verificar-presupuesto.sh > /tmp/aegis-presupuesto-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-presupuesto-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
-        printf '    %somitido (no se pudo compilar el agente)%s\n' "$GRIS" "$FIN"
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-presupuesto-ci.log | tail -25
+        FALLOS=$((FALLOS + 1))
     fi
 fi
 

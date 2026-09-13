@@ -525,7 +525,8 @@ fn caos_el_watchdog_distingue_colgado_de_muerto() {
             TargetState {
                 alive: true,
                 heartbeat_age_ms: Some(30_000),
-                shutdown_requested: false
+                shutdown_requested: false,
+                ..TargetState::default()
             },
             max
         ),
@@ -537,7 +538,8 @@ fn caos_el_watchdog_distingue_colgado_de_muerto() {
             TargetState {
                 alive: false,
                 heartbeat_age_ms: Some(0),
-                shutdown_requested: false
+                shutdown_requested: false,
+                ..TargetState::default()
             },
             max
         ),
@@ -550,7 +552,8 @@ fn caos_el_watchdog_distingue_colgado_de_muerto() {
             TargetState {
                 alive: false,
                 heartbeat_age_ms: None,
-                shutdown_requested: true
+                shutdown_requested: true,
+                ..TargetState::default()
             },
             max
         ),

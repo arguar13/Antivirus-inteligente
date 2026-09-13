@@ -70,7 +70,8 @@ vueltas de ida y vuelta.
 bandera de compresión y cuatro bytes de longitud) sobre el flujo mTLS, precedido
 de un byte de enrutado que sobre HTTP/2 llevarían las cabeceras `:path` y
 `grpc-status`. No son tramas HTTP/2: el resto de AegisCore es **síncrono** a
-propósito —por el presupuesto de memoria (< 45 MB) y el control estricto de la
+propósito —por el presupuesto de memoria (48 MiB en reposo en una pasarela) y
+por el control estricto de la
 concurrencia— y el único HTTP/2 maduro de Rust exige un runtime asíncrono. Lo
 que importa para la seguridad —autenticación mutua, protobuf real, certificados
 rotativos, clave sin disco— es idéntico; lo que cambia es que el mensaje viaja

@@ -377,6 +377,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-presupuesto"
+version = "0.1.0"
+
+[[package]]
 name = "aegis-ptguard"
 version = "0.1.0"
 dependencies = [
@@ -532,6 +536,7 @@ dependencies = [
 name = "aegis-watchdog"
 version = "0.1.0"
 dependencies = [
+ "aegis-presupuesto",
  "libc",
  "thiserror 2.0.20",
 ]
@@ -541,6 +546,7 @@ name = "aegis-wire"
 version = "0.1.0"
 dependencies = [
  "aegis-net",
+ "aegis-presupuesto",
  "sha2",
  "thiserror 2.0.20",
 ]

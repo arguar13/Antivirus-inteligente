@@ -105,6 +105,34 @@ impl Default for ConfigMotor {
     }
 }
 
+impl ConfigMotor {
+    /// Configuracion con los topes que le corresponden a un host concreto.
+    ///
+    /// Es la forma que hay que usar en el agente. Las constantes de este modulo
+    /// son el caso de la estacion tipica; en una pasarela de 1 GiB son demasiado
+    /// generosas y en un servidor de 768 GiB dejan al sensor expulsando flujos
+    /// que la maquina tenia RAM de sobra para conservar —y cada flujo expulsado
+    /// es un trozo de conversacion que el sensor deja de ver.
+    ///
+    /// El reparto entre reensamblado y bufers de aplicacion conserva la
+    /// proporcion 2:1 de las constantes: el reensamblado necesita mas porque
+    /// sostiene los segmentos fuera de orden de todos los flujos a la vez,
+    /// mientras que el bufer de aplicacion se vacia en cuanto un mensaje se
+    /// interpreta.
+    #[must_use]
+    pub fn para_presupuesto(presupuesto: &aegis_presupuesto::Presupuesto) -> ConfigMotor {
+        let cuota = presupuesto.cuota(aegis_presupuesto::Componente::Red);
+        let cuota = usize::try_from(cuota).unwrap_or(usize::MAX);
+        ConfigMotor {
+            // Una tabla que no puede guardar nada no protege: los topes tienen
+            // suelo por la misma razon que lo tiene el presupuesto entero.
+            max_memoria: (cuota * 2 / 3).max(64 * 1024),
+            max_memoria_app: (cuota / 3).max(32 * 1024),
+            ..ConfigMotor::default()
+        }
+    }
+}
+
 /// Contadores del motor.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContadoresMotor {

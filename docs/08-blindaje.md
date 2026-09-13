@@ -114,7 +114,8 @@ pasiva (`TracerPid`) sigue activa y es segura.
 la libc. Como el cifrado de cadenas, esto sube el coste, no lo hace infinito. Las
 dos técnicas juntas —estática y dinámica— dejan fuera al atacante oportunista y
 al script que automatiza el análisis, que es el objetivo realista de un producto
-que también tiene que caber en 45 MB de RAM.
+que también tiene que caber en el presupuesto de memoria de una pasarela de
+1 GiB: 48 MiB en reposo.
 
 ---
 

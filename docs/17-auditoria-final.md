@@ -16,7 +16,7 @@ recursos:
 | **Clippy** | `-D warnings` sobre todos los targets. |
 | **Red Team** | Los 5 escenarios de ataque real resisten (FASES 9, 10, 13, 14, 22). |
 | **Estrés del ring** | Un millón de eventos por el ring buffer, en orden, sin pérdidas, con YARA y ML compitiendo por la CPU. |
-| **Recursos** | El agente de release arranca por debajo de **45 MB** de RSS. |
+| **Recursos** | El agente de release arranca por debajo de **las dos puertas**: el presupuesto de reposo del host (que escala con su RAM) y la línea base de arranque de 32 MiB (que no escala, y es la que caza una regresión en una máquina grande). |
 
 Corren en paralelo porque son independientes: mientras compila, la simulación de
 Red Team monta sus ataques y el estrés inunda el ring. El veredicto es único: si
@@ -29,7 +29,7 @@ cualquiera falla, la auditoría falla.
   Clippy (-D warnings)         OK
   Red Team (5 escenarios)      OK  Todas las defensas resistieron (5 escenarios).
   Estres del ring (1M eventos) OK  ritmo del ring: 519708 eventos/seg (objetivo 100000)
-  Recursos (RSS <= 45 MB)      OK  22368 KB de 46080 KB
+  Recursos en reposo           OK  22368 KB · reposo 81920 KB · linea base 32768 KB · perfil estacion
 
 AUDITORIA FINAL SUPERADA. AegisCore listo para release.
 ```

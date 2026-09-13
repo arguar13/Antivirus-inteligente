@@ -73,12 +73,22 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::from(2);
     };
 
+    // El presupuesto sale del host y de AEGIS_PERFIL, no de un argumento: que el
+    // que lanza el watchdog pueda aflojarle el techo por linea de ordenes seria
+    // dejar la ultima defensa a merced de quien edite un script de arranque.
+    let presupuesto = aegis_presupuesto::efectivo();
+    eprintln!(
+        "aegis-watchdog: {}",
+        aegis_presupuesto::resumen(&presupuesto).trim_end()
+    );
+
     let target = Target {
         program,
         args: prog_args,
         heartbeat,
         shutdown_marker: marker,
         max_heartbeat_age_ms: max_age_ms,
+        presupuesto,
     };
     let mut wd = Watchdog::new(target);
     if let Err(e) = wd.spawn() {

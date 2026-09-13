@@ -6,7 +6,8 @@
 # POR QUE NO ESTA EN EL WORKSPACE DEL AGENTE, medido y no opinado:
 #
 #   este arbol            340 crates transitivos, runtime tokio
-#   el agente             presupuesto de 45 MB de RSS, sincrono, panic=abort,
+#   el agente             presupuesto de memoria por clase de host (48 MiB en
+#                         reposo en una pasarela), sincrono, panic=abort,
 #                         y el arbol de dependencias tratado como superficie de
 #                         ataque
 #
