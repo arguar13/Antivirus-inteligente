@@ -1,0 +1,63 @@
+# Linea base de `unsafe` en el workspace del AGENTE — FASE 80 (AegisProof)
+#
+# LA INVARIANTE, dicha con precision
+# ----------------------------------
+# «Ningun crate de analisis ha ganado un `unsafe`». Analisis es lo que **mira
+# entrada que escribe un atacante**: paquetes, ficheros, reglas de terceros,
+# mensajes del enjambre, registros ajenos. Ahi un `unsafe` no es una decision de
+# rendimiento: es poner una vulnerabilidad de corrupcion de memoria en el camino
+# por el que entra lo hostil, en un proceso privilegiado, en cien mil maquinas.
+#
+# Y hay codigo del agente que **no puede** prescindir de `unsafe`, porque su
+# trabajo es hablar con el kernel: `ioctl`, `mmap`, mapas de eBPF, memoria
+# compartida, lectura de memoria ajena. Prohibirlo ahi no haria el producto mas
+# seguro; haria imposible el producto.
+#
+# La invariante util no es «cero unsafe», que seria mentira, sino esta:
+#
+#   TODO crate del agente O declara `#![forbid(unsafe_code)]`, O esta en esta
+#   lista con su razon escrita. No hay tercera opcion.
+#
+# Un lado lo impone el compilador; el otro, la revision. Un crate que se cuele sin
+# ninguna de las dos cosas hace fallar `verificar-invariantes.sh`.
+#
+# COMO SE ACTUALIZA
+# -----------------
+# Si un crate de esta lista deja de necesitar `unsafe`, se le pone el `forbid` y se
+# borra la fila. Si un crate NUEVO la necesita, se añade la fila ANTES del codigo,
+# y la pregunta correcta es casi siempre si esa parte puede vivir detras de un
+# crate que ya lo tiene —`aegis-scal` o `aegis-ipc`— en vez de abrir un frente
+# nuevo.
+#
+# FORMATO
+# -------
+#   <crate>  <razon en una linea>
+
+aegis-agent          Adjunta y consulta programas eBPF por libbpf, que es una API de C
+aegis-deception      Sockets de escucha de los servicios senuelo, con opciones que la libc solo expone por `setsockopt`
+aegis-forensics      Lee la memoria de un proceso vivo por `process_vm_readv`
+aegis-harden         Anti-depuracion: `ptrace(PTRACE_TRACEME)` y consulta de estado del propio proceso
+aegis-hardsense      `perf_event_open` y `mmap` del bufer de la PMU, que no tiene equivalente seguro
+aegis-honeytoken     Marca de ficheros senuelo con atributos extendidos por `setxattr`
+aegis-invitado       Corre DENTRO de la microVM con los mismos permisos que la muestra: traza con `ptrace` y enlaza solo `libc`
+aegis-ipc            ES el contrato ABI Ring 0 <-> Ring 3: bufer en anillo en memoria compartida, con el layout fijado por el driver
+aegis-kintegrity     Lee estructuras del kernel para la verificacion cruzada de procesos ocultos
+aegis-memhunter      Lee `/proc/<pid>/pagemap` y tablas de paginas: el dato que delata el codigo sin fichero
+aegis-mesh           Descubrimiento por multidifusion, con opciones de socket que la libc solo expone por `setsockopt`
+aegis-net            Filtro XDP y captura: mapas de eBPF y sockets crudos
+aegis-ptguard        `mmap` de la traza de Intel PT, que no cabe en memoria
+aegis-resp           Terminacion, cuarentena y aislamiento: `kill`, `setns` y control de interfaces
+aegis-rollback       Copia-sombra: `ioctl` de instantaneas del sistema de ficheros
+aegis-sandbox        Landlock y seccomp-bpf: las dos son llamadas al sistema sin envoltura segura
+aegis-scal           ES la capa de abstraccion del nucleo del sistema: si el `unsafe` no estuviera aqui, estaria repartido por veinte crates
+aegis-sync           Baja su propia prioridad con `setpriority` para no competir con la deteccion
+aegis-syscallguard   Registros de depuracion (DRx) y contadores de la PMU para verificar el origen de cada syscall
+aegis-unpacker       Ejecuta y observa un binario empaquetado en memoria para encontrar su OEP
+aegis-vmi            Lee memoria fisica del invitado por EPT: introspeccion por debajo del sistema operativo
+aegis-watchdog       Reinicio del proceso vigilado y consulta de su estado
+
+# NOTA sobre `aegis-e2e`: sus pruebas de integracion usan `unsafe` para fabricar
+# condiciones de fallo (memoria corrupta, senales). `#![forbid(unsafe_code)]` en
+# `lib.rs` no alcanza a `tests/`, que son crates aparte, asi que el `forbid` de la
+# biblioteca convive con ello y es correcto: lo que se prohibe es el `unsafe` en el
+# codigo que se despliega, no en el que lo ataca.

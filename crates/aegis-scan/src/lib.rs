@@ -14,6 +14,17 @@
 //! eBPF: si ese hilo se bloquea, el kernel empieza a descartar eventos y el
 //! producto se queda ciego justo durante el pico que provoco la saturacion.
 
+// SEGURIDAD DE MEMORIA IMPUESTA POR EL COMPILADOR (FASE 80).
+//
+// Este crate no necesita `unsafe`, asi que lo prohibe. No es una declaracion de
+// intenciones: `forbid` no se puede levantar desde dentro ni con un `allow`, asi
+// que el dia que alguien optimice un bucle con un puntero crudo, no compila.
+//
+// La invariante del producto no admite tercera opcion: todo crate del agente O
+// declara esto, O esta en `tools/lineabase-unsafe.txt` con su razon escrita. Un
+// crate que se cuele sin ninguna de las dos hace fallar
+// `tools/verificar-invariantes.sh`.
+#![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 pub mod memory;

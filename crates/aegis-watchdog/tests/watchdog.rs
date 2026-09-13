@@ -285,16 +285,56 @@ fn presupuesto_imposible() -> Presupuesto {
 ///
 /// Sondea la medida directamente y no via `supervise_once`, para no gastar
 /// muestras del propio contador que la prueba va a ejercitar despues.
-fn esperar_por_encima(wd: &mut Watchdog, techo: u64) {
+/// Lecturas seguidas por encima del techo que se exigen antes de empezar a
+/// muestrear.
+///
+/// # Por que no basta con una
+///
+/// El objetivo es `/bin/sh -c "... exec sleep 3600"`, asi que **hay un `execve`
+/// por medio**: el shell arranca, redirige y se sustituye por `sleep`. Durante
+/// esa sustitucion, leer `/proc/<pid>/status` puede fallar o devolver un registro
+/// a medio actualizar, y el uso observado sale como «no se sabe».
+///
+/// Eso no es un detalle del entorno: el contador de muestras sobre el techo se
+/// **reinicia** con cualquier lectura que no confirme el desbordamiento —y tiene
+/// que hacerlo, porque esa es justo la garantia de que un pico aislado no
+/// reinicia el EDR—. Si la prueba empezara a muestrear con el `execve` todavia en
+/// vuelo, una de sus muestras caeria en ese hueco y la decisiva no seria la
+/// decisiva.
+///
+/// Con tres lecturas seguidas por encima del techo, el `execve` ya ocurrio y
+/// `/proc` responde: la precondicion de la prueba queda **comprobada** en vez de
+/// supuesta. El margen real es estrecho —`sleep` tiene unos 100 KiB de memoria
+/// anonima frente a un techo de 64— asi que confiar en que «seguro que ya va
+/// bien» es exactamente lo que falla el dia que la maquina esta cargada.
+const LECTURAS_SEGUIDAS: u32 = 3;
+
+/// Espera a que el objetivo este **de forma estable** por encima del techo.
+///
+/// Devuelve el uso observado en la ultima lectura, para que quien llame pueda
+/// contarlo si algo falla despues.
+fn esperar_por_encima(wd: &mut Watchdog, techo: u64) -> u64 {
+    let mut seguidas = 0;
+    let mut ultimo = 0;
     for _ in 0..400 {
-        if let Some(u) = wd.pid().and_then(aegis_presupuesto::uso_de) {
-            if u.anonima > techo {
-                return;
+        match wd.pid().and_then(aegis_presupuesto::uso_de) {
+            Some(u) if u.anonima > techo => {
+                ultimo = u.anonima;
+                seguidas += 1;
+                if seguidas >= LECTURAS_SEGUIDAS {
+                    return ultimo;
+                }
             }
+            // Cualquier lectura que no confirme el desbordamiento vuelve a
+            // empezar la cuenta, igual que hace el supervisor.
+            _ => seguidas = 0,
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    panic!("el objetivo nunca paso de {techo} bytes");
+    panic!(
+        "el objetivo nunca estuvo {LECTURAS_SEGUIDAS} lecturas seguidas por encima de \
+         {techo} bytes (ultima lectura: {ultimo})"
+    );
 }
 
 #[test]
@@ -308,7 +348,7 @@ fn el_watchdog_reinicia_a_un_agente_que_se_come_la_maquina() {
     wd.spawn().unwrap();
     let pid_original = wd.pid().unwrap();
     esperar_vivo(&mut wd);
-    esperar_por_encima(&mut wd, 64 * 1024);
+    let uso = esperar_por_encima(&mut wd, 64 * 1024);
 
     // Las primeras muestras NO reinician: una sola lectura sobre el techo puede
     // ser un pico legitimo, y reiniciar el EDR abre una ventana sin proteccion.
@@ -330,7 +370,17 @@ fn el_watchdog_reinicia_a_un_agente_que_se_come_la_maquina() {
                 "observado {observado} no pasa de {techo}"
             );
         }
-        otro => panic!("se esperaba RestartMemoria, hubo {otro:?}"),
+        // `Starting` aqui significa que el supervisor NO vio el desbordamiento en
+        // esta muestra, asi que el contador se habia reiniciado por el camino.
+        // Se dice con esas palabras: «hubo Starting» a secas manda a quien lo lea
+        // a buscar un fallo de arranque que no existe.
+        Decision::Starting => panic!(
+            "el contador de muestras sobre el techo se reinicio por el camino: \
+             alguna muestra no vio el desbordamiento. Ultimo uso conocido antes de \
+             muestrear: {uso} bytes sobre un techo de {}",
+            64 * 1024
+        ),
+        otro => panic!("se esperaba RestartMemoria, hubo {otro:?} (uso {uso} bytes)"),
     }
     assert_eq!(wd.restarts(), 1);
     assert_ne!(
@@ -353,12 +403,17 @@ fn el_seguimiento_de_memoria_no_sobrevive_al_reinicio() {
     let mut wd = Watchdog::new(target);
     wd.spawn().unwrap();
     esperar_vivo(&mut wd);
-    esperar_por_encima(&mut wd, 64 * 1024);
+    let uso = esperar_por_encima(&mut wd, 64 * 1024);
 
     for _ in 0..aegis_presupuesto::MUESTRAS_PARA_REINICIO {
         wd.supervise_once(now_ns()).unwrap();
     }
-    assert_eq!(wd.restarts(), 1);
+    assert_eq!(
+        wd.restarts(),
+        1,
+        "no reinicio con {} muestras sobre el techo (uso {uso} bytes)",
+        aegis_presupuesto::MUESTRAS_PARA_REINICIO
+    );
     // Tras el reinicio el seguimiento arranca limpio.
     assert_eq!(wd.vigilante().muestras(), 0);
     assert_eq!(

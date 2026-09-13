@@ -498,6 +498,33 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "share" ]; then
     fi
 fi
 
+# LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
+#
+# Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo
+# demas tiene que haber corrido ya. Cada verificar-<fase>.sh comprueba lo suyo y lo
+# comprueba mejor que esta; lo que ninguna puede comprobar es que el agente siga
+# cabiendo en su presupuesto con TODAS las capacidades encendidas a la vez, que
+# ningun crate de analisis haya ganado un `unsafe` por el camino, que el arbol de
+# dependencias del endpoint no haya engordado sin justificacion escrita, y que el
+# producto entero —no solo el enjambre— siga protegiendo con el plano de control
+# caido.
+#
+# Y tiene DERECHO DE VETO: si demuestra que una invariante se rompio, se arregla de
+# raiz antes de dar el trabajo por terminado, aunque obligue a volver sobre una
+# fase anterior. Una invariante que se relaja «solo esta vez» deja de ser una
+# invariante y pasa a ser una aspiracion.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "invariantes" ]; then
+    printf '%s==>%s AegisProof · las trece invariantes sobre el producto completo\n' "$GRIS" "$FIN"
+    if ./tools/verificar-invariantes.sh > /tmp/aegis-invariantes-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-invariantes-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-invariantes-ci.log
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
 # un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
 # que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la

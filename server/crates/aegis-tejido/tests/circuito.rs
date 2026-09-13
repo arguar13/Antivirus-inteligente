@@ -262,21 +262,50 @@ fn el_veredicto_se_sostiene_en_mas_de_un_plano() {
     );
 }
 
-/// EL CIRCUITO ES DETERMINISTA. Dos recorridos sobre los mismos hechos dan el
-/// mismo identificador, el mismo veredicto y la misma frase.
+/// EL CIRCUITO ES DETERMINISTA — INVARIANTE 4 de la FASE 80.
+///
+/// Dos recorridos sobre los mismos hechos dan el mismo identificador, el mismo
+/// veredicto —frase y señales incluidas—, el mismo caso y la misma propuesta de
+/// contencion.
 ///
 /// No es una propiedad estetica: sin ella no se puede comparar el informe de hoy
-/// con el de ayer, que es como se detecta que un cambio ha movido una deteccion.
+/// con el de ayer, que es como se detecta que un cambio ha movido una deteccion
+/// sin que nadie lo pretendiera. Y no basta con que coincida el resultado: dos
+/// ejecuciones que llegan a «malicioso» por razones distintas son dos productos
+/// distintos, y lo unico que el analista ve es la frase.
 #[test]
-fn dos_recorridos_dan_exactamente_lo_mismo() {
+fn el_determinismo_cubre_veredicto_caso_y_contencion() {
     let a = circuito().expect("primer recorrido");
     let b = circuito().expect("segundo recorrido");
 
+    // EL IDENTIFICADOR.
     assert_eq!(a.contenido.texto(), b.contenido.texto());
-    assert_eq!(a.veredicto.resultado, b.veredicto.resultado);
-    assert_eq!(a.veredicto.severidad, b.veredicto.severidad);
-    assert_eq!(a.veredicto.confianza, b.veredicto.confianza);
-    assert_eq!(a.veredicto.porque, b.veredicto.porque);
+    assert_eq!(a.sha256_del_contenido, b.sha256_del_contenido);
+
+    // EL VEREDICTO, entero: no basta con que coincida el resultado. Dos
+    // ejecuciones que llegan a «malicioso» por razones distintas son dos
+    // productos distintos, y el analista solo ve la frase.
+    assert_eq!(a.veredicto, b.veredicto);
+    assert_eq!(a.veredicto.senales.len(), b.veredicto.senales.len());
+    for (x, y) in a.veredicto.senales.iter().zip(&b.veredicto.senales) {
+        assert_eq!(x.motor, y.motor);
+        assert_eq!(x.juicio, y.juicio);
+        assert_eq!(x.confianza, y.confianza);
+        assert_eq!(x.porque, y.porque);
+    }
+
+    // EL CASO: el numero de lineas de cronologia y lo que dice su parada.
+    assert_eq!(a.lineas_de_cronologia, b.lineas_de_cronologia);
+    let caso_a = a.paradas.iter().find(|p| p.numero == 6).expect("parada 6");
+    let caso_b = b.paradas.iter().find(|p| p.numero == 6).expect("parada 6");
+    assert_eq!(caso_a.salida, caso_b.salida);
+
+    // LA PROPUESTA DE CONTENCION, entera: sujeto, accion y justificacion.
+    assert_eq!(a.contencion, b.contencion);
+
+    // Y el linaje y el informe completo.
+    assert_eq!(a.linaje.aristas(), b.linaje.aristas());
+    assert_eq!(a.linaje.entidades(), b.linaje.entidades());
     assert_eq!(a.informe(), b.informe());
 }
 

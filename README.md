@@ -231,42 +231,113 @@ protección en cuanto se cae el enlace.
 
 ```
 shared/include/aegis_abi.h    Contrato ABI Ring 0 <-> Ring 3 (fuente de verdad)
-crates/
-  aegis-ipc/                  Espejo Rust del ABI + consumidor del ring   [hecho]
-  aegis-agent/                Colector eBPF, grafo de linaje, triaje      [hecho]
-  aegis-vuln/                 Escáner de postura y CVE del host           [hecho]
-  aegis-net/                  IDS de red, filtro XDP, detección de barridos [hecho]
-  aegis-resp/                 Terminación, cuarentena AES-256-GCM, aislamiento [hecho]
-  aegis-scan/                 YARA-X sobre ficheros y memoria de procesos    [hecho]
-  aegis-ml/                   Atributos estáticos PE/ELF + inferencia ONNX   [hecho]
-  aegis-ransom/               Velocidad, transición de entropía, señuelos    [hecho]
-  aegis-evasion/              Vaciado de proceso, inyección, hooks           [hecho]
-  aegis-intel/                Reputación k-anónima + caché LRU               [hecho]
-  aegis-e2e/                  Integración de extremo a extremo + estrés      [hecho]
-  aegis-harden/               Cifrado de cadenas + anti-depuración           [hecho]
-  aegis-kguard/               Integridad HMAC del eBPF + permisos de mapas   [hecho]
-  aegis-audit/                Registro de auditoría cifrado + rotación       [hecho]
-  aegis-ctl/                  Canal de control por socket Unix + aegisctl    [hecho]
-  aegis-update/               Actualización firmada Ed25519 + rollback       [hecho]
-  aegis-forensics/            Volcado de memoria en vivo + exploits          [hecho]
-  aegis-sync/                 Sincronización diferencial (Merkle) de IoCs    [hecho]
-  aegis-fim/                  Integridad de ficheros (inotify + BLAKE3)      [hecho]
-  aegis-watchdog/             Watchdog de alta disponibilidad                [hecho]
-  aegis-presupuesto/          Presupuesto de memoria por clase de host       [hecho]
-  aegis-invitado/             Agente de detonacion (dentro del invitado)     [hecho]
-  aegis-ingest/               Ingesta y normalizacion de registros           [hecho]
-  aegis-entidad/              Modelo de entidad unico + arbitro de veredictos [hecho]
-  aegis-ui/                   Tauri v2, no residente
-drivers/
-  windows/aegis-drv/          Minifilter + callbacks + ELAM (C, WDK)
-  linux/aegis-bpf/            Sondas eBPF CO-RE + filtro XDP (C, libbpf)  [hecho]
-cloud/
-  api/                        Reputación k-anónima (Go)
-  sandbox/                    Detonación en microVM (Go)
-tools/
-  abi-check.sh                Verificación cruzada del layout C <-> Rust
-docs/                         Blueprint arquitectónico
+crates/                       Workspace del AGENTE: sincrono, sin runtime async, panic=abort
+server/crates/                Workspace del PLANO DE CONTROL: tokio, axum, sqlx
+swarm-net/                    Transporte libp2p del enjambre, FUERA del agente a proposito
+drivers/windows/aegis-drv/    Minifilter + callbacks + ELAM (C, WDK)
+drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf)
+cloud/                        Reputacion k-anonima y detonacion (Go)
+tools/                        28 puertas de verificacion + ABI check + CI local
+docs/                         Blueprint arquitectonico, una pagina por fase
 ```
+
+Los **dos workspaces están separados a propósito**, y no por gusto: el agente es
+síncrono, sin runtime asíncrono, con un presupuesto de memoria acotado por clase
+de host y `panic = "abort"`; el servidor es justo lo contrario. Mezclarlos
+contaminaría el árbol de dependencias del agente —que en un EDR **es** superficie
+de ataque— con cientos de crates que sólo necesita el servidor. Separándolos, la
+auditoría de la cadena de suministro del endpoint sigue siendo corta y revisable:
+**39 dependencias directas, cada una con su justificación escrita** en
+[`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y `make ci` falla si
+alguna no la tiene.
+
+### Componentes, con su estado real
+
+La columna `forbid(unsafe)` no es informativa: es una **invariante comprobada**.
+Todo crate del agente o la tiene en «sí» —y entonces lo impone el compilador— o
+está en [`tools/lineabase-unsafe.txt`](tools/lineabase-unsafe.txt) con su razón
+escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba.
+
+#### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
+
+**54 crates · 1823 pruebas**
+
+| Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
+|---|---|---:|---|---|
+| `aegis-agent` | Agente de deteccion de AegisCore: consumidor de telemetria, grafo de linaje y triaje | 54 | — | — |
+| `aegis-attest` | Atestacion remota con raiz de confianza en el TPM 2.0 (FASE 49) | 11 | — | sí |
+| `aegis-audit` | Registro local de auditoria cifrado con rotacion automatica | 9 | — | sí |
+| `aegis-behavior` | Motor conductual de AegisCore: grafo dirigido de procesos, tecnicas MITRE ATT&CK y puntuacion de riesgo | 22 | — | sí |
+| `aegis-cloudnative` | Deteccion de escape de contenedor (Deepce/Traitor) a partir de setns/unshare/capset/bpf/mount, con el decisor en Rust puro y el enganche eBPF declarado gated | 13 | `verificar-cloudnative.sh` | sí |
+| `aegis-ctl` | Protocolo de control por socket Unix y CLI de administracion aegisctl | 10 | — | sí |
+| `aegis-deception` | Servicios senuelo de red y deteccion de reconocimiento sin falsos positivos | 18 | — | — |
+| `aegis-e2e` | Pruebas de integracion de extremo a extremo de AegisCore | 15 | — | sí |
+| `aegis-edgeml` | Inferencia TinyML en el borde: deteccion de zero-day por comportamiento, sin nube (FASE 53) | 6 | — | sí |
+| `aegis-emu` | Micro-sandbox de emulacion x86-64 en memoria: desempaqueta binarios desconocidos y observa su comportamiento sin ejecutarlos en el host | 39 | — | sí |
+| `aegis-entidad` | Modelo de entidad unico y arbitro de veredictos para todos los subsistemas de deteccion | 61 | `verificar-fabric.sh` | sí |
+| `aegis-evasion` | Deteccion de vaciado de procesos, inyeccion reflectiva y manipulacion de hooks | 22 | — | sí |
+| `aegis-fim` | Monitorizacion de integridad de ficheros criticos con inotify y BLAKE3 | 8 | — | sí |
+| `aegis-firehose` | Entrega sin perdida de auditoria hacia SIEM y SOAR: WAL en disco, Kafka y Syslog sobre TLS | 32 | — | sí |
+| `aegis-firmware` | Escaner de integridad de firmware: TPM 2.0 PCRs, event log TCG, Secure Boot y revocacion UEFI (DBX) | 24 | — | sí |
+| `aegis-fleet` | Agente de gestion de flota sobre gRPC/mTLS con certificados de rotacion automatica y claves que nunca tocan el disco | 52 | — | sí |
+| `aegis-forensics` | Introspeccion de memoria en vivo y deteccion de exploits de corrupcion | 31 | — | — |
+| `aegis-fwaudit` | Auditoria estrictamente de solo lectura del firmware — tablas ACPI (WPBT) y ROM SPI (descriptor Intel, volumenes UEFI y ficheros FFS) contra implantes de plataforma | 67 | `verificar-fwaudit.sh` | sí |
+| `aegis-harden` | Blindaje del agente: cifrado de cadenas y anti-depuracion | 12 | — | — |
+| `aegis-hardsense` | Telemetria de la PMU (perf_event_open) para detectar ataques de canal lateral y anomalias ROP/JOP por picos de fallos de cache y de prediccion de saltos | 7 | `verificar-hardsense.sh` | — |
+| `aegis-honeytoken` | Honey-tokens dinamicos y decepcion activa: credenciales senuelo atribuibles (FASE 52) | 10 | `verificar-honeytoken.sh` | — |
+| `aegis-hunt` | Ejecucion de consultas AegisQL contra el estado real del endpoint | 37 | — | sí |
+| `aegis-ingest` | Ingesta y normalizacion de registros de cualquier origen, con contrapresion y punto de control durable | 201 | `verificar-ingest.sh` | sí |
+| `aegis-intel` | Cliente de reputacion con k-anonimato y cache local | 22 | — | sí |
+| `aegis-invitado` | Agente invitado de detonacion: traza el comportamiento de una muestra y lo sube por vsock | 38 | `verificar-detonate.sh` | — |
+| `aegis-ipc` | Contrato ABI y consumidor del ring buffer compartido Ring 0 <-> Ring 3 de AegisCore | 17 | `verificar-resiliencia.sh` | — |
+| `aegis-ips` | Prevencion en linea: decide que flujos cortar y baja el veredicto al kernel | 76 | `verificar-ips.sh` | sí |
+| `aegis-kguard` | Integridad del bytecode eBPF y bloqueo de permisos de mapas | 11 | — | sí |
+| `aegis-kintegrity` | Verificacion cruzada de la integridad del kernel: deteccion de rootkits DKOM y procesos ocultos | 14 | — | — |
+| `aegis-l7hunter` | Extraccion de telemetria L7 en claro por uprobes de eBPF sobre SSL_read/SSL_write, y caza de balizas C2 sin romper el certificate pinning | 56 | `verificar-l7hunter.sh` | sí |
+| `aegis-memhunter` | Analisis de VAD y de la tabla de paginas (PTE) para delatar codigo sin fichero, inyeccion reflexiva y module stomping, sin leer la memoria del proceso | 39 | `verificar-memhunter.sh` | — |
+| `aegis-mesh` | Malla P2P de la red local: propagacion cifrada y autenticada de vacunas entre agentes | 19 | — | — |
+| `aegis-ml` | Extraccion de atributos estaticos PE/ELF e inferencia local ONNX para AegisCore | 22 | — | sí |
+| `aegis-net` | IDS de red y filtro XDP de AegisCore | 45 | — | — |
+| `aegis-parser` | Lexer, parser y validador del lenguaje de consulta de telemetria de AegisCore | 60 | — | sí |
+| `aegis-pqc` | Criptografia post-cuantica hibrida (ML-KEM-768 + ML-DSA-65) para el canal C2 y el firmado de actualizaciones | 39 | — | sí |
+| `aegis-presupuesto` | Presupuesto de memoria del agente: reparto por host, regimenes y obligacion desde el kernel | 50 | `verificar-presupuesto.sh` | sí |
+| `aegis-ptguard` | Trazado de ejecucion por hardware (Intel PT) para detectar ROP/JOP (FASE 51) | 12 | `verificar-ptguard.sh` | — |
+| `aegis-ransom` | Motor de deteccion y contencion de ransomware en tiempo real | 22 | — | sí |
+| `aegis-resp` | Motor de respuesta activa de AegisCore: terminacion, cuarentena y aislamiento | 22 | — | — |
+| `aegis-rollback` | Reversion de ransomware: copia-sombra cifrada y restauracion en milisegundos (FASE 50) | 6 | — | — |
+| `aegis-sandbox` | Aislamiento preventivo de procesos con Landlock y seccomp-bpf | 11 | — | — |
+| `aegis-scal` | Capa de abstraccion del nucleo del sistema (SCAL): telemetria y control independientes del sistema operativo | 35 | — | — |
+| `aegis-scan` | Motor de deteccion profunda de AegisCore: YARA sobre ficheros y memoria de procesos | 27 | `verificar-memscanner.sh` | sí |
+| `aegis-selfdefense` | Autodefensa legitima: OTP firmado del Control Plane, decision de tamper, clasificacion ELAM y requisitos PPL | 42 | — | sí |
+| `aegis-swarm` | Enjambre autonomo: nucleo sans-io del protocolo de reparto de inteligencia y ordenes de contencion entre agentes aislados del plano de control | 75 | `verificar-swarm.sh` | sí |
+| `aegis-sync` | Sincronizacion diferencial de indicadores de compromiso con arboles de Merkle | 8 | — | — |
+| `aegis-syscallguard` | Deteccion de syscalls directas respaldada por hardware (PMU/DRx) y verificacion cruzada del origen de cada syscall | 15 | — | — |
+| `aegis-unpacker` | Desempaquetado dinamico en memoria: detecta el OEP de un binario empaquetado y extrae el codigo real | 7 | — | — |
+| `aegis-update` | Actualizacion firmada (hibrida Ed25519+ML-DSA-65) con rollback atomico | 18 | `verificar-resiliencia.sh` | sí |
+| `aegis-vmi` | Introspeccion de maquina virtual (VMI) DEFENSIVA: EPT y lectura de estructuras del kernel desde memoria fisica para detectar rootkits por debajo del SO | 10 | `verificar-vmi.sh` | — |
+| `aegis-vuln` | Escaner de postura y vulnerabilidades del host para AegisCore | 45 | — | sí |
+| `aegis-watchdog` | Watchdog de alta disponibilidad del agente y el driver | 8 | — | — |
+| `aegis-wire` | Diseccion semantica de protocolos: convierte trafico crudo en hechos, con reensamblado TCP resistente a evasion | 191 | `verificar-wire.sh` | sí |
+
+#### Workspace del plano de control (`server/crates/`)
+
+**13 crates · 971 pruebas**
+
+| Crate | Qué hace | Pruebas | Puerta propia |
+|---|---|---:|---|
+| `aegis-case` | Ciclo de vida del incidente: de alerta a caso cerrado, con cronologia automatica y rastro inmutable | 79 | `verificar-case.sh` |
+| `aegis-detonate` | Detonacion de muestras en microVM con invitado hostil e informe de comportamiento determinista | 94 | `verificar-detonate.sh` |
+| `aegis-enrich` | Orquestacion de enriquecimiento con declaracion obligatoria de exposicion de datos y modo sin salida | 125 | `verificar-enrich.sh` |
+| `aegis-itdr` | Deteccion y respuesta a amenazas de identidad (ITDR): Kerberoasting, Golden/Silver Ticket y grafo de identidad con centralidad | 25 | `verificar-itdr.sh` |
+| `aegis-orchestrator` | Maquina de estados transaccional de remediacion de flota; ante una deteccion critica lanza en paralelo el playbook de respuesta, resiliente a fallos parciales e idempotente en el reintento | 6 | `verificar-orchestrator.sh` |
+| `aegis-pipeline` | Canalizacion de registros del plano de control: nubes, deduplicacion, orden por ocurrencia y cuotas por inquilino | 56 | `verificar-ingest.sh` |
+| `aegis-predict` | Caminos de ataque mas probables, radio de explosion y contencion preventiva acotada | 53 | `verificar-predict.sh` |
+| `aegis-ruleforge` | La fabrica de contenido: compila el corpus mundial de deteccion en artefactos firmados | 181 | `verificar-ruleforge.sh` |
+| `aegis-scale` | Plano de control para 100.000 agentes: particionado de flota, conexiones, base de datos y actualizacion progresiva | 61 | `verificar-scale.sh` |
+| `aegis-server` | Plano de control de AegisCore: ingesta de flota gRPC/mTLS y API de administracion | 122 | — |
+| `aegis-share` | Plataforma STIX/TAXII de inteligencia con difusion controlada, federacion y procedencia reversible | 120 | `verificar-share.sh` |
+| `aegis-tejido` | El tejido de AegisFabric: inventario de veredictos, traduccion a la escala unica y el circuito completo de extremo a extremo | 38 | `verificar-fabric.sh` |
+| `fleet-simulator` | Generador de carga: simula una flota de miles de agentes contra el plano de control | 11 | — |
 
 ## Documentación
 
@@ -345,6 +416,7 @@ docs/                         Blueprint arquitectónico
 | 72 | [AegisEnrich: preguntar a muchas fuentes sin contar lo que no toca](docs/72-enrich.md) — la regla que define la fase, y que casi ningún producto dice en voz alta: **consultar por un resumen le dice al proveedor que ese fichero está en tu red**; no es un efecto secundario de la consulta, *es* la consulta — le das información que no tenía, gratis, y no se puede retirar. Casi siempre compensa, pero «casi siempre» es una decisión, y una decisión que nadie ve no es una decisión: es un valor por defecto. Así que la exposición se **declara en el tipo** —qué campos salen, a dónde, con qué retención y bajo qué jurisdicción, todo enumerados cerrados, campo obligatorio de la ficha: un analizador sin declararla **no compila**— y el panel enseña *qué revela* cada campo antes de ejecutar, no su nombre: «revela que ese fichero exacto está en tu red» y «revela que eres **tú** quien pregunta, que convierte todo lo anterior en atribuible». Lo que **nunca** sale se decide una sola vez y no en cada analizador —una regla repartida por veinte es una regla que el veintiuno se salta—: cuentas, rutas, líneas de órdenes, direcciones privadas y nombres internos, cada uno con su motivo escrito. El **modo sin salida** se cumple *por construcción*: la salida es una **capacidad** que se entrega, no una bandera que se comprueba, y con el modo puesto ese objeto **no existe** — la diferencia que va de «prometió no salir» a **«no se le dio por dónde»**; en la puerta de calidad el analizador lo intenta y sale con 0 consultas, mientras los locales siguen dando veredicto (sin salida es *degradado*, no apagado). Lo que devuelve un analizador lo escribió un tercero por Internet dentro del proceso más privilegiado del producto, así que se **sanea siempre** —20.000 B → 510, 1.000 etiquetas → 1, confianza 255 → 100, fecha futura → presente— y hay cuatro cosas que **no puede elegir**: su clase (si no, un canal comunitario se declara autoritativo y se salta la jerarquía entera), su exposición, si hay red, y el observable del dictamen. La **caché es también privacidad** —cada consulta que no se hace es una vez menos que lo confirmas, y la frecuencia es lo que permite reconstruir tu cronología—, con caducidad por tipo sacada del mundo real (**IP 2 días** frente a resumen 180: tratarlas igual es bloquear a quien ocupa hoy una dirección por lo que hizo quien la ocupaba la semana pasada) y el acierto **negativo a una hora**, porque guardar «no lo conozco» durante meses es no enterarse justo del malware nuevo. La cuota se **reserva**, no se comprueba: 1.440 peticiones concurrentes contra una ráfaga de 100 conceden **exactamente 100**, porque comprobar-y-actuar deja pasar de más y pasarse de cuota corta el servicio *durante* el incidente. Y la fusión **no promedia**: dos fuentes seguras y contrarias dan **`EnDisputa`** y no un valor intermedio que se leería como evidencia débil cuando lo que hay es evidencia fuerte en las dos direcciones; cuatro «no sé» dan **`SinDatos`** y no «probablemente limpio» —un fichero que nadie conoce es lo que parece un fichero recién compilado—; y una observación propia gana a tres reputaciones porque nosotros **vimos** la cosa y ellas repiten lo que alguien dijo. Un analizador colgado se corta (203 ms con plazo de 200 y uno que tarda 2.000), uno que entra en pánico se recoge, y doce fusiones concurrentes dan el mismo veredicto **y la misma explicación** |
 | 73 | [AegisShare: inteligencia con difusión impuesta en el código](docs/73-share.md) — la asimetría que lo decide todo es que **compartir es irreversible y los errores se propagan**, y por eso los dos fallos que importan no son de formato: que salga algo que no debía —y no hace falta un ataque, basta un filtro que se quedó atrás cuando se añadió un camino de salida nuevo—, y que entre algo envenenado y **no se pueda deshacer**. STIX y TAXII son la parte fácil. **TLP y PAP son dos ejes** y casi todo el mundo implementa sólo el primero: `TLP:GREEN`+`PAP:RED` significa «compártelo con toda la comunidad **y no lo bloquees**», porque bloquearlo le dice al atacante que se le ha visto y cambia de infraestructura — quien sólo mira TLP lo empuja al motor de bloqueo y **quema la operación de quien lo compartió**, y la siguiente vez no se lo mandan. El retículo sólo restringe: combinar toma lo peor **de cada eje por separado** (tomar «el peor objeto» perdería la mitad de la restricción), lo que llega sin marcar es lo más restrictivo, y el `TLP:PINK` que aparezca el año que viene se lee como RED y no como público. Un paquete STIX es **JSON de un desconocido que procesa el plano de control**, así que la extensibilidad del formato *es* la superficie de ataque: topes de bytes, objetos, propiedades y textos, y **profundidad medida ANTES de analizar** —10.000 llaves abiertas desbordan la pila antes de que ninguna validación llegue a ejecutarse—; más las tres comprobaciones que casi nadie hace, y la que más ha filtrado en sistemas reales es que **una referencia de marcado que no resuelve restringe MÁS, no menos** (si no, el objeto se pinta sin etiqueta: documento válido, objeto entero, y lo único que falta es lo que decía que no se podía enseñar). «No sale por ningún camino» es arquitectura antes que código: **un solo estrangulamiento** por el que pasan TAXII, federación, enjambre y exportación —si cada uno tuviera su filtro, el que se quedara atrás no fallaría ruidosamente, *compartiría de más*— y `TLP:RED` **no lo distribuye ningún canal**, ni una exportación a fichero, porque exportar es distribuir; en la puerta el motivo de retención es **el mismo en los cinco destinos**, así que la propiedad es cierta por construcción y no por haber configurado bien. El enjambre lleva dos topes que **no se pueden subir**: nada por encima de `TLP:GREEN` y nada que no permita bloqueo propio, porque llega a máquinas que el atacante puede haber comprometido —el supuesto de la FASE 68— y lo que cruza acaba en el motor de bloqueo de cien mil endpoints. La paginación TAXII por **cursor `(añadido, id)`** y no por desplazamiento, que *pierde objetos en silencio* si alguien escribe entre dos peticiones, y el sondeo va por «cuándo se añadió aquí» para que lo que llega viejo por federación se vea hoy. En federación, «ya vi ese identificador» corta el bucle **y también las correcciones** —«esto era un falso positivo, lo retiro» no llegaría nunca—, así que se usa el **vector de camino** de BGP, con el último salto autenticado (lo único infalsificable) y un tope de saltos que **no depende de que nadie diga la verdad**; los conflictos se resuelven por `(modified, revocado, id)` y jamás por hora de llegada, que haría que dos nodos de la misma federación acabaran distintos. Y la procedencia: la confianza **se calcula, no se guarda** (un escalar dejaría el número inflado al revocar), un objeto con varios aportes **sobrevive** a que caiga uno, y —lo que casi nadie hace— **dos canales que repiten al mismo son una fuente**, que es como un indicador parece corroborado sin estarlo y lo que explota quien envenena: envenena el de arriba y cobra en los dos. En la puerta: 467 aportes tocados, **430 caen, 37 sobreviven** con la confianza recalculada y 237 quedan intactos; **3.082 entradas hostiles** sin un solo pánico; y la doctrina de la FASE 68 **se cuenta**, no se afirma — la carga del enjambre tiene dos variantes y ninguna es una orden |
 | 74 | [AegisFabric: un solo modelo de entidad, un solo veredicto](docs/74-fabric.md) — la tesis es incómoda y comprobable: **nueve subsistemas de detección, cada uno con su idea de «qué es una cosa», producen nueve sucesos sin relación ante un mismo ataque**. En este árbol había **doce enumerados de veredicto y nueve de severidad**, ninguno mal por separado, y ni una tabla que dijera cuál se traduce a cuál — así que ante el mismo incidente el disector decía `FicheroTransferido{sha256}`, el corpus `Entrada{clave,clase}`, la detonación `ConHallazgos{hechos}` sobre una `Muestra{sha256}`, el caso `Observable::Hash` y el enjambre `Ioc{FileSha256}`: cinco nombres para la misma cosa, y la unión la hacía una persona de cabeza. El identificador **se deriva, no se coordina** (dos observadores con los mismos hechos llegan al mismo nombre sin hablar, que es lo que salva un corte de red), y lo que más decide es **lo que NO se fusiona**: un **pid reciclado** no hereda la historia del anterior —por eso el identificador lleva el arranque, y sin él la cronología mezcla dos procesos ajenos—, el **contenido y la ubicación** son entidades distintas —el mismo fichero en dos rutas no es una cosa, y dos ficheros en la misma ruta tampoco: eso es una actualización, y confundirlos hace que un binario nuevo herede el veredicto del que sustituyó—, y el **mismo flujo desde los dos extremos** sí es uno. Severidad y confianza son **ejes distintos**: un adware con certeza absoluta y un indicio de ransomware dan el mismo «riesgo de 0 a 100» y son la diferencia entre anotarlo y levantar a alguien de la cama. Cada motor lleva su **tope de confianza** con su razón —99 la detonación, que *vio* la muestra correr; 70 el modelo, porque una puntuación alta no es una probabilidad salvo que se haya calibrado— y lo impone el **constructor**, no una convención. Corroborar **cuenta planos, no motores**: el estático y el modelo del endpoint comparten la entrada entera, así que si el fichero está ofuscado **fallan los dos a la vez y por lo mismo**, y contarlos como dos es la falsa confirmación más fácil de fabricar; toda la inteligencia externa es **un** plano, y nunca decide sola. El árbitro es una **función pura** —el tiempo entra como argumento— con seis reglas en orden y **sin medias**: dos motores seguros y contrarios dan `EnDisputa`, no un punto medio que se leería como evidencia débil. La prueba que justifica la fase encadena **once subsistemas sobre un solo identificador** —paquete → disección → fichero extraído → corpus mundial → microVM → árbitro → caso → enriquecimiento → camino de ataque → contención → TAXII → enjambre—, con el código real de cada uno; y dos paradas dicen lo que el producto es: el enriquecimiento responde **`sin-datos`** porque corre sin salida y «nadie lo conoce» no es «está limpio», y la contención **corta la identidad y no el controlador de dominio**, que está protegido. La ruta caliente se mide antes y después (85 ns el criterio viejo, **2,9 µs** el árbitro con su frase, sus planos y sus señales, bajo un techo declarado de 5 µs), y el coste en el endpoint son **cero crates nuevos**, comprobado por subconjunto del árbol del agente y no contando dependencias. Y la fase, al usar el producto desde fuera por primera vez, encontró que los dos marcados AMBER de `aegis-share` **tenían el nombre cambiado**: `Tlp::Amber` valía `TLP:AMBER+STRICT`. El orden era correcto y todo funcionaba, así que ninguna prueba lo veía —la ida y vuelta de etiqueta es estable con los nombres cambiados porque sólo compara el sistema consigo mismo—; lo que rompe es quien escribe `if tlp <= Tlp::Amber { compartir }` y sin saberlo deja pasar «sólo mi organización». **Un identificador que miente sobre su valor es un fallo de seguridad aunque la aritmética esté bien** |
+| 75 | [AegisProof: las trece invariantes, demostradas sobre el producto completo](docs/75-invariantes.md) — cada una de las veintisiete puertas de fase comprueba lo suyo y lo comprueba mejor que ésta; lo que **ninguna puede comprobar es lo que se rompe al sumar**: que el agente siga cabiendo en su presupuesto con *todas* las capacidades encendidas a la vez —cada fase midió la suya, ninguna midió el total—, que ningún crate de análisis haya ganado un `unsafe` por el camino, que el árbol del endpoint no haya engordado sin que nadie lo justifique, y que el producto **entero** siga protegiendo con el plano de control caído. Tiene **derecho de veto**: si una invariante se rompió, se arregla *de raíz* antes de dar el trabajo por terminado, aunque obligue a volver sobre una fase anterior — una invariante que se relaja «sólo esta vez» deja de ser una invariante y pasa a ser una aspiración. El **presupuesto** no son 46 080 KB fijos, y se dice por qué: un número fijo obliga a elegir entre ahogar una pasarela de 1 GiB y desaprovechar un servidor de 512 GiB, así que se mide contra el reparto por clase de host, con la huella de arranque —32 MiB medidos— como regresión dura, y con la tercera capa impuesta por **el kernel** (`MemoryHigh` 321 MiB, `MemoryMax` 482 MiB de cgroup v2) porque las dos de dentro las ejecuta un proceso que puede estar comprometido. La **seguridad de memoria** no se afirma como «cero `unsafe`», que sería mentira —hay código cuyo trabajo *es* hablar con el kernel—, sino como algo comprobable y sin tercera opción: todo crate del agente **o** declara `#![forbid(unsafe_code)]`, y lo impone el compilador, **o** está en la línea base con su razón escrita; la fase encontró **19 crates que no usaban `unsafe` y tampoco lo prohibían** —entre ellos `aegis-parser`, `aegis-scan`, `aegis-ml` y `aegis-behavior`, análisis puro que mira entrada hostil— y ahora son 32 con el `forbid` y 22 declarados. La **autonomía** no es permisividad, y ésa es la prueba que más dice: un agente aislado que aceptara órdenes sin firma sería peor que uno que no detecta nada, porque el atacante **crea** el aislamiento y luego manda — así que el corte no afloja ni una comprobación, y las tres acciones que apagarían la defensa (levantar un aislamiento, desactivar una regla, degradar la protección) se descartan *por su clase*, antes de mirar la firma. El **autoataque** usa cada capacidad contra el producto —el disector como amplificador, el IPS como denegación de servicio, el compilador de reglas como vía de ejecución, la detonación como fuga del invitado, la ingesta como agotamiento de memoria, el enriquecimiento como fuga de datos, la federación como envenenamiento— con **205 pruebas**, porque cada capacidad que se añade a un producto de seguridad es una capacidad nueva para quien lo comprometa. Y cuatro invariantes se verifican **por lo que falta**, que es la única garantía que no depende de que el código de comprobación esté bien: la carga del enjambre no tiene variante que sea una orden, la salida de la detonación no tiene variante para «red de verdad», y el evento del invitado no tiene ninguna que se pueda ejecutar |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo

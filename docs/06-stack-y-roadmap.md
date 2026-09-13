@@ -14,29 +14,61 @@
 | Entrenamiento ML | **Python** | Solo offline. Al endpoint llega un ONNX, nunca un intérprete de Python |
 | Ensamblador | **Solo donde no hay alternativa** | Trampolines del *instrumentation callback* y lectura de registros de control. Cada línea documentada y aislada en su propio módulo |
 
-**Sobre `unsafe` en Rust.** Los crates de lógica llevan `#![forbid(unsafe_code)]`.
-El `unsafe` se concentra en `aegis-ipc` (memoria compartida) y en los crates de
-FFI con el sistema operativo, donde cada bloque tiene su comentario `// SAFETY:`
-justificando la invariante. La disciplina es que `unsafe` sea auditable en una
-tarde, no que no exista.
+**Sobre `unsafe` en Rust.** «Cero `unsafe`» sería mentira: hay código del agente
+cuyo trabajo *es* hablar con el kernel —`ioctl`, `mmap`, mapas de eBPF, memoria
+compartida, memoria ajena— y prohibírselo no haría el producto más seguro, lo
+haría imposible. La invariante que sí es cierta, y que `make ci` comprueba, no
+admite tercera opción:
+
+> Todo crate del agente **o** declara `#![forbid(unsafe_code)]` —y entonces lo
+> impone el compilador— **o** está en
+> [`tools/lineabase-unsafe.txt`](../tools/lineabase-unsafe.txt) con su razón
+> escrita.
+
+Un lado lo impone el compilador; el otro, la revisión. Un crate que se cuele sin
+ninguna de las dos cosas hace fallar `tools/verificar-invariantes.sh`.
+
+El `unsafe` se concentra a propósito: `aegis-ipc` (memoria compartida del anillo
+Ring 0 ↔ Ring 3) y `aegis-scal` (la capa de abstracción del núcleo del sistema —
+si no estuviera ahí, estaría repartido por veinte crates). Donde de verdad importa
+—lo que **mira entrada que escribe un atacante**— no hay ninguno: ahí un `unsafe`
+no es una decisión de rendimiento, es una corrupción de memoria en el camino por
+el que entra lo hostil, en un proceso privilegiado, en cien mil máquinas.
+
+La línea base funciona también al revés: si un crate declarado deja de necesitar
+`unsafe`, la puerta lo dice y pide que se le ponga el `forbid`. Una lista de
+excepciones que sólo crece deja de ser una lista de excepciones.
 
 ### Dependencias
 
 Cada dependencia de terceros es superficie de ataque de cadena de suministro en
-un producto de seguridad. Lista corta y justificada:
+un producto de seguridad. En el agente eso no es una frase: es código de un
+tercero que acabará ejecutándose **con privilegios en cada máquina de la flota**.
+
+La lista completa, con una justificación por crate, vive en
+[`tools/lineabase-agente.txt`](../tools/lineabase-agente.txt) y la comprueba
+`tools/verificar-invariantes.sh`: **una dependencia directa sin justificación
+escrita hace fallar `make ci`**, y la fila se añade *antes* que la dependencia.
+
+Hoy son **39 dependencias directas** en el workspace del agente. Las que más
+dicen del criterio:
 
 | Crate | Uso | Por qué se acepta |
 |---|---|---|
-| `yara-x` | Motor de firmas | Mantenido por VirusTotal, Rust puro |
-| `ort` | ONNX Runtime | Envoltorio sobre una biblioteca de Microsoft ampliamente auditada |
-| `ring` / `aws-lc-rs` | AES-GCM, HKDF, Ed25519 | Criptografía auditada; implementarla nosotros sería irresponsable |
-| `arc-swap` | Recarga de reglas sin lock | Pequeño y sin dependencias |
-| `windows-rs` | Enlaces a la API de Windows | Oficial de Microsoft |
+| `yara-x` | Motor de firmas | Rust puro; la alternativa —`libyara` en C— procesaría ficheros hostiles dentro del proceso privilegiado |
+| `tract-onnx` | Inferencia ONNX | Rust puro; `onnxruntime` es C++ y arrastraría un árbol que no cabe en el presupuesto del endpoint |
+| `rustls` | TLS | Sin OpenSSL: el árbol de una biblioteca en C con esa superficie no cabe en un agente privilegiado |
+| `libbpf-rs` / `libbpf-sys` | eBPF CO-RE | El verificador y BTF están construidos alrededor de libbpf; reimplementarla sería el proyecto entero |
+| `ml-dsa`, `libcrux-ml-kem` | Post-cuántico | La mitad post-cuántica del par híbrido de firma (ML-DSA-65) y de KEM (ML-KEM-768) |
+| `libc` | Llamadas al sistema | Las syscalls **son** el trabajo del agente; escribirlas a mano sería reimplementar la libc con menos revisiones |
+| `tokio` | **Sólo en `aegis-firehose`** | Es el proceso de salida a SIEM, **no** el colector privilegiado: el agente de detección sigue siendo síncrono |
 
-Se rechazan: cualquier crate con más de tres niveles de dependencias
-transitivas, cualquiera sin publicaciones en 12 meses, y cualquiera que traiga un
-runtime asíncrono al agente (el agente usa hilos y canales; `tokio` está solo en
-el lado de la nube).
+Se rechaza lo que no quepa en esa lógica, y el ejemplo que más se cita aquí es
+**libp2p**: sus 340 crates y su runtime asíncrono no entran en un agente
+privilegiado cuyo presupuesto en reposo en una pasarela son 48 MiB, así que el
+transporte del enjambre vive en un workspace **aparte** (`swarm-net/`) y `make ci`
+lo comprueba con `cargo tree`. El núcleo del protocolo, que es lo que el endpoint
+necesita, es *sans-io* y no depende de nada de eso.
 
 `cargo-deny` y `cargo-audit` en CI, con bloqueo por fallo.
 
@@ -63,39 +95,31 @@ a desactivar el producto, y la UI es el componente con más superficie de ataque
 ## 6.3 Estructura del repositorio
 
 ```
-shared/include/aegis_abi.h      Contrato ABI. Fuente de verdad, en C.
-crates/
-  aegis-ipc/                    Espejo Rust + consumidor del ring        [HECHO]
-  aegis-agent/                  Servicio: colector, grafo, árbitro
-  aegis-scan/                   YARA-X, ONNX, analizador PE/ELF, memoria
-  aegis-resp/                   WFP, cuarentena, rollback
-  aegis-sys-win/                FFI de Windows (unsafe aislado aquí)
-  aegis-sys-linux/              FFI de Linux  (unsafe aislado aquí)
-  aegis-ui/                     Tauri v2
-drivers/
-  windows/aegis-drv/            Minifilter + callbacks + WFP callout
-  windows/aegis-elam/           Driver ELAM
-  linux/aegis-bpf/              Programas eBPF CO-RE + cargador
-cloud/
-  api/                          Reputación k-anónima (Go)
-  sandbox/                      Orquestador Firecracker (Go)
-ml/
-  training/                     Entrenamiento offline (Python)
-  features/                     Extractor de referencia, espejo del de Rust
-tools/
-  abi-check.sh                  Verificación cruzada de layout C <-> Rust
-  bench/                        Pruebas de carga y presupuesto de recursos
-tests/
-  redteam/                      Reproducción de técnicas ofensivas conocidas
-docs/                           Este blueprint
+shared/include/aegis_abi.h    Contrato ABI Ring 0 <-> Ring 3. Fuente de verdad, en C.
+crates/                       Workspace del AGENTE: sincrono, panic=abort, 54 crates
+server/crates/                Workspace del PLANO DE CONTROL: tokio/axum/sqlx, 13 crates
+swarm-net/                    Transporte libp2p del enjambre, FUERA del agente a proposito
+drivers/windows/aegis-drv/    Minifilter + callbacks + ELAM (C, WDK)
+drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf)
+cloud/                        Reputacion k-anonima y detonacion (Go)
+tools/                        28 puertas de verificacion + ABI check + CI local
+docs/                         Una pagina por fase
 ```
 
----
+La tabla de componentes con el estado real de cada crate —qué hace, cuántas
+pruebas tiene, qué puerta lo verifica y si lleva `#![forbid(unsafe_code)]`— vive
+en el [README](../README.md#componentes-con-su-estado-real), que es donde la
+busca quien llega al repositorio. Aquí se repetiría y se quedaría vieja.
 
 ## 6.4 Hoja de ruta
 
 Cada fase tiene **criterios de salida medibles**. Una fase no se cierra por
 calendario; se cierra cuando sus números se cumplen.
+
+Las seis que siguen son el **plan original**, y están hechas. El estado real del
+proyecto —ochenta fases, con lo que eso cambió— está en
+[«Dónde está el proyecto hoy»](#dónde-está-el-proyecto-hoy), al final de esta
+sección.
 
 ### Fase 0 — Contrato ABI · **completada**
 
@@ -231,20 +255,42 @@ se desplaza; nada más depende de ella, y por eso está aislada aquí.
 
 ---
 
-### Camino crítico
+### Dónde está el proyecto hoy
+
+Las cinco fases de arriba son el **plan original**, y están hechas. Lo que vino
+después no estaba en ese plan: ochenta fases numeradas, cada una con sus
+criterios de salida medibles y su puerta en `make ci`. El recuento de hoy:
+
+| | |
+|---|---|
+| Crates propios | **67** (54 en el agente, 13 en el plano de control) |
+| Pruebas | **2 794** (1 823 + 971) |
+| Puertas de verificación | **28**, todas en `make ci` |
+| Dependencias directas del agente | **39**, cada una justificada por escrito |
+| Crates del agente con `forbid(unsafe_code)` | **32**; los otros 22, declarados con su razón |
+
+Las dos últimas fases son las que cambian la naturaleza del conjunto:
+
+- **AegisFabric (79)** convierte nueve subsistemas en un producto: un modelo de
+  entidad único, una escala única y un árbitro único, con un circuito que
+  encadena once subsistemas sobre **un solo identificador**. Es la única ventaja
+  de este diseño que no se puede copiar comprando: un conjunto de productos
+  integrados no puede darla porque cada uno nombra las cosas a su manera.
+- **AegisProof (80)** demuestra que las invariantes siguen en pie sobre el
+  producto completo, y tiene derecho de veto sobre el resto.
+
+### Lo que falta para producción
+
+Nada de esto depende de escribir más detección:
 
 ```
-Fase 1 ──── Fase 2 ──── Fase 3 ──── Fase 4 ──── Fase 5
-  │                                    ▲
-  └─ Trámites de certificación ────────┘
-     (EV, Partner Center, ELAM: 6-12 meses)
+Certificación EV + Partner Center + ELAM ──── 6-12 meses, y no depende de nosotros
+Driver de Windows en Driver Verifier ──────── continuo
+Piloto de 1.000 endpoints, 30 días ────────── tras la certificación
 ```
 
-Los trámites arrancan el día 1 precisamente porque su duración es comparable a la
-de las fases 1 a 3 juntas y no depende de nosotros. Total estimado: **~18 meses**
-hasta producción.
-
----
+Los trámites arrancan el día 1 precisamente porque su duración no la controlamos
+y es comparable a la del desarrollo entero.
 
 ## 6.5 Riesgos
 
@@ -269,15 +315,28 @@ arranque.
 
 | Comprobación | Cuándo | Bloquea |
 |---|---|---|
-| `cargo test` (workspace) | Cada push | Sí |
-| `cargo clippy -- -D warnings` | Cada push | Sí |
-| `tools/abi-check.sh` | Cada push | Sí |
+| `cargo fmt --check` (los **dos** workspaces) | Cada push | Sí |
+| `cargo clippy --all-targets -- -D warnings` (los dos) | Cada push | Sí |
+| `cargo test` (los dos) | Cada push | Sí |
+| `tools/abi-check.sh` (layout C ↔ Rust) | Cada push | Sí |
+| Las 27 puertas de fase `tools/verificar-*.sh` | Cada push | Sí |
+| **`tools/verificar-invariantes.sh`** (las trece) | Cada push | Sí, **con derecho de veto** |
 | `cargo deny` + `cargo audit` | Cada push | Sí |
 | Compilación del driver + Driver Verifier | Diario | Sí |
 | `tests/redteam/` en VM efímera | Diario | Sí |
-| Presupuesto de recursos (`tools/bench/`) | Diario | Sí, si se supera el 110 % de la cuota |
 | Corpus benigno de falsos positivos | Antes de cada publicación | Sí, con cero tolerancia |
 | 72 h de estabilidad | Antes de cada publicación | Sí |
+
+El presupuesto de recursos ya no es una comprobación diaria aparte: entra en cada
+push como la **primera** de las trece invariantes, y no contra una cuota fija sino
+contra el reparto por clase de host de `aegis-presupuesto`, con la huella de
+arranque —32 MiB medidos— como regresión dura.
+
+La fila que define el proyecto es `verificar-invariantes.sh`: no comprueba una
+fase, comprueba **el producto completo**, y si demuestra que una invariante se
+rompió se arregla *de raíz* antes de dar el trabajo por terminado, aunque obligue
+a volver sobre una fase anterior. Una invariante que se relaja «sólo esta vez»
+deja de ser una invariante y pasa a ser una aspiración.
 
 `tests/redteam/` es el conjunto de pruebas que más valor aporta: reproduce
 técnicas ofensivas conocidas (inyección, *hollowing*, syscalls directos,

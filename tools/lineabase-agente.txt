@@ -1,0 +1,82 @@
+# Linea base del workspace del AGENTE — FASE 80 (AegisProof)
+#
+# POR QUE EXISTE ESTE FICHERO
+# ---------------------------
+# El agente corre con privilegios en cada maquina de la flota. Su arbol de
+# dependencias NO es una lista de bibliotecas: es la superficie de ataque de la
+# cadena de suministro del endpoint, y cada crate que entra es codigo de un
+# tercero que acabara ejecutandose con esos privilegios en cien mil sitios.
+#
+# De ahi la regla, que es de la casa y no de esta fase: **un crate nuevo en el
+# agente necesita una justificacion escrita**. Sin ella, `verificar-invariantes.sh`
+# falla. No es burocracia — es lo unico que impide que el arbol crezca por
+# acumulacion de decisiones que nadie recuerda haber tomado.
+#
+# El servidor no lleva linea base equivalente, y es deliberado: alli el criterio es
+# otro (tokio, axum, sqlx y su arbol completo), y mezclarlos convertiria esta lista
+# en ruido. Que los dos workspaces esten separados es lo que hace posible auditar
+# este.
+#
+# FORMATO
+# -------
+#   <crate>  <apartado>  <justificacion en una linea>
+#
+# El apartado dice de que no se puede prescindir sin perder una capacidad; la
+# justificacion dice por que no se escribe en casa. Las lineas que empiezan por
+# `#` son comentarios y no cuentan.
+#
+# COMO SE ACTUALIZA
+# -----------------
+# Añadiendo la fila ANTES de añadir la dependencia, no despues. Si la puerta falla
+# porque falta una fila, la respuesta correcta casi nunca es escribir la fila: es
+# preguntarse si el crate tiene que entrar en el endpoint o puede vivir en el
+# servidor, como se hizo con libp2p en la FASE 68.
+
+# ── Fundamentos: los tres que estan en casi todo ────────────────────────────────
+libc               sistema       Las llamadas al sistema son el trabajo del agente; escribirlas a mano seria reimplementar la libc con menos revisiones
+thiserror          errores       Deriva de `Error` sin macros propias; sin dependencias en tiempo de ejecucion
+sha2               cripto        SHA-256 es el nombre de una entidad en todo el producto (FASE 79) y el resumen de todo lo firmado
+
+# ── Criptografia: nada de esto se escribe en casa ───────────────────────────────
+aes-gcm            cripto        Cifrado autenticado de la cuarentena y del registro de auditoria
+blake3             cripto        Resumen rapido para integridad de ficheros (FIM): SHA-256 costaria de mas en el camino caliente
+ed25519-dalek      cripto        Firma clasica de actualizaciones y ordenes; mitad del par hibrido con ML-DSA
+ml-dsa             cripto        Firma post-cuantica (ML-DSA-65); la otra mitad del par hibrido
+libcrux-ml-kem     cripto        Encapsulado de clave post-cuantico (ML-KEM-768) para el canal C2
+x25519-dalek       cripto        Intercambio clasico del hibrido: si uno de los dos cae, el canal aguanta
+hkdf               cripto        Derivacion de claves con RFC 5869; la aritmetica la hace `hmac`
+hmac               cripto        MAC del bytecode eBPF y de las claves derivadas
+zeroize            cripto        Borrado de material de clave que el optimizador no puede eliminar
+getrandom          cripto        Entropia del sistema, sin intermediarios
+rand               cripto        Generacion de nonces y desfases deterministas sembrados
+signature          cripto        Rasgos comunes de firma que comparten `ecdsa`, `p256` y `ed25519-dalek`
+ecdsa              cripto        Verificacion de citas del TPM 2.0
+p256               cripto        Curva de las claves de atestacion del TPM
+rsa                cripto        Claves de respaldo del TPM 2.0, que sigue emitiendo RSA-2048
+rustls             red           TLS sin OpenSSL: el arbol de una biblioteca en C con esta superficie no cabe en un agente privilegiado
+rustls-pemfile     red           Lectura de PEM para los certificados de flota
+rustls-pki-types   red           Tipos compartidos de `rustls`, sin logica propia
+rcgen              red           Generacion de la CSR de matriculacion en el propio agente: la clave privada no toca el disco
+pem                red           Codificacion PEM de la CSR
+
+# ── Analisis: lo que mira contenido hostil ──────────────────────────────────────
+yara-x             analisis      Motor YARA en Rust; la alternativa —libyara en C— procesa ficheros hostiles en el proceso privilegiado
+goblin             analisis      Analisis de PE/ELF en Rust puro, sin `unsafe` en el camino de datos
+iced-x86           analisis      Desensamblador x86-64 para Intel PT; escribirlo en casa seria un proyecto propio
+tract-onnx         analisis      Inferencia ONNX sin `onnxruntime`, que es C++ y arrastraria un arbol que no cabe
+logos              analisis      Generador de analizador lexico de AegisQL en tiempo de compilacion, sin coste en ejecucion
+memmap2            analisis      Mapeo de la traza de Intel PT, que no cabe en memoria
+
+# ── Estado y formatos ───────────────────────────────────────────────────────────
+serde              formatos      Serializacion del esquema OCSF de ingesta
+serde_json         formatos      JSON de la ingesta, de AegisQL y de las claves PQC
+time               formatos      Fechas de certificados X.509, que tienen su propio formato
+rusqlite           estado        Indice del registro de auditoria: SQLite es un fichero, no un servidor
+dashmap            estado        Mapa concurrente del grafo de linaje en el camino caliente del colector
+arc-swap           estado        Recambio de reglas YARA sin parar el escaneo
+
+# ── eBPF y transporte ───────────────────────────────────────────────────────────
+libbpf-rs          kernel        Carga y mapas de eBPF con CO-RE; la alternativa es reimplementar libbpf
+libbpf-sys         kernel        Enlace con libbpf, que es lo que el kernel documenta
+rdkafka            salida        Entrega a SIEM por Kafka: el protocolo es propietario de facto y no se escribe en casa
+tokio              salida        SOLO en `aegis-firehose`, que es el proceso de salida a SIEM y NO el colector privilegiado — el agente sigue siendo sincrono
