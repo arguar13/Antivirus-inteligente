@@ -1,0 +1,18 @@
+[package]
+name = "aegis-case"
+description = "Ciclo de vida del incidente: de alerta a caso cerrado, con cronologia automatica y rastro inmutable"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# El rastro de auditoria es una CADENA: cada entrada lleva el resumen de la
+# anterior, asi que alterar una linea invalida todo lo que vino despues. Es lo que
+# convierte la manipulacion silenciosa en manipulacion detectable.
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }

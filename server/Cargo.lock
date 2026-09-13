@@ -28,6 +28,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-case"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "aegis-detonate"
 version = "0.1.0"
 dependencies = [
@@ -230,6 +238,7 @@ name = "aegis-server"
 version = "0.1.0"
 dependencies = [
  "aegis-attest",
+ "aegis-case",
  "aegis-firehose",
  "aegis-firmware",
  "aegis-fleet",

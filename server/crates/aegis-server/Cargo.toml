@@ -11,6 +11,10 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# El ciclo de vida del incidente. La logica entera —fusion, transiciones,
+# cronologia, rastro encadenado y metricas— vive alli como funciones puras; aqui
+# solo se pone en PostgreSQL.
+aegis-case = { path = "../aegis-case" }
 # --- Transporte nativo de la flota -----------------------------------------
 # El agente (aegis-fleet, FASE 34) habla protobuf con el enmarcado de gRPC sobre
 # mTLS crudo, NO sobre HTTP/2. Depender del propio crate del agente garantiza que

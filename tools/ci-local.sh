@@ -438,6 +438,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ingest" ]; then
     fi
 fi
 
+# Ciclo de vida del incidente (FASE 76): un producto que detecta y no da flujo de
+# trabajo produce alertas que nadie mira, y no por dejadez —es la respuesta
+# racional a una senal en la que cuarenta y ocho de cada cincuenta son ruido—. Se
+# comprueban las cuatro formas de fallar EN SILENCIO: fusionar de mas y perder el
+# caso distinto que llego en medio de una campana, coser los huecos de la
+# cronologia en una cadena causal que no existio, un rastro editable despues, y
+# un panel sin ruido POR REGLA, que es lo unico que permite apagar las reglas que
+# solo hacen ruido.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "case" ]; then
+    printf '%s==>%s AegisCase · de alerta a caso cerrado, con rastro inalterable\n' "$GRIS" "$FIN"
+    if ./tools/verificar-case.sh > /tmp/aegis-case-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-case-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-case-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena

@@ -25,6 +25,7 @@ pub mod atestacion;
 pub mod autodefensa;
 pub mod ca;
 pub mod cache;
+pub mod casos;
 pub mod config;
 pub mod correlador;
 pub mod dominio;

@@ -80,6 +80,24 @@ pub fn enrutador(estado: EstadoApi) -> Router {
         .route("/api/grafos", get(listar_grafos))
         .route("/api/grafos/{id}", get(obtener_grafo))
         // --- Caceria distribuida AegisQL (FASE 43) ---
+        // Casos (FASE 76). El ciclo de vida del incidente: de alerta a cierre.
+        //
+        // `verificar` esta en la API a proposito y no en una herramienta de
+        // administracion: un rastro que solo se comprueba cuando alguien
+        // sospecha es un rastro que nadie comprueba.
+        .route("/api/casos", get(listar_casos))
+        .route("/api/casos/{id}", get(obtener_caso))
+        .route("/api/casos/{id}/estado", post(cambiar_estado_caso))
+        .route("/api/casos/{id}/cerrar", post(cerrar_caso))
+        .route("/api/casos/{id}/tareas", post(crear_tarea_caso))
+        .route(
+            "/api/casos/{id}/tareas/{tarea}/cerrar",
+            post(cerrar_tarea_caso),
+        )
+        .route("/api/casos/{id}/auditoria", get(rastro_caso))
+        .route("/api/casos/{id}/auditoria/verificar", get(verificar_caso))
+        .route("/api/casos/{id}/auditoria/anclar", post(anclar_caso))
+        .route("/api/soc/metricas", get(metricas_soc))
         .route("/api/cacerias", get(listar_cacerias).post(lanzar_caza))
         .route("/api/cacerias/{id}", get(obtener_caza))
         .route("/api/cacerias/{id}/cerrar", post(cerrar_caza))
@@ -1720,6 +1738,319 @@ async fn listar_cuarentena(
 
     match estado.servicio.almacen().cuarentena_vigente().await {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+// --- Casos (FASE 76) --------------------------------------------------------
+//
+// El ciclo de vida del incidente. La logica entera vive en `aegis-case` como
+// funciones puras; `crate::casos` la pone en PostgreSQL; y esto es la superficie
+// que ve el panel.
+
+/// Filtro de listado de casos.
+#[derive(Debug, serde::Deserialize)]
+struct FiltroCasos {
+    inquilino: Option<String>,
+    limite: Option<i64>,
+}
+
+/// Lo que el panel manda para cambiar de estado.
+#[derive(Debug, serde::Deserialize)]
+struct CambioEstado {
+    estado: String,
+}
+
+/// Lo que el panel manda para cerrar.
+#[derive(Debug, serde::Deserialize)]
+struct CierreCaso {
+    veredicto: String,
+    justificacion: Option<String>,
+}
+
+/// Lo que el panel manda para crear una tarea.
+#[derive(Debug, serde::Deserialize)]
+struct TareaNueva {
+    titulo: String,
+}
+
+/// Lo que el panel manda para cerrar una tarea.
+#[derive(Debug, serde::Deserialize)]
+struct CierreTarea {
+    motivo: Option<String>,
+}
+
+fn servicio_casos(estado: &EstadoApi) -> crate::casos::ServicioCasos {
+    crate::casos::ServicioCasos::nuevo(estado.servicio.almacen())
+}
+
+/// Rechazo con el motivo legible tal cual.
+///
+/// Se devuelve 409 y no 400: la peticion esta bien formada, lo que pasa es que
+/// el caso no esta en un estado en el que eso se pueda hacer. Y el motivo viaja
+/// entero porque el analista lo va a leer en el panel a las tres de la manana.
+fn conflicto(e: crate::error::ErrorServidor) -> axum::response::Response {
+    match e {
+        crate::error::ErrorServidor::Config(motivo) => (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": motivo })),
+        )
+            .into_response(),
+        otro => error_500(otro).into_response(),
+    }
+}
+
+async fn listar_casos(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Query(q): Query<FiltroCasos>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    let limite = q.limite.unwrap_or(50);
+    match servicio_casos(&estado)
+        .listar(q.inquilino.as_deref(), limite)
+        .await
+    {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+async fn obtener_caso(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    let usuario = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let s = servicio_casos(&estado);
+    // QUIEN VIO QUE tambien es parte de la pregunta que un rastro contesta, y el
+    // acceso a informacion personal se audita por obligacion en cualquier
+    // regimen de proteccion de datos. Se anota ANTES de devolver el caso.
+    if let Err(e) = s.consultado(&id, &usuario).await {
+        return conflicto(e);
+    }
+    match s.listar(None, crate::casos::MAX_LISTADO).await {
+        Ok(v) => match v.into_iter().find(|c| c.id == id) {
+            Some(c) => (StatusCode::OK, Json(c)).into_response(),
+            None => (StatusCode::NOT_FOUND, "caso desconocido").into_response(),
+        },
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+async fn cambiar_estado_caso(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+    Json(c): Json<CambioEstado>,
+) -> axum::response::Response {
+    let usuario = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let nuevo = match c.estado.as_str() {
+        "nuevo" => aegis_case::Estado::Nuevo,
+        "en-curso" => aegis_case::Estado::EnCurso,
+        "en-espera" => aegis_case::Estado::EnEspera,
+        "contenido" => aegis_case::Estado::Contenido,
+        "cerrado" => aegis_case::Estado::Cerrado,
+        otro => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("estado «{otro}» desconocido") })),
+            )
+                .into_response()
+        }
+    };
+    match servicio_casos(&estado).pasar_a(&id, nuevo, &usuario).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => conflicto(e),
+    }
+}
+
+async fn cerrar_caso(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+    Json(c): Json<CierreCaso>,
+) -> axum::response::Response {
+    let usuario = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let v = match c.veredicto.as_str() {
+        "verdadero" => aegis_case::Veredicto::Verdadero,
+        "falso-positivo" => aegis_case::Veredicto::FalsoPositivo,
+        "autorizado" => aegis_case::Veredicto::Autorizado,
+        "no-concluyente" => aegis_case::Veredicto::NoConcluyente,
+        otro => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": format!("veredicto «{otro}» desconocido") })),
+            )
+                .into_response()
+        }
+    };
+    match servicio_casos(&estado)
+        .cerrar(&id, v, c.justificacion, &usuario)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => conflicto(e),
+    }
+}
+
+async fn crear_tarea_caso(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+    Json(t): Json<TareaNueva>,
+) -> axum::response::Response {
+    let usuario = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    match servicio_casos(&estado)
+        .anadir_tarea(&id, &t.titulo, &usuario)
+        .await
+    {
+        Ok(n) => (StatusCode::CREATED, Json(serde_json::json!({ "id": n }))).into_response(),
+        Err(e) => conflicto(e),
+    }
+}
+
+async fn cerrar_tarea_caso(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path((id, tarea)): Path<(String, i32)>,
+    Json(c): Json<CierreTarea>,
+) -> axum::response::Response {
+    let usuario = match usuario_autenticado(&estado, &cabeceras).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    match servicio_casos(&estado)
+        .cerrar_tarea(&id, tarea, c.motivo, &usuario)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => conflicto(e),
+    }
+}
+
+async fn rastro_caso(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    match servicio_casos(&estado).rastro(&id).await {
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+async fn verificar_caso(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    match servicio_casos(&estado).verificar(&id).await {
+        // Un rastro roto se devuelve con 200 y `intacto: false`, no con un
+        // error: el error se pierde en un registro y lo que hace falta es que el
+        // panel lo enseñe en rojo con las roturas enumeradas.
+        Ok(v) => (StatusCode::OK, Json(v)).into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+async fn anclar_caso(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    match servicio_casos(&estado).anclar(&id, None).await {
+        Ok(hasta) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "anclado_hasta": hasta })),
+        )
+            .into_response(),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+async fn metricas_soc(
+    State(estado): State<EstadoApi>,
+    cabeceras: header::HeaderMap,
+    Query(q): Query<FiltroCasos>,
+) -> axum::response::Response {
+    if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
+        return r;
+    }
+    match servicio_casos(&estado)
+        .metricas(q.inquilino.as_deref())
+        .await
+    {
+        Ok(r) => {
+            // Lo que el panel necesita para APAGAR reglas, que es la unica
+            // metrica que de verdad cambia un centro de operaciones.
+            let sospechosas: Vec<_> = r
+                .reglas_sospechosas()
+                .iter()
+                .map(|x| {
+                    serde_json::json!({
+                        "regla": x.nombre,
+                        "ruido_por_ciento": x.ruido_centesimas(),
+                        "casos_cerrados": x.casos_cerrados,
+                        "falsos_positivos": x.falsos_positivos,
+                        "verdaderos": x.verdaderos,
+                    })
+                })
+                .collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "abiertos": r.abiertos,
+                    "cerrados": r.cerrados,
+                    "vivos": r.vivos,
+                    "sin_asignar": r.sin_asignar,
+                    "hasta_deteccion_ns": {
+                        "p50": r.hasta_deteccion.p50_ns,
+                        "p95": r.hasta_deteccion.p95_ns,
+                        "p99": r.hasta_deteccion.p99_ns,
+                        "maximo": r.hasta_deteccion.maximo_ns,
+                    },
+                    "hasta_respuesta_ns": {
+                        "p50": r.hasta_respuesta.p50_ns,
+                        "p95": r.hasta_respuesta.p95_ns,
+                        "p99": r.hasta_respuesta.p99_ns,
+                        "maximo": r.hasta_respuesta.maximo_ns,
+                    },
+                    "hasta_cierre_ns": {
+                        "p50": r.hasta_cierre.p50_ns,
+                        "p95": r.hasta_cierre.p95_ns,
+                        "p99": r.hasta_cierre.p99_ns,
+                        "maximo": r.hasta_cierre.maximo_ns,
+                    },
+                    "por_veredicto": r.por_veredicto,
+                    "reglas_sospechosas": sospechosas,
+                })),
+            )
+                .into_response()
+        }
         Err(e) => error_500(e).into_response(),
     }
 }
