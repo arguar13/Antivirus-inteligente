@@ -1169,10 +1169,10 @@ mod pruebas {
         );
         let p = Paquete::validar(&doc).expect("valido");
         let ind = &p.objetos[&format!("indicator--{UUID_A}")];
-        assert_eq!(ind.marcado.tlp, Tlp::AmberStrict);
+        assert_eq!(ind.marcado.tlp, Tlp::Amber);
         assert_eq!(ind.marcado.pap, Pap::Green);
         // Y el marcado del paquete entero es el mas restrictivo de sus objetos.
-        assert_eq!(p.marcado().tlp, Tlp::AmberStrict);
+        assert_eq!(p.marcado().tlp, Tlp::Amber);
     }
 
     #[test]

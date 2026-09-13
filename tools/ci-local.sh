@@ -498,6 +498,27 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "share" ]; then
     fi
 fi
 
+# El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
+# un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
+# que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la
+# UNION. Once subsistemas encadenados —paquete, diseccion, fichero extraido, corpus
+# mundial, microVM, arbitro, caso, enriquecimiento, camino de ataque, contencion,
+# TAXII y enjambre— sobre UN SOLO identificador de entidad, con el codigo real de
+# cada uno. Mas el inventario de veredictos recorrido, la ruta caliente medida
+# contra el criterio de antes, y la comprobacion de que el arbol de dependencias
+# del endpoint no crece ni un crate.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fabric" ]; then
+    printf '%s==>%s AegisFabric · un solo modelo de entidad, un solo veredicto\n' "$GRIS" "$FIN"
+    if ./tools/verificar-fabric.sh > /tmp/aegis-fabric-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-fabric-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-fabric-ci.log | tail -40
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena

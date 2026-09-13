@@ -1,0 +1,40 @@
+[package]
+name = "aegis-tejido"
+description = "El tejido de AegisFabric: inventario de veredictos, traduccion a la escala unica y el circuito completo de extremo a extremo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# EL NUCLEO DE LA FASE. Vive en el workspace del AGENTE a proposito: el modelo de
+# entidad y el arbitro tienen que correr en el endpoint, no solo en el servidor.
+# Una sola dependencia (`sha2`), que el agente ya tenia.
+aegis-entidad = { path = "../../../crates/aegis-entidad" }
+
+# Los subsistemas que producen veredictos hoy. Este crate NO añade logica de
+# deteccion: traduce lo que cada uno dice al vocabulario unico y los encadena.
+aegis-wire = { path = "../../../crates/aegis-wire" }
+aegis-swarm = { path = "../../../crates/aegis-swarm" }
+aegis-sync = { path = "../../../crates/aegis-sync" }
+aegis-ruleforge = { path = "../aegis-ruleforge" }
+aegis-detonate = { path = "../aegis-detonate" }
+aegis-case = { path = "../aegis-case" }
+aegis-enrich = { path = "../aegis-enrich" }
+aegis-share = { path = "../aegis-share" }
+aegis-predict = { path = "../aegis-predict" }
+aegis-itdr = { path = "../aegis-itdr" }
+aegis-update = { path = "../../../crates/aegis-update" }
+
+[dev-dependencies]
+aegis-invitado = { path = "../../../crates/aegis-invitado" }
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+tempfile = "3"
+
+[[example]]
+name = "circuito"
+path = "examples/circuito.rs"

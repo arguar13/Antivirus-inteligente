@@ -424,7 +424,7 @@ impl Difusor {
         }
         // `AMBER+STRICT` significa «solo mi organizacion». El tope configurado
         // dice hasta donde se QUIERE llegar; esto dice si se PUEDE.
-        if m.tlp >= Tlp::Amber && !d.es_propia_organizacion {
+        if m.tlp >= Tlp::AmberStrict && !d.es_propia_organizacion {
             return Err(Retenido::FueraDeLaOrganizacion);
         }
         if m.tlp > d.tope_efectivo() {
@@ -489,7 +489,7 @@ mod pruebas {
     fn difusor_completo() -> Difusor {
         let mut d = Difusor::nuevo();
         d.declarar(destino("comunidad", Canal::Taxii, Tlp::Green, false));
-        d.declarar(destino("socio", Canal::Federacion, Tlp::AmberStrict, false));
+        d.declarar(destino("socio", Canal::Federacion, Tlp::Amber, false));
         d.declarar(destino("interno", Canal::Federacion, Tlp::Red, true));
         d.declarar(destino("flota", Canal::Enjambre, Tlp::Red, true));
         d.declarar(destino("fichero", Canal::Exportacion, Tlp::Red, true));
@@ -552,10 +552,7 @@ mod pruebas {
         assert_eq!(flota.tope_tlp, Tlp::Red, "la configuracion pide el maximo");
         assert_eq!(flota.tope_efectivo(), Tlp::Green, "y el canal lo baja");
 
-        let ambar = objeto(
-            "indicator--ambar",
-            Marcado::nuevo(Tlp::AmberStrict, Pap::Clear),
-        );
+        let ambar = objeto("indicator--ambar", Marcado::nuevo(Tlp::Amber, Pap::Clear));
         let r = d.repartir(&paquete(vec![ambar]), "flota").expect("destino");
         assert!(r.salen.is_empty());
         let (_, motivo) = &r.retenidos[0];
@@ -600,7 +597,7 @@ mod pruebas {
         d.declarar(destino("socio", Canal::Federacion, Tlp::Red, false));
         d.declarar(destino("nosotros", Canal::Federacion, Tlp::Red, true));
 
-        let estricto = objeto("indicator--x", Marcado::nuevo(Tlp::Amber, Pap::Clear));
+        let estricto = objeto("indicator--x", Marcado::nuevo(Tlp::AmberStrict, Pap::Clear));
         let p = paquete(vec![estricto]);
 
         let fuera = d.repartir(&p, "socio").expect("destino");
@@ -614,10 +611,7 @@ mod pruebas {
         let d = difusor_completo();
         let p = paquete(vec![
             objeto("indicator--verde", Marcado::nuevo(Tlp::Green, Pap::Clear)),
-            objeto(
-                "indicator--ambar",
-                Marcado::nuevo(Tlp::AmberStrict, Pap::Clear),
-            ),
+            objeto("indicator--ambar", Marcado::nuevo(Tlp::Amber, Pap::Clear)),
         ]);
         let r = d.repartir(&p, "comunidad").expect("destino");
         assert_eq!(r.salen, vec!["indicator--verde".to_string()]);
@@ -673,7 +667,7 @@ mod pruebas {
             },
             Retenido::PorTopeDuroDelCanal {
                 canal: Canal::Enjambre,
-                objeto: Tlp::Amber,
+                objeto: Tlp::AmberStrict,
                 tope: Tlp::Green,
             },
             Retenido::PorPap {
@@ -696,7 +690,7 @@ mod pruebas {
         let p = paquete(vec![
             objeto("indicator--a", Marcado::publico()),
             objeto("indicator--b", Marcado::nuevo(Tlp::Red, Pap::Clear)),
-            objeto("indicator--c", Marcado::nuevo(Tlp::AmberStrict, Pap::Clear)),
+            objeto("indicator--c", Marcado::nuevo(Tlp::Amber, Pap::Clear)),
         ]);
         let r = d.repartir(&p, "comunidad").expect("destino");
         assert_eq!(r.salen.len(), 1);

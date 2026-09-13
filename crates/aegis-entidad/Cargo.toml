@@ -1,0 +1,18 @@
+[package]
+name = "aegis-entidad"
+description = "Modelo de entidad unico y arbitro de veredictos para todos los subsistemas de deteccion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# UNICA dependencia, y el agente YA la tenia por `aegis-sync`: el arbol de
+# dependencias del endpoint no crece ni un crate. Es deliberado — este crate lo
+# usan todos los subsistemas, incluidos los que corren con privilegios en cada
+# maquina, y ahi cada dependencia es superficie de ataque.
+sha2 = "0.10"

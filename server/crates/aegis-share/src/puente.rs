@@ -530,7 +530,7 @@ mod pruebas {
         let o = indicador(
             "indicator--a",
             "[domain-name:value = 'malo.example']",
-            Marcado::nuevo(Tlp::AmberStrict, Pap::Clear),
+            Marcado::nuevo(Tlp::Amber, Pap::Clear),
         );
         let reg = con_procedencia(&["indicator--a"], Fiabilidad::Propia, 99);
         let r = p.preparar(&paquete(vec![o]), &reg, AHORA, false);

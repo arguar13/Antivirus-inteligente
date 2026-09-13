@@ -11,7 +11,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/aegis-server", "crates/aegis-itdr", "crates/aegis-orchestrator", "crates/aegis-predict", "crates/aegis-ruleforge",
-    "crates/aegis-detonate", "crates/aegis-pipeline", "crates/aegis-scale", "crates/aegis-case", "crates/aegis-enrich", "crates/aegis-share", "crates/fleet-simulator"]
+    "crates/aegis-detonate", "crates/aegis-pipeline", "crates/aegis-scale", "crates/aegis-case", "crates/aegis-enrich", "crates/aegis-share", "crates/aegis-tejido", "crates/fleet-simulator"]
 
 [workspace.package]
 version = "0.1.0"

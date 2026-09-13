@@ -52,12 +52,20 @@ pub enum Tlp {
     /// Se puede compartir con la comunidad, sin publicar.
     Green,
     /// Solo con la propia organizacion y sus clientes.
-    AmberStrict,
-    /// Solo con la propia organizacion.
+    Amber,
+    /// Solo con la propia organizacion, **sin** sus clientes.
     ///
     /// `TLP:AMBER+STRICT` es **mas** restrictivo que `TLP:AMBER`, y el orden del
     /// enumerado lo refleja: mezclarlos al reves es una fuga con formato valido.
-    Amber,
+    ///
+    /// Y el nombre de la variante tiene que decir lo mismo que su valor. Aqui
+    /// estuvieron cambiados: `Tlp::Amber` valia `TLP:AMBER+STRICT` y viceversa.
+    /// El orden y las comprobaciones eran correctos —las pruebas pasaban—, pero
+    /// quien escribiera `Tlp::Amber` leyendo «AMBER» obtenia otra cosa, y el
+    /// error no aparece hasta que alguien comparte de mas con un `<=` que
+    /// creia entender. Un identificador que miente sobre su valor es un fallo
+    /// de seguridad aunque la aritmetica este bien.
+    AmberStrict,
     /// Solo para quien lo recibio en persona. No se reenvia.
     Red,
 }
@@ -69,8 +77,8 @@ impl Tlp {
         match self {
             Tlp::Clear => "TLP:CLEAR",
             Tlp::Green => "TLP:GREEN",
-            Tlp::AmberStrict => "TLP:AMBER",
-            Tlp::Amber => "TLP:AMBER+STRICT",
+            Tlp::Amber => "TLP:AMBER",
+            Tlp::AmberStrict => "TLP:AMBER+STRICT",
             Tlp::Red => "TLP:RED",
         }
     }
@@ -93,8 +101,8 @@ impl Tlp {
             // se emite nunca: ver `nombre`.
             "CLEAR" | "WHITE" => Some(Tlp::Clear),
             "GREEN" => Some(Tlp::Green),
-            "AMBER" => Some(Tlp::AmberStrict),
-            "AMBER+STRICT" | "AMBERSTRICT" => Some(Tlp::Amber),
+            "AMBER" => Some(Tlp::Amber),
+            "AMBER+STRICT" | "AMBERSTRICT" => Some(Tlp::AmberStrict),
             "RED" => Some(Tlp::Red),
             _ => None,
         }
@@ -370,11 +378,11 @@ mod pruebas {
     #[test]
     fn el_orden_del_reticulo_es_el_de_la_semantica() {
         assert!(Tlp::Clear < Tlp::Green);
-        assert!(Tlp::Green < Tlp::AmberStrict);
+        assert!(Tlp::Green < Tlp::Amber);
         // `AMBER+STRICT` es MAS restrictivo que `AMBER`: mezclarlos al reves es
         // una fuga con formato valido.
-        assert!(Tlp::AmberStrict < Tlp::Amber);
-        assert!(Tlp::Amber < Tlp::Red);
+        assert!(Tlp::Amber < Tlp::AmberStrict);
+        assert!(Tlp::AmberStrict < Tlp::Red);
         assert!(Pap::Clear < Pap::Green);
         assert!(Pap::Green < Pap::Amber);
         assert!(Pap::Amber < Pap::Red);
@@ -409,7 +417,7 @@ mod pruebas {
         // juntaron sus fuentes, y dos nodos darian marcados distintos al mismo
         // documento.
         let a = Marcado::nuevo(Tlp::Green, Pap::Clear);
-        let b = Marcado::nuevo(Tlp::Amber, Pap::Amber);
+        let b = Marcado::nuevo(Tlp::AmberStrict, Pap::Amber);
         let c = Marcado::nuevo(Tlp::Clear, Pap::Red);
         assert_eq!(a.combinar(b), b.combinar(a));
         assert_eq!(a.combinar(b).combinar(c), a.combinar(b.combinar(c)));
@@ -417,12 +425,12 @@ mod pruebas {
 
     #[test]
     fn solo_se_puede_reemitir_hacia_mas_restrictivo() {
-        let amber = Marcado::nuevo(Tlp::Amber, Pap::Amber);
+        let amber = Marcado::nuevo(Tlp::AmberStrict, Pap::Amber);
         assert!(amber.admite_reemision_como(Marcado::nuevo(Tlp::Red, Pap::Red)));
         assert!(amber.admite_reemision_como(amber));
         // Esto es la fuga con documento valido.
         assert!(!amber.admite_reemision_como(Marcado::nuevo(Tlp::Clear, Pap::Amber)));
-        assert!(!amber.admite_reemision_como(Marcado::nuevo(Tlp::Amber, Pap::Clear)));
+        assert!(!amber.admite_reemision_como(Marcado::nuevo(Tlp::AmberStrict, Pap::Clear)));
     }
 
     #[test]
@@ -471,8 +479,8 @@ mod pruebas {
         for t in [
             Tlp::Clear,
             Tlp::Green,
-            Tlp::AmberStrict,
             Tlp::Amber,
+            Tlp::AmberStrict,
             Tlp::Red,
         ] {
             assert!(!t.nombre().contains("WHITE"));
@@ -482,10 +490,46 @@ mod pruebas {
     #[test]
     fn las_etiquetas_se_leen_con_sus_formas_raras() {
         assert_eq!(Tlp::de_etiqueta("  tlp:green "), Some(Tlp::Green));
-        assert_eq!(Tlp::de_etiqueta("AMBER"), Some(Tlp::AmberStrict));
-        assert_eq!(Tlp::de_etiqueta("TLP:AMBER + STRICT"), Some(Tlp::Amber));
+        assert_eq!(Tlp::de_etiqueta("AMBER"), Some(Tlp::Amber));
+        assert_eq!(
+            Tlp::de_etiqueta("TLP:AMBER + STRICT"),
+            Some(Tlp::AmberStrict)
+        );
         assert_eq!(Tlp::de_etiqueta("tlp:rojo"), None);
         assert_eq!(Pap::de_etiqueta("pap:amber"), Some(Pap::Amber));
+    }
+
+    /// EL NOMBRE DE LA VARIANTE TIENE QUE DECIR LO MISMO QUE SU VALOR.
+    ///
+    /// Aqui estuvieron cambiados: `Tlp::Amber` valia `TLP:AMBER+STRICT` y
+    /// `Tlp::AmberStrict` valia `TLP:AMBER`. El orden era correcto y todas las
+    /// comprobaciones funcionaban, asi que **ninguna prueba lo veia**: la ida y
+    /// vuelta de etiqueta es estable con los nombres cambiados, porque solo
+    /// compara el sistema consigo mismo.
+    ///
+    /// Lo que rompe es quien escribe `Tlp::Amber` creyendo que pone AMBER y
+    /// resulta poner la restriccion de mas arriba — o, en la direccion peligrosa,
+    /// quien escribe `if tlp <= Tlp::Amber { compartir }` y sin saberlo deja
+    /// pasar tambien AMBER+STRICT. Un identificador que miente sobre su valor es
+    /// un fallo de seguridad aunque la aritmetica este bien, y la unica prueba
+    /// que lo detecta es la que ata el nombre al texto canonico.
+    #[test]
+    fn cada_variante_se_llama_como_lo_que_vale() {
+        assert_eq!(Tlp::Clear.nombre(), "TLP:CLEAR");
+        assert_eq!(Tlp::Green.nombre(), "TLP:GREEN");
+        assert_eq!(Tlp::Amber.nombre(), "TLP:AMBER");
+        assert_eq!(Tlp::AmberStrict.nombre(), "TLP:AMBER+STRICT");
+        assert_eq!(Tlp::Red.nombre(), "TLP:RED");
+
+        assert_eq!(Pap::Clear.nombre(), "PAP:CLEAR");
+        assert_eq!(Pap::Green.nombre(), "PAP:GREEN");
+        assert_eq!(Pap::Amber.nombre(), "PAP:AMBER");
+        assert_eq!(Pap::Red.nombre(), "PAP:RED");
+
+        // Y el orden sigue siendo el de la semantica: AMBER+STRICT restringe mas
+        // que AMBER, que es lo que el nombre ya decia y ahora tambien dice la
+        // variante.
+        assert!(Tlp::Amber < Tlp::AmberStrict);
     }
 
     #[test]
@@ -496,8 +540,8 @@ mod pruebas {
         for t in [
             Tlp::Clear,
             Tlp::Green,
-            Tlp::AmberStrict,
             Tlp::Amber,
+            Tlp::AmberStrict,
             Tlp::Red,
         ] {
             assert_eq!(Tlp::de_etiqueta(t.nombre()), Some(t), "{}", t.nombre());
@@ -505,7 +549,7 @@ mod pruebas {
         for p in [Pap::Clear, Pap::Green, Pap::Amber, Pap::Red] {
             assert_eq!(Pap::de_etiqueta(p.nombre()), Some(p), "{}", p.nombre());
         }
-        let m = Marcado::nuevo(Tlp::Amber, Pap::Green);
+        let m = Marcado::nuevo(Tlp::AmberStrict, Pap::Green);
         let etiquetas: Vec<String> = m.etiquetas().iter().map(|s| (*s).to_string()).collect();
         assert_eq!(de_etiquetas(&etiquetas), m);
     }
