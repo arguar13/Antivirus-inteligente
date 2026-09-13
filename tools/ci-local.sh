@@ -323,6 +323,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "predict" ]; then
     fi
 fi
 
+# Diseccion semantica de protocolos (AegisWire, FASE 70): convierte bytes que
+# escribe el ATACANTE, sin autenticacion previa y a velocidad de linea, en hechos
+# con significado. Es la superficie de ataque mas expuesta del producto. El motor
+# es sans-io, asi que cada ataque —evasion por solape TCP, contrabando HTTP,
+# bucle de punteros DNS, cadena de extensiones IPv6, fichero disfrazado,
+# agotamiento de memoria— se ejerce ENTERO en pruebas, sin red y sin privilegios.
+# Muros declarados: no captura de la NIC (eso es aegis-net), no defragmentacion
+# IP, y no se mira dentro de lo cifrado (eso es aegis-l7hunter).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "wire" ]; then
+    printf '%s==>%s AegisWire · diseccion de protocolos y reensamblado resistente a evasion\n' "$GRIS" "$FIN"
+    if ./tools/verificar-wire.sh > /tmp/aegis-wire-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-wire-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-wire-ci.log | tail -25
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena

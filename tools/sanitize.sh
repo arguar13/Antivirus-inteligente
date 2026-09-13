@@ -37,6 +37,14 @@ CRATES=(
                       # escribe algo que se ejecuta ANTES que el sistema operativo.
                       # ASan aqui no busca unsafe propio, busca que ningun indice
                       # calculado a partir de esos bytes se salga de su buffer
+    aegis-wire        # mismo motivo que aegis-fwaudit, y mas expuesto todavia: el
+                      # crate es #![forbid(unsafe_code)], pero DISECTA BYTES DE LA
+                      # RED sin autenticacion previa. Cada longitud, desplazamiento
+                      # e indice sale de datos que escribe el atacante, y es
+                      # exactamente el sitio donde ClamAV, Suricata y Zeek acumulan
+                      # su historial de desbordamientos. ASan corre aqui los
+                      # ataques ya construidos —solape TCP, punteros DNS, DER
+                      # anidado, cadena IPv6— buscando que ninguno se salga
 )
 
 if ! rustup toolchain list 2>/dev/null | grep -q nightly; then

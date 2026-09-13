@@ -1,0 +1,25 @@
+[package]
+name = "aegis-wire"
+description = "Diseccion semantica de protocolos: convierte trafico crudo en hechos, con reensamblado TCP resistente a evasion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# CERO DEPENDENCIAS EXTERNAS NUEVAS, y no es una postura: un disector de
+# protocolo analiza bytes que escribe el atacante, sin autenticacion previa y a
+# velocidad de linea. Es la superficie de ataque mas expuesta del producto, y es
+# exactamente donde ClamAV, Suricata y Zeek acumulan su historial de CVE de
+# desbordamiento. Meter aqui una biblioteca de parsing generica seria importar
+# codigo no auditado al sitio mas caliente del agente.
+#
+# `sha2` entra porque las huellas JA3/JA3S necesitan MD5 por definicion del
+# estandar y JA4 necesita SHA-256; se reutiliza el que el agente ya enlaza.
+[dependencies]
+aegis-net = { path = "../aegis-net", default-features = false }
+sha2 = "0.10"
+thiserror = "2"

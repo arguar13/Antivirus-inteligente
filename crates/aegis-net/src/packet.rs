@@ -203,6 +203,15 @@ pub struct Ipv4Header {
     pub dst: Ipv4Addr,
     /// Indica si el paquete es un fragmento que no es el primero.
     pub is_fragment: bool,
+    /// Bandera MF (`More Fragments`): quedan fragmentos por llegar.
+    ///
+    /// Es distinta de `is_fragment`. El PRIMER fragmento de un datagrama
+    /// troceado lleva desplazamiento cero —y por tanto `is_fragment == false`,
+    /// porque ese fragmento trae cabecera de transporte y se puede analizar—
+    /// pero lleva MF a uno. Quien quiera saber si un datagrama viene troceado
+    /// necesita las dos banderas; quien solo quiera saber si puede analizar
+    /// transporte necesita `is_fragment`.
+    pub mas_fragmentos: bool,
 }
 
 impl Ipv4Header {
@@ -257,6 +266,7 @@ impl Ipv4Header {
             // Los fragmentos posteriores no llevan cabecera de transporte, asi
             // que analizarlos como TCP leeria datos de carga util como puertos.
             is_fragment: frag_offset != 0,
+            mas_fragmentos: flags_frag & 0x2000 != 0,
         })
     }
 
