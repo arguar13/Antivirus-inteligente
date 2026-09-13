@@ -45,6 +45,12 @@ CRATES=(
                       # su historial de desbordamientos. ASan corre aqui los
                       # ataques ya construidos —solape TCP, punteros DNS, DER
                       # anidado, cadena IPv6— buscando que ninguno se salga
+    aegis-ips         # tambien #![forbid(unsafe_code)], pero DECIDE CORTAR LA RED
+                      # de un cliente a partir de bytes hostiles, y serializa a
+                      # mano las claves y valores de los mapas que lee el kernel
+                      # por cada paquete. Un indice mal calculado ahi no da un
+                      # error: escribe el veredicto en una clave que no existe y
+                      # el corte no ocurre nunca, en silencio
 )
 
 if ! rustup toolchain list 2>/dev/null | grep -q nightly; then

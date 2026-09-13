@@ -1,0 +1,32 @@
+[package]
+name = "aegis-ips"
+description = "Prevencion en linea: decide que flujos cortar y baja el veredicto al kernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["kernel"]
+# Escritura real de los mapas eBPF y enganche de los programas TC. Se desactiva
+# para compilar y probar el MOTOR DE DECISION en maquinas sin privilegios: si
+# decidir dependiera de poder cargar codigo en el kernel, la parte del producto
+# que decide cortar la red de un cliente seria justo la que no se puede probar.
+kernel = ["dep:libbpf-rs", "aegis-net/xdp"]
+
+[dependencies]
+# El IPS consume los hechos que produce el disector: son la entrada de toda
+# decision. Sin esto habria que reinventar el analisis de protocolo, que es
+# exactamente lo que la FASE 70 existe para no repetir.
+aegis-wire = { path = "../aegis-wire" }
+# El enganche a la interfaz y el reloj monotonico del kernel ya estan
+# implementados y auditados en aegis-net. Repetirlos aqui obligaria a meter
+# `unsafe` en un crate que es #![forbid(unsafe_code)], y dejaria dos copias de la
+# misma llamada a la libc que revisar.
+aegis-net = { path = "../aegis-net", default-features = false }
+thiserror = "2"
+libbpf-rs = { version = "0.24", optional = true }

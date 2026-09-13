@@ -272,6 +272,16 @@ name = "aegis-ipc"
 version = "0.1.0"
 
 [[package]]
+name = "aegis-ips"
+version = "0.1.0"
+dependencies = [
+ "aegis-net",
+ "aegis-wire",
+ "libbpf-rs",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-kguard"
 version = "0.1.0"
 dependencies = [

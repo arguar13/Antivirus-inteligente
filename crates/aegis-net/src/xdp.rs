@@ -447,7 +447,13 @@ fn decode_block_entry(addr: Ipv4Addr, bytes: &[u8]) -> BlockEntry {
 }
 
 /// Resuelve el indice de una interfaz por su nombre.
-fn if_nametoindex(nombre: &str) -> Result<u32, NetError> {
+/// Traduce un nombre de interfaz a su indice.
+///
+/// Publico porque lo necesita tambien el plano de aplicacion de AegisIPS
+/// (FASE 71). Duplicarlo alli obligaria a repetir el `unsafe` de la llamada a
+/// libc en un crate que es `#![forbid(unsafe_code)]`, y dos copias de la misma
+/// llamada a la libc son dos sitios donde revisar lo mismo.
+pub fn if_nametoindex(nombre: &str) -> Result<u32, NetError> {
     let c = std::ffi::CString::new(nombre)
         .map_err(|_| NetError::UnknownInterface(nombre.to_string()))?;
     // SAFETY: `c` es una cadena C valida y viva durante la llamada.

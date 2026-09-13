@@ -42,6 +42,7 @@ BPF_OBJ    := $(BUILD)/aegis_probes.bpf.o
 XDP_OBJ    := $(BUILD)/aegis_xdp.bpf.o
 KI_OBJ     := $(BUILD)/aegis_kintegrity.bpf.o
 SSL_OBJ    := $(BUILD)/aegis_sslsniff.bpf.o
+IPS_OBJ    := $(BUILD)/aegis_ips.bpf.o
 VERIFIER   := $(BUILD)/aegis_bpf_verify
 CORECHECK  := $(BUILD)/aegis_core_check
 
@@ -76,7 +77,7 @@ VERIFY_LDLIBS := -lbpf -lelf -lz
 
 .PHONY: build verify core-check core-matrix sign check-integrity clean dump
 
-build: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
+build: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(IPS_OBJ)
 
 $(BUILD):
 	@mkdir -p $(BUILD)
@@ -122,6 +123,14 @@ $(SSL_OBJ): src/aegis_sslsniff.bpf.c include/aegis_bpf_common.h include/aegis_ss
 	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
 	@echo "  BPF   $@"
 
+# Prevencion en linea por TC (FASE 71). Usa los dos ganchos de clsact, ingreso
+# y egreso, porque XDP no tiene camino de salida y el sentido saliente —la
+# baliza al C2, la exfiltracion, el movimiento lateral— es el que mas importa
+# cortar en un endpoint.
+$(IPS_OBJ): src/aegis_ips.bpf.c include/aegis_bpf_common.h $(VMLINUX_H) | $(BUILD)
+	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+	@echo "  BPF   $@"
+
 $(VERIFIER): tools/aegis_bpf_verify.c | $(BUILD)
 	$(CC) $(VERIFY_CFLAGS) $< -o $@ $(VERIFY_LDLIBS)
 
@@ -133,11 +142,12 @@ $(CORECHECK): tools/aegis_core_check.c | $(BUILD)
 # Compilar no demuestra nada en eBPF: el verificador del kernel rechaza
 # programas que compilan perfectamente (accesos no acotados, bucles que no
 # puede probar que terminan, punteros sin comprobar). Esta es la prueba real.
-verify: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(VERIFIER)
+verify: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(IPS_OBJ) $(VERIFIER)
 	@./$(VERIFIER) $(BPF_OBJ)
 	@./$(VERIFIER) $(XDP_OBJ)
 	@./$(VERIFIER) $(KI_OBJ)
 	@./$(VERIFIER) $(SSL_OBJ)
+	@./$(VERIFIER) $(IPS_OBJ)
 
 # Comprueba, sobre los bytes del objeto, que el bytecode lleva reubicaciones
 # CO-RE bien formadas. Compilar con vmlinux.h no lo garantiza: un objeto puede

@@ -272,4 +272,111 @@ enum aegis_xdp_stat {
     AEGIS_XDP_STAT__MAX = 7,
 };
 
+/* ------------------------------------------------------------------------
+ * Prevencion en linea (AegisIPS, FASE 71)
+ * ------------------------------------------------------------------------ */
+
+/* MODOS. El kernel los aplica, no solo los transporta.
+ *
+ * Que el modo se compruebe AQUI y no en userland no es un detalle de
+ * implementacion: es lo que hace que «modo aprendizaje» sea una promesa que se
+ * puede sostener. Si la decision de cortar viviera arriba, un fallo de logica
+ * en userland cortaria trafico de un cliente que habia pedido expresamente que
+ * no se cortara nada. Con la comprobacion aqui, para que eso pase hace falta
+ * cambiar el modo a proposito. */
+#define AEGIS_IPS_MODO_SOLO_DETECCION 0u
+#define AEGIS_IPS_MODO_BLOQUEO        1u
+#define AEGIS_IPS_MODO_APRENDIZAJE    2u
+
+#define AEGIS_IPS_CFG_ENABLED 0x00000001u
+
+/* Veredictos que userland puede escribir para un flujo. */
+#define AEGIS_IPS_VEREDICTO_PERMITIR 0u
+#define AEGIS_IPS_VEREDICTO_CORTAR   1u
+
+/* Clave de flujo NORMALIZADA: los dos sentidos de una conversacion dan la
+ * misma clave. Userland la normaliza antes de escribir; el kernel la normaliza
+ * antes de buscar. Si no coincidieran, un veredicto escrito viendo el sentido
+ * cliente->servidor no cortaria el sentido de vuelta, que es justo por donde
+ * llega lo que interesa cortar. */
+struct aegis_ips_flujo {
+    __u32 ip_a;     /* la menor de las dos, en orden de red */
+    __u32 ip_b;
+    __u16 puerto_a; /* el de ip_a, en orden de host */
+    __u16 puerto_b;
+    __u8 protocolo;
+    __u8 pad[3];
+};
+
+/* Veredicto cacheado en el kernel para un flujo.
+ *
+ * ESTO ES LO QUE HACE QUE BLOQUEAR NO CUESTE RENDIMIENTO: el primer paquete de
+ * un flujo sospechoso sube a userland, se juzga una vez, y el veredicto baja al
+ * kernel. A partir de ahi el resto del flujo se corta con una busqueda de mapa,
+ * sin volver a subir. Un IPS que consulte a userland por cada paquete paga el
+ * coste que existe para evitar. */
+struct aegis_ips_veredicto {
+    /* Caducidad en la base de bpf_ktime_get_boot_ns. 0 = sin caducidad. */
+    __u64 until_ns;
+    /* Paquetes afectados por este veredicto. Lo lleva el kernel para que
+     * userland mida el efecto sin recibir un evento por paquete. */
+    __u64 hits;
+    /* AEGIS_IPS_VEREDICTO_*. */
+    __u32 veredicto;
+    /* AEGIS_BLOCK_REASON_*, para poder explicar el corte. */
+    __u32 motivo;
+    /* Identificador de la regla que lo decidio, para poder auditarlo. */
+    __u64 regla;
+};
+
+/* Entrada de la lista de NUNCA BLOQUEAR.
+ *
+ * Se consulta ANTES que el veredicto, a proposito. Un falso positivo en un IPS
+ * no es una alerta molesta: es una interrupcion de servicio. El plano de
+ * control, los controladores de dominio y el DNS de la organizacion son
+ * justamente las maquinas cuyo corte convierte un incidente en un apagon, y
+ * son las que un atacante querria que bloquearamos por el. */
+struct aegis_ips_protegido {
+    /* Veces que esta entrada ha evitado un corte. Es la medida de cuantas
+     * veces la salvaguarda ha hecho falta de verdad. */
+    __u64 salvadas;
+    __u32 motivo;
+    __u32 pad;
+};
+
+struct aegis_ips_config {
+    __u32 flags;
+    /* AEGIS_IPS_MODO_*. Por defecto SOLO_DETECCION: un IPS que llega
+     * bloqueando por defecto tira la produccion del cliente el primer dia. */
+    __u32 modo;
+    __u64 reservado;
+};
+/* El espejo en Rust tiene que coincidir byte a byte: estos mapas los escribe
+ * userland y los lee el kernel por cada paquete. */
+AEGIS_BPF_STATIC_ASSERT(sizeof(struct aegis_ips_flujo) == 16, "aegis_ips_flujo == 16");
+AEGIS_BPF_STATIC_ASSERT(sizeof(struct aegis_ips_veredicto) == 32, "aegis_ips_veredicto == 32");
+AEGIS_BPF_STATIC_ASSERT(sizeof(struct aegis_ips_protegido) == 16, "aegis_ips_protegido == 16");
+AEGIS_BPF_STATIC_ASSERT(sizeof(struct aegis_ips_config) == 16, "aegis_ips_config == 16");
+
+enum aegis_ips_stat {
+    AEGIS_IPS_STAT_PAQUETES = 0,
+    /* Paquetes CORTADOS de verdad. */
+    AEGIS_IPS_STAT_CORTADOS = 1,
+    /* Paquetes que se HABRIAN cortado y no se cortaron, por el modo.
+     * Es la cifra que un cliente mira antes de atreverse a activar el bloqueo. */
+    AEGIS_IPS_STAT_HABRIA_CORTADO = 2,
+    /* Veces que la lista de protegidos evito un corte. Si esto sube, el motor
+     * de decision se esta equivocando en algo grave y hay que mirarlo. */
+    AEGIS_IPS_STAT_PROTEGIDOS = 3,
+    /* Aciertos y fallos de la cache de veredictos, para poder demostrar que el
+     * bloqueo no cuesta subir a userland por paquete. */
+    AEGIS_IPS_STAT_CACHE_ACIERTO = 4,
+    AEGIS_IPS_STAT_CACHE_FALLO = 5,
+    /* Paquetes que no se pudieron clasificar hasta tener clave de flujo. */
+    AEGIS_IPS_STAT_NO_CLASIFICADOS = 6,
+    /* Veredictos encontrados pero ya caducados. */
+    AEGIS_IPS_STAT_CADUCADOS = 7,
+    AEGIS_IPS_STAT__MAX = 8,
+};
+
 #endif /* AEGIS_BPF_COMMON_H */

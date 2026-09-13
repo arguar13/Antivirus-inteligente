@@ -51,6 +51,7 @@ members = [
     "crates/aegis-fwaudit",
     "crates/aegis-swarm",
     "crates/aegis-wire",
+    "crates/aegis-ips",
 ]
 
 [workspace.package]

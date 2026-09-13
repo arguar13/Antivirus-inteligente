@@ -343,6 +343,28 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "wire" ]; then
     fi
 fi
 
+# Prevencion en linea (AegisIPS, FASE 71): pasar de DETECTAR a BLOQUEAR. La
+# frase que gobierna la fase: un falso positivo en un IDS es una alerta que
+# alguien descarta; en un IPS es una INTERRUPCION DE SERVICIO. Por eso las cuatro
+# salvaguardas —solo la confianza alta corta, lista de nunca-bloquear, modo por
+# defecto Solo Deteccion, y tope de bloqueos con degradacion automatica— no son
+# un anadido al motor: son EL diseno. Las dos del medio se comprueban OTRA VEZ en
+# el kernel, porque una salvaguarda que depende de que el codigo de decision este
+# bien no protege del caso que importa. Plano de datos en TC (no XDP: XDP no
+# tiene camino de salida, y el sentido saliente —baliza al C2, exfiltracion,
+# movimiento lateral— es el que mas importa cortar en un endpoint).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ips" ]; then
+    printf '%s==>%s AegisIPS · prevencion en linea con veredictos cacheados en el kernel\n' "$GRIS" "$FIN"
+    if ./tools/verificar-ips.sh > /tmp/aegis-ips-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-ips-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-ips-ci.log | tail -25
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Forense de memoria a escala (RAM YARA, FASE 57): el nucleo —chunks con
 # solapamiento, YARA real, filtro existencial de AegisQL— se prueba en "Rust ·
 # tests". Aqui se re-ejercita y se DECLARA el muro: leer memoria fisica/ajena
