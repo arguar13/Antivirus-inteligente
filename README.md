@@ -234,12 +234,21 @@ shared/include/aegis_abi.h    Contrato ABI Ring 0 <-> Ring 3 (fuente de verdad)
 crates/                       Workspace del AGENTE: sincrono, sin runtime async, panic=abort
 server/crates/                Workspace del PLANO DE CONTROL: tokio, axum, sqlx
 swarm-net/                    Transporte libp2p del enjambre, FUERA del agente a proposito
-drivers/windows/aegis-drv/    Minifilter + callbacks + ELAM (C, WDK)
-drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf)
-cloud/                        Reputacion k-anonima y detonacion (Go)
+drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf) — 2.746 lineas
+kernel/windows/aegis/         Minifilter + ObCallbacks + politica (C, WDK) — 887 lineas
+deploy/terraform/             Aprovisionamiento del plano de control
+fuzz/                         Objetivos de libFuzzer sobre los analizadores
 tools/                        28 puertas de verificacion + ABI check + CI local
 docs/                         Blueprint arquitectonico, una pagina por fase
 ```
+
+**Lo que NO hay, dicho aqui y no escondido en una nota al pie:** no existe un
+directorio `cloud/`. La reputacion k-anonima corre en el cliente
+(`crates/aegis-intel`) contra un servicio que no esta en este repositorio, y la
+detonacion vive en el plano de control (`server/crates/aegis-detonate`), no en un
+servicio en Go aparte. El driver de Windows compila, pero **ELAM necesita un
+certificado de Microsoft** que no se tiene, asi que la paridad de Windows esta
+declarada como muro en `tools/verificar-windows.sh` y no como capacidad.
 
 Los **dos workspaces están separados a propósito**, y no por gusto: el agente es
 síncrono, sin runtime asíncrono, con un presupuesto de memoria acotado por clase

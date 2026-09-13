@@ -99,9 +99,9 @@ shared/include/aegis_abi.h    Contrato ABI Ring 0 <-> Ring 3. Fuente de verdad, 
 crates/                       Workspace del AGENTE: sincrono, panic=abort, 54 crates
 server/crates/                Workspace del PLANO DE CONTROL: tokio/axum/sqlx, 13 crates
 swarm-net/                    Transporte libp2p del enjambre, FUERA del agente a proposito
-drivers/windows/aegis-drv/    Minifilter + callbacks + ELAM (C, WDK)
 drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf)
-cloud/                        Reputacion k-anonima y detonacion (Go)
+kernel/windows/aegis/         Minifilter + ObCallbacks + politica (C, WDK)
+deploy/terraform/             Aprovisionamiento del plano de control
 tools/                        28 puertas de verificacion + ABI check + CI local
 docs/                         Una pagina por fase
 ```
