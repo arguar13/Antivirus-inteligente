@@ -176,6 +176,29 @@ fn analizar_linea(linea: &str, protocolo: &'static str, ipv6: bool) -> Option<So
 ///      127.0.0.1 en una maquina little-endian. Leerlo al reves da 1.0.0.127,
 ///      una direccion que existe y que llevaria a bloquear a un tercero.
 ///   2. IPv6 va en cuatro grupos de 32 bits, cada uno en orden del anfitrion.
+///
+/// POR QUE LOS DOS CASOS USAN `to_ne_bytes` (corregido en la FASE 81)
+/// ------------------------------------------------------------------
+/// El kernel imprime con `%08X` el `u32` TAL COMO ESTA EN MEMORIA, y en memoria
+/// ese `u32` contiene los cuatro octetos de la direccion en orden de red. Al
+/// imprimirlo como numero, una maquina little-endian saca primero el octeto que
+/// en memoria iba el ultimo. Deshacerlo es, exactamente, volver a escribir el
+/// numero en el orden NATIVO de esta maquina: eso es `to_ne_bytes`, y vale en
+/// las dos endianidades sin preguntar por ninguna.
+///
+/// Antes de la FASE 81 habia aqui dos errores distintos y ninguna prueba que
+/// los viera:
+///
+///   - IPv6 usaba `to_be_bytes`, que contradecia al comentario de arriba. `::1`
+///     —que /proc escribe `...01000000`— salia como `::100:0`. Una direccion
+///     inventada en la tabla de sockets no es un defecto cosmetico: una caceria
+///     por la IP de un C2 no encuentra al que la tiene, y si alguien bloquea por
+///     esa columna, bloquea a un tercero.
+///   - IPv4 usaba `swap_bytes`, que acierta en little-endian y falla en
+///     big-endian. Era correcto en las maquinas donde se probo y solo ahi.
+///
+/// La prueba que lo tapaba comprobaba `matches!(ip, IpAddr::V6(_))`: verificaba
+/// el TIPO del resultado, no su VALOR. Ver `el_loopback_v6_se_decodifica_a_uno`.
 fn analizar_direccion(campo: &str, ipv6: bool) -> Option<(IpAddr, u16)> {
     let (dir, puerto) = campo.split_once(':')?;
     let puerto = u16::from_str_radix(puerto, 16).ok()?;
@@ -187,7 +210,7 @@ fn analizar_direccion(campo: &str, ipv6: bool) -> Option<(IpAddr, u16)> {
         let mut octetos = [0u8; 16];
         for g in 0..4 {
             let palabra = u32::from_str_radix(&dir[g * 8..g * 8 + 8], 16).ok()?;
-            octetos[g * 4..g * 4 + 4].copy_from_slice(&palabra.to_be_bytes());
+            octetos[g * 4..g * 4 + 4].copy_from_slice(&palabra.to_ne_bytes());
         }
         Some((IpAddr::V6(Ipv6Addr::from(octetos)), puerto))
     } else {
@@ -195,9 +218,7 @@ fn analizar_direccion(campo: &str, ipv6: bool) -> Option<(IpAddr, u16)> {
             return None;
         }
         let palabra = u32::from_str_radix(dir, 16).ok()?;
-        // El kernel escribe el entero tal cual lo tiene en memoria; en
-        // little-endian eso deja los octetos al reves respecto del orden de red.
-        Some((IpAddr::V4(Ipv4Addr::from(palabra.swap_bytes())), puerto))
+        Some((IpAddr::V4(Ipv4Addr::from(palabra.to_ne_bytes())), puerto))
     }
 }
 
@@ -323,6 +344,46 @@ mod pruebas {
             analizar_direccion("00000000000000000000000001000000:0050", true).unwrap();
         assert_eq!(puerto, 80);
         assert!(matches!(ip, IpAddr::V6(_)));
+    }
+
+    #[test]
+    fn el_loopback_v6_se_decodifica_a_uno() {
+        // LA PRUEBA QUE FALTABA, y que dejo pasar un defecto durante toda la
+        // vida del modulo: la de arriba comprueba que el resultado ES una IPv6,
+        // no que VALGA lo que tiene que valer. Con `to_be_bytes` esto daba
+        // `::100:0`, una direccion inventada.
+        //
+        // Por que importa mas de lo que parece: la tabla de sockets es lo que
+        // responde una caceria por la IP de un C2. Una direccion mal decodificada
+        // no devuelve "no lo encuentro": devuelve OTRA direccion, y quien actue
+        // sobre esa columna actua contra un tercero que no tiene nada que ver.
+        let (ip, puerto) =
+            analizar_direccion("00000000000000000000000001000000:0050", true).unwrap();
+        assert_eq!(ip, IpAddr::V6(Ipv6Addr::LOCALHOST), "::1 mal decodificado");
+        assert_eq!(puerto, 80);
+    }
+
+    #[test]
+    fn una_direccion_v6_completa_conserva_todos_sus_grupos() {
+        // 2001:db8::dead:beef tal y como la escribe /proc/net/tcp6 en una
+        // maquina little-endian: cada grupo de 32 bits, con sus octetos al reves.
+        let (ip, _) = analizar_direccion("B80D0120000000000000000000000000:0000", true).unwrap();
+        assert_eq!(
+            ip,
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0)),
+            "el prefijo 2001:db8:: se decodifica mal"
+        );
+    }
+
+    #[test]
+    fn las_dos_familias_usan_el_mismo_criterio_de_endianidad() {
+        // IPv4 e IPv6 salen del MISMO formato del kernel, asi que tienen que
+        // deshacerlo igual. Que una usara `swap_bytes` y la otra `to_be_bytes`
+        // era la senal de que una de las dos estaba mal.
+        let (v4, _) = analizar_direccion("0100007F:0000", false).unwrap();
+        assert_eq!(v4, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        let (v6, _) = analizar_direccion("00000000000000000000000001000000:0000", true).unwrap();
+        assert_eq!(v6, IpAddr::V6(Ipv6Addr::LOCALHOST));
     }
 
     #[test]

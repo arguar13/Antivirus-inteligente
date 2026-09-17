@@ -369,7 +369,12 @@ pub fn parse_addr(campo: &str, proto: SocketProto) -> Option<std::net::SocketAdd
                 return None;
             }
             let crudo = u32::from_str_radix(dir, 16).ok()?;
-            let ip = std::net::Ipv4Addr::from(crudo.to_le_bytes());
+            // `to_ne_bytes` y no `to_le_bytes`: el kernel imprime el `u32` tal
+            // como lo tiene en memoria, asi que deshacerlo es volver a
+            // escribirlo en el orden NATIVO de esta maquina. En little-endian
+            // los dos coinciden; en big-endian solo el nativo acierta. Unificado
+            // con `aegis-scal::linux::net` en la FASE 81.
+            let ip = std::net::Ipv4Addr::from(crudo.to_ne_bytes());
             Some(std::net::SocketAddr::from((ip, puerto)))
         }
         SocketProto::Tcp6 | SocketProto::Udp6 => {
@@ -377,10 +382,11 @@ pub fn parse_addr(campo: &str, proto: SocketProto) -> Option<std::net::SocketAdd
                 return None;
             }
             let mut bytes = [0u8; 16];
-            // Cuatro palabras de 32 bits, cada una en el orden del host.
+            // Cuatro palabras de 32 bits, cada una en el orden del host. Ver la
+            // nota del caso IPv4 sobre por que es `to_ne_bytes`.
             for i in 0..4 {
                 let palabra = u32::from_str_radix(&dir[i * 8..i * 8 + 8], 16).ok()?;
-                bytes[i * 4..i * 4 + 4].copy_from_slice(&palabra.to_le_bytes());
+                bytes[i * 4..i * 4 + 4].copy_from_slice(&palabra.to_ne_bytes());
             }
             let ip = std::net::Ipv6Addr::from(bytes);
             Some(std::net::SocketAddr::from((ip, puerto)))
