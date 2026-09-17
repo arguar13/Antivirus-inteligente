@@ -127,12 +127,20 @@
 // declara esto, O esta en `tools/lineabase-unsafe.txt` con su razon escrita.
 #![forbid(unsafe_code)]
 
+/// Contenedores vistos desde el nucleo del anfitrion.
+pub mod contenedores;
 /// El contexto de una lectura: presupuesto, reloj, raiz y maquina.
 pub mod contexto;
 /// El coste de una tabla, y el rechazo en compilacion de lo que no se puede difundir.
 pub mod coste;
 /// Ficheros, atributos extendidos, ACL, montajes y superbloques.
 pub mod ficheros;
+/// Usuarios, grupos, sesiones y credenciales.
+pub mod identidad;
+/// Arranque, servicios, tareas, modulos y precarga.
+pub mod persistencia;
+/// CPU, memoria, buses, firmware y paquetes.
+pub mod plataforma;
 /// Procesos y todo lo que cuelga de ellos.
 pub mod procesos;
 /// Sockets locales, rutas, interfaces, vecinos y cortafuegos.

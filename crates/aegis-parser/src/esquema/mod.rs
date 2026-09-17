@@ -135,10 +135,18 @@ impl Tabla {
     }
 }
 
+/// Contenedores vistos desde el nucleo del anfitrion (FASE 81).
+pub mod contenedores;
 /// Ficheros, atributos extendidos, ACL y montajes (FASE 81).
 pub mod ficheros;
+/// Usuarios, grupos, sesiones y credenciales (FASE 81).
+pub mod identidad;
 /// Las cinco tablas originales de AegisQL (FASES 34, 38 y 57).
 pub mod nucleo;
+/// Arranque, servicios, tareas, modulos y precarga (FASE 81).
+pub mod persistencia;
+/// CPU, memoria, buses, firmware y paquetes (FASE 81).
+pub mod plataforma;
 /// Procesos y todo lo que cuelga de ellos (FASE 81).
 pub mod procesos;
 /// Rutas, interfaces, vecinos, cortafuegos y sockets locales (FASE 81).
@@ -180,6 +188,37 @@ pub const TABLAS: &[Tabla] = &[
     red::ARP_CACHE,
     red::FIREWALL_RULES,
     red::UNIX_SOCKETS,
+    // FASE 81 — identidad.
+    identidad::USERS,
+    identidad::GROUPS,
+    identidad::SESSIONS,
+    identidad::SUDOERS,
+    identidad::AUTHORIZED_KEYS,
+    identidad::KERBEROS_TICKETS,
+    // FASE 81 — persistencia.
+    persistencia::SYSTEMD_UNITS,
+    persistencia::SYSTEMD_TIMERS,
+    persistencia::CRON_JOBS,
+    persistencia::KERNEL_MODULES,
+    persistencia::BOOT_IMAGES,
+    persistencia::BOOT_ENTRIES,
+    persistencia::SHELL_PROFILES,
+    persistencia::PRELOAD,
+    // FASE 81 — plataforma y paquetes.
+    plataforma::PACKAGES,
+    plataforma::CPU_INFO,
+    plataforma::CPU_MITIGATIONS,
+    plataforma::MEMORY_INFO,
+    plataforma::BLOCK_DEVICES,
+    plataforma::PCI_DEVICES,
+    plataforma::USB_DEVICES,
+    plataforma::FIRMWARE_INFO,
+    plataforma::TPM_PCRS,
+    // FASE 81 — contenedores.
+    contenedores::CONTAINERS,
+    contenedores::CONTAINER_IMAGES,
+    contenedores::CONTAINER_MOUNTS,
+    contenedores::CONTAINER_CAPABILITIES,
 ];
 
 /// Busca una tabla por nombre.

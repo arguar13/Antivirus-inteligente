@@ -146,6 +146,7 @@ name = "aegis-estado"
 version = "0.1.0"
 dependencies = [
  "aegis-entidad",
+ "aegis-firmware",
  "aegis-parser",
  "aegis-scal",
  "aegis-vuln",

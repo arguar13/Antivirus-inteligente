@@ -28,6 +28,10 @@ aegis-entidad = { path = "../aegis-entidad" }
 # Package>` parametrizado por raiz). Escribir un segundo lector de dpkg seria
 # exactamente la duplicacion que esta fase viene a corregir.
 aegis-vuln = { path = "../aegis-vuln" }
+# El estado del arranque seguro y la presencia del TPM ya los cubre
+# `aegis-firmware` desde la FASE 49. La tabla `firmware_info` los expone; no
+# vuelve a leer las variables UEFI por su cuenta.
+aegis-firmware = { path = "../aegis-firmware" }
 # La columna `sha256` de la tabla de ficheros. Ya tiene fila en
 # `tools/lineabase-agente.txt` desde la FASE 79, porque SHA-256 es el nombre de
 # una entidad de contenido en todo el producto.
