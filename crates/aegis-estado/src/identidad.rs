@@ -747,6 +747,10 @@ impl Tabla for ClavesAutorizadas {
         let mut c = Constructor::nuevo(self.esquema());
 
         for cuenta in cuentas {
+            if ctx.agotado() {
+                salida.truncada = true;
+                break;
+            }
             if cuenta.directorio.is_empty() {
                 continue;
             }

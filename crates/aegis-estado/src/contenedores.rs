@@ -187,6 +187,10 @@ impl Tabla for Contenedores {
         let mut c = Constructor::nuevo(self.esquema());
 
         for p in procesos {
+            if ctx.agotado() {
+                salida.truncada = true;
+                break;
+            }
             let pid = p.key.pid;
             salida.examinadas += 1;
             let Ok(cgroup) = std::fs::read_to_string(format!("/proc/{pid}/cgroup")) else {
@@ -382,6 +386,10 @@ impl Tabla for MontajesDeContenedor {
         let mut vistos: BTreeMap<String, ()> = BTreeMap::new();
 
         for p in procesos {
+            if ctx.agotado() {
+                salida.truncada = true;
+                break;
+            }
             let pid = p.key.pid;
             let Ok(cgroup) = std::fs::read_to_string(format!("/proc/{pid}/cgroup")) else {
                 continue;
@@ -458,6 +466,10 @@ impl Tabla for CapacidadesDeContenedor {
         let mut c = Constructor::nuevo(self.esquema());
 
         for p in procesos {
+            if ctx.agotado() {
+                salida.truncada = true;
+                break;
+            }
             let pid = p.key.pid;
             let Ok(cgroup) = std::fs::read_to_string(format!("/proc/{pid}/cgroup")) else {
                 continue;

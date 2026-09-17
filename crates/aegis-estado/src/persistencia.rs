@@ -120,6 +120,10 @@ impl Tabla for Unidades {
             };
             hubo_directorio = true;
             for ruta in hijos {
+                if ctx.agotado() {
+                    salida.truncada = true;
+                    return Ok(salida);
+                }
                 let Some(nombre) = ruta.file_name().and_then(|n| n.to_str()) else {
                     continue;
                 };
@@ -221,6 +225,10 @@ impl Tabla for Temporizadores {
                 continue;
             };
             for ruta in hijos {
+                if ctx.agotado() {
+                    salida.truncada = true;
+                    return Ok(salida);
+                }
                 let Some(nombre) = ruta.file_name().and_then(|n| n.to_str()) else {
                     continue;
                 };
@@ -496,6 +504,12 @@ impl Tabla for Modulos {
             .leer_texto("proc/sys/kernel/osrelease")
             .map(|v| v.trim().to_string())
             .unwrap_or_default();
+        // UNA sola pasada por el arbol de modulos, y solo si hace falta.
+        let indice = if version.is_empty() {
+            None
+        } else {
+            Some(indice_de_ko(ctx, &version))
+        };
 
         let mut salida = Filas::default();
         let mut c = Constructor::nuevo(self.esquema());
@@ -504,11 +518,9 @@ impl Tabla for Modulos {
             salida.examinadas += 1;
             // Si su fichero .ko no esta en el arbol de modulos, el modulo se
             // cargo desde otro sitio: es LA columna de deteccion de rootkits.
-            let en_disco = if version.is_empty() {
-                None
-            } else {
-                Some(hay_ko(ctx, &version, &m.nombre))
-            };
+            let en_disco = indice
+                .as_ref()
+                .map(|i| i.contains(&m.nombre.replace('-', "_")));
             // Las marcas de contaminacion del propio modulo.
             let tainted =
                 std::fs::read_to_string(ctx.ruta(&format!("sys/module/{}/taint", m.nombre)))
@@ -538,21 +550,36 @@ impl Tabla for Modulos {
     }
 }
 
-/// Busca el fichero `.ko` de un modulo en el arbol de modulos del nucleo.
-fn hay_ko(ctx: &Contexto, version: &str, nombre: &str) -> bool {
-    // El nombre en `/proc/modules` lleva guiones bajos donde el fichero puede
-    // llevar guiones: `snd_hda_intel` es `snd-hda-intel.ko`. Buscar solo una de
-    // las dos formas da falsos «no esta en disco», que es una acusacion seria.
-    let variantes = [nombre.to_string(), nombre.replace('_', "-")];
-    let base = ctx.ruta(&format!("lib/modules/{version}"));
-    let mut pendientes = vec![base];
-    let mut vistos = 0usize;
+/// Indice de los ficheros `.ko` del arbol de modulos, construido UNA vez.
+///
+/// # Por que un indice y no una busqueda por modulo
+///
+/// La version evidente —buscar el fichero de cada modulo cuando toca— recorre el
+/// arbol entero de `/lib/modules` por CADA uno de los cien y pico modulos
+/// cargados. En la maquina de integracion eso colgaba la consulta hasta agotar
+/// cualquier plazo, y en un endpoint de un cliente habria sido peor: un disco
+/// mecanico y un arbol de modulos completo son minutos de E/S por consulta.
+///
+/// Lo detecto la prueba del catalogo al leer las cuarenta y siete tablas
+/// seguidas, que es justamente para lo que sirve: los costes patologicos no se
+/// ven probando una tabla sola.
+///
+/// Los nombres se guardan en sus DOS formas —con guion bajo y con guion— porque
+/// `/proc/modules` dice `snd_hda_intel` y el fichero se llama
+/// `snd-hda-intel.ko`. Buscar solo una produce falsos «no esta en disco», que es
+/// una acusacion de rootkit.
+fn indice_de_ko(ctx: &Contexto, version: &str) -> std::collections::BTreeSet<String> {
+    let mut indice = std::collections::BTreeSet::new();
+    let mut pendientes = vec![ctx.ruta(&format!("lib/modules/{version}"))];
+    let mut directorios = 0usize;
+
     while let Some(dir) = pendientes.pop() {
-        vistos += 1;
-        // Cota dura: el arbol de modulos de un nucleo tiene unos pocos miles de
-        // directorios, y un recorrido sin tope en una tabla no es aceptable.
-        if vistos > 4096 {
-            return false;
+        // Cota dura sobre el recorrido, y presupuesto: el arbol de modulos de un
+        // nucleo son unos miles de directorios, pero un `/lib/modules` preparado
+        // a mano podria ser cualquier cosa.
+        directorios += 1;
+        if directorios > 8192 || ctx.agotado() {
+            break;
         }
         let Ok(hijos) = std::fs::read_dir(&dir) else {
             continue;
@@ -563,19 +590,16 @@ fn hay_ko(ctx: &Contexto, version: &str, nombre: &str) -> bool {
                 pendientes.push(ruta);
                 continue;
             }
-            let n = h.file_name().to_string_lossy().to_string();
-            for v in &variantes {
-                if n == format!("{v}.ko")
-                    || n == format!("{v}.ko.xz")
-                    || n == format!("{v}.ko.zst")
-                    || n == format!("{v}.ko.gz")
-                {
-                    return true;
-                }
-            }
+            let nombre = h.file_name().to_string_lossy().to_string();
+            // `.ko`, `.ko.xz`, `.ko.zst`, `.ko.gz`: se queda el nombre base.
+            let Some(pos) = nombre.find(".ko") else {
+                continue;
+            };
+            let base = &nombre[..pos];
+            indice.insert(base.replace('-', "_"));
         }
     }
-    false
+    indice
 }
 
 // ---------------------------------------------------------------------------
@@ -949,6 +973,10 @@ impl Tabla for Perfiles {
         }
 
         for (ruta, duenno, alcance) in fuentes {
+            if ctx.agotado() {
+                salida.truncada = true;
+                break;
+            }
             let Ok(texto) = std::fs::read_to_string(&ruta) else {
                 continue;
             };
@@ -1021,6 +1049,10 @@ impl Tabla for Precarga {
         if ctx.es_el_sistema_real() && filtro.necesita("pid") {
             if let Ok(procesos) = ctx.procesos() {
                 for p in procesos {
+                    if ctx.agotado() {
+                        salida.truncada = true;
+                        break;
+                    }
                     let pid = p.key.pid;
                     let Ok(bytes) = std::fs::read(format!("/proc/{pid}/environ")) else {
                         continue;

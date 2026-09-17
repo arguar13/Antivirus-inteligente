@@ -116,7 +116,7 @@ impl MotivoNoLeible {
                 format!("este nucleo no expone {interfaz}")
             }
             MotivoNoLeible::NoAplicaEnEstaPlataforma { interfaz } => {
-                format!("no aplica en esta plataforma: {interfaz} es de otra")
+                format!("no aplica en esta maquina: {interfaz}")
             }
             MotivoNoLeible::FuenteAusente { ruta } => {
                 format!("la fuente no existe en esta maquina: {ruta}")

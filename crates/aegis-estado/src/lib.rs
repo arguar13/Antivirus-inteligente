@@ -127,6 +127,8 @@
 // declara esto, O esta en `tools/lineabase-unsafe.txt` con su razon escrita.
 #![forbid(unsafe_code)]
 
+/// El catalogo: que tablas existen y quien las sirve.
+pub mod catalogo;
 /// Contenedores vistos desde el nucleo del anfitrion.
 pub mod contenedores;
 /// El contexto de una lectura: presupuesto, reloj, raiz y maquina.
@@ -148,6 +150,7 @@ pub mod red;
 /// El rasgo `Tabla`, sus filas y el motivo por el que a veces no hay ninguna.
 pub mod tabla;
 
+pub use catalogo::{catalogo, la_sirve_el_ejecutor, peligrosas, tabla_llamada};
 pub use contexto::Contexto;
 pub use tabla::{Aviso, Fila, Filas, Filtro, MotivoNoLeible, Tabla};
 

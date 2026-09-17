@@ -39,11 +39,17 @@ use aegis_scal::process::{ProcessInfo, ProcessLifecycleProvider};
 
 use crate::tabla::MotivoNoLeible;
 
-/// Presupuesto de tiempo por defecto para leer una tabla.
+/// Presupuesto de tiempo de TODO lo que se lea con un mismo contexto.
 ///
-/// Mas bajo que el de una consulta entera (cinco segundos en `aegis-hunt`)
-/// porque una consulta puede tocar varias tablas y ninguna puede comerse el
-/// presupuesto de las demas.
+/// El cronometro arranca al construir el [`Contexto`] y no se reinicia entre
+/// tablas, lo cual es deliberado y conviene decirlo claro porque lo natural es
+/// suponer lo contrario: una consulta que toca cinco tablas tiene DOS segundos
+/// en total, no dos por tabla. El endpoint de un cliente no distingue si el
+/// minuto que lleva ocupado se lo come una tabla o veinte.
+///
+/// Quien necesite un presupuesto por tabla —la puerta de calidad, una
+/// recoleccion programada— construye un contexto por tabla, que es barato salvo
+/// por el censo de `/proc` que hace el proveedor de procesos.
 pub const PRESUPUESTO_POR_DEFECTO: Duration = Duration::from_secs(2);
 
 /// Tope de filas que una tabla devuelve por lectura.

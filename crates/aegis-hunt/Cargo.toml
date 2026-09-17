@@ -13,6 +13,10 @@ workspace = true
 [dependencies]
 aegis-parser = { path = "../aegis-parser" }
 aegis-scal = { path = "../aegis-scal" }
+# Los cuarenta y siete proveedores de estado de la FASE 81. El ejecutor sigue
+# sirviendo sus cinco tablas originales —las que tienen columnas cualificadas— y
+# delega el resto; ver `src/estado.rs`.
+aegis-estado = { path = "../aegis-estado" }
 # Motor YARA para la tabla `memory` (FASE 57): SELECT pid FROM memory WHERE
 # yara_match = 'RULE'. aegis-scan (y su yara-x) ya esta en el arbol del agente,
 # asi que no suma superficie nueva.
@@ -25,3 +29,6 @@ sha2 = "0.10"
 
 [dev-dependencies]
 libc = "0.2"
+# Las pruebas del puente con `aegis-estado` construyen un contexto, y un contexto
+# necesita la identidad de la maquina.
+aegis-entidad = { path = "../aegis-entidad" }

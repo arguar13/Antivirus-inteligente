@@ -80,6 +80,18 @@ pub struct Resultado {
     pub agotado: bool,
     /// Milisegundos empleados.
     pub duracion_ms: u64,
+    /// Por que NO hay tabla, cuando no la hay (FASE 81).
+    ///
+    /// Es la diferencia con osquery, y cabe en un campo: alli el tipo de retorno
+    /// es una lista de filas y no hay donde poner el motivo, asi que «no hay
+    /// nada» y «no pude mirar» se escriben igual —vacio— y en un informe se leen
+    /// igual. Aqui la segunda respuesta tiene sitio propio.
+    pub motivo: Option<String>,
+    /// Huecos declarados dentro de una lectura que si tuvo exito.
+    ///
+    /// Distinto de `motivo`: aquel dice «no hay tabla», estos dicen «hay tabla,
+    /// y le faltan estas filas, por esto».
+    pub avisos: Vec<String>,
 }
 
 /// Ejecuta consultas contra este endpoint.
@@ -87,6 +99,7 @@ pub struct Ejecutor<'a> {
     grafo: Option<&'a BehaviorGraph>,
     yara: Option<&'a aegis_scan::YaraEngine>,
     presupuesto: Duration,
+    estado: Option<&'a aegis_estado::Contexto>,
 }
 
 impl<'a> Ejecutor<'a> {
@@ -99,6 +112,7 @@ impl<'a> Ejecutor<'a> {
             grafo: None,
             yara: None,
             presupuesto: PRESUPUESTO_POR_DEFECTO,
+            estado: None,
         }
     }
 
@@ -108,7 +122,21 @@ impl<'a> Ejecutor<'a> {
             grafo: Some(grafo),
             yara: None,
             presupuesto: PRESUPUESTO_POR_DEFECTO,
+            estado: None,
         }
+    }
+
+    /// Da al ejecutor el contexto con el que leer las cuarenta y siete tablas de
+    /// estado de la FASE 81.
+    ///
+    /// Sin el, esas tablas responden con su MOTIVO —«este agente no tiene
+    /// contexto de estado»— y no con cero filas. La diferencia importa: un
+    /// agente mal configurado tiene que verse como un agente mal configurado, no
+    /// como una maquina sin usuarios ni servicios ni paquetes.
+    #[must_use]
+    pub fn con_estado(mut self, ctx: &'a aegis_estado::Contexto) -> Ejecutor<'a> {
+        self.estado = Some(ctx);
+        self
     }
 
     /// Da al ejecutor el motor YARA que la tabla `memory` necesita para escanear
@@ -135,11 +163,50 @@ impl<'a> Ejecutor<'a> {
             "memory_regions" => self.tabla_memoria(plan, reloj),
             "memory" => self.tabla_yara(plan, reloj),
             "graph_edges" => self.tabla_aristas(plan, reloj),
-            // El analizador no deja pasar otra tabla. Si llegara, devolver
-            // vacio es preferible a entrar en panico dentro del agente.
-            _ => Resultado::default(),
+            // Todo lo demas lo sirve el catalogo de `aegis-estado` (FASE 81).
+            _ => self.tabla_del_catalogo(plan),
         };
         r.duracion_ms = reloj.elapsed().as_millis() as u64;
+        r
+    }
+
+    /// Sirve una de las cuarenta y siete tablas de `aegis-estado`.
+    ///
+    /// Ver `crate::estado` sobre por que estas no las sirve el ejecutor con
+    /// codigo propio y las otras cinco si.
+    fn tabla_del_catalogo(&self, plan: &Plan) -> Resultado {
+        let mut r = Resultado {
+            columnas: self.columnas_de_salida(plan),
+            ..Default::default()
+        };
+        let Some(ctx) = self.estado else {
+            // Un agente sin contexto de estado NO devuelve cero filas: lo dice.
+            r.motivo = Some(
+                "este agente no se configuro con contexto de estado; no puede leer esta tabla"
+                    .to_string(),
+            );
+            return r;
+        };
+        let Some(lectura) = crate::estado::ejecutar(plan, ctx, plan.consulta.limite) else {
+            // El analizador no deja pasar una tabla que no existe. Si llegara,
+            // decirlo es mejor que devolver un vacio que parece un hecho.
+            r.motivo = Some(format!(
+                "no hay proveedor para la tabla {}",
+                plan.consulta.tabla
+            ));
+            return r;
+        };
+
+        r.filas = lectura.filas;
+        r.coincidencias = lectura.coincidencias;
+        r.examinadas = lectura.examinadas;
+        r.inaccesibles = lectura.inaccesibles;
+        r.incompleto = lectura.truncada;
+        r.motivo = lectura.motivo;
+        r.avisos = lectura.avisos;
+        if matches!(plan.consulta.proyeccion, Proyeccion::Cuenta) {
+            r.filas = vec![vec![r.coincidencias.to_string()]];
+        }
         r
     }
 

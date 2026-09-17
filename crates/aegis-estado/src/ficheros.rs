@@ -57,6 +57,24 @@ pub const PROFUNDIDAD_MAXIMA: usize = 24;
 /// el de nadie, y que haria concluir que un fichero conocido es desconocido.
 pub const TAMANO_MAXIMO_HASH: u64 = 512 * 1024 * 1024;
 
+/// Indica si una ruta cae dentro de un arbol que no se recorre.
+///
+/// Compara por PREFIJO y no por igualdad, y la diferencia no es cosmetica: una
+/// consulta acotada a `/proc/self/` empieza DENTRO de `/proc`, asi que con una
+/// comparacion por igualdad se colaba entera. `/proc` no es un arbol de
+/// ficheros —es una ventana al nucleo, con enlaces que apuntan a cualquier
+/// sitio, directorios por hilo y ficheros cuya lectura puede bloquear—, y
+/// recorrerlo cuelga la consulta.
+///
+/// Lo encontro la prueba del catalogo, que lee las cuarenta y siete tablas
+/// seguidas: la tabla sola, con una raiz normal, nunca lo habria enseñado.
+pub fn esta_prohibido(ruta: &Path) -> bool {
+    DIRECTORIOS_QUE_NO_SE_RECORREN.iter().any(|p| {
+        let prohibido = Path::new(p);
+        ruta == prohibido || ruta.starts_with(prohibido)
+    })
+}
+
 /// Lo que el recorrido encontro en una ruta.
 #[derive(Debug, Clone)]
 pub struct Entrada {
@@ -106,10 +124,7 @@ fn recorrer(
             ));
             continue;
         }
-        if DIRECTORIOS_QUE_NO_SE_RECORREN
-            .iter()
-            .any(|p| dir == Path::new(p))
-        {
+        if esta_prohibido(&dir) {
             continue;
         }
 
@@ -151,9 +166,30 @@ fn recorrer(
 /// Las raices que hay que recorrer segun lo que diga el filtro.
 ///
 /// Es el empuje de predicados de esta familia: un `path = '/bin/sh'` no recorre
-/// nada, y un `path LIKE '/tmp/%'` recorre solo `/tmp`. Devuelve `None` cuando
-/// el filtro no acota, que es cuando la tabla peligrosa se niega a leerse.
-fn raices_segun_filtro(ctx: &Contexto, filtro: &Filtro) -> Option<Vec<PathBuf>> {
+/// nada, y un `path LIKE '/tmp/%'` recorre solo `/tmp`.
+///
+/// Devuelve el motivo cuando el filtro no acota —la tabla peligrosa se niega a
+/// leerse— y tambien cuando lo que acota cae dentro de un arbol que no se
+/// recorre. Las dos comprobaciones viven AQUI, en el unico sitio por el que
+/// pasan las cuatro tablas peligrosas de la familia, para que ninguna pueda
+/// olvidarse de una de ellas.
+fn raices_segun_filtro(
+    ctx: &Contexto,
+    filtro: &Filtro,
+    acotan: &'static [&'static str],
+) -> Result<Vec<PathBuf>, MotivoNoLeible> {
+    let raices =
+        raices_crudas(ctx, filtro).ok_or(MotivoNoLeible::RequiereFiltro { columnas: acotan })?;
+    if raices.iter().all(|r| esta_prohibido(r)) {
+        return Err(MotivoNoLeible::NoAplicaEnEstaPlataforma {
+            interfaz: "/proc, /sys, /dev y /run no son arboles de ficheros que recorrer",
+        });
+    }
+    Ok(raices)
+}
+
+/// Las raices que pide el filtro, sin comprobar nada mas.
+fn raices_crudas(ctx: &Contexto, filtro: &Filtro) -> Option<Vec<PathBuf>> {
     if let Some(exacta) = filtro.texto("path") {
         return Some(vec![ctx.ruta(exacta)]);
     }
@@ -253,9 +289,7 @@ impl Tabla for Ficheros {
 
     fn leer(&self, ctx: &Contexto, filtro: &Filtro) -> Result<Filas, MotivoNoLeible> {
         self.exige_cota(filtro)?;
-        let raices = raices_segun_filtro(ctx, filtro).ok_or(MotivoNoLeible::RequiereFiltro {
-            columnas: self.columnas_que_acotan(),
-        })?;
+        let raices = raices_segun_filtro(ctx, filtro, self.columnas_que_acotan())?;
         // El hash solo si la consulta lo pide. Hashear cada fichero de un
         // recorrido «por si acaso» convierte una consulta de metadatos en horas
         // de E/S sobre el disco del cliente.
@@ -407,9 +441,7 @@ impl Tabla for Xattrs {
 
     fn leer(&self, ctx: &Contexto, filtro: &Filtro) -> Result<Filas, MotivoNoLeible> {
         self.exige_cota(filtro)?;
-        let raices = raices_segun_filtro(ctx, filtro).ok_or(MotivoNoLeible::RequiereFiltro {
-            columnas: self.columnas_que_acotan(),
-        })?;
+        let raices = raices_segun_filtro(ctx, filtro, self.columnas_que_acotan())?;
         let nombre_buscado = filtro.texto("name");
         let mut salida = Filas::default();
         let mut avisos = Vec::new();
@@ -520,9 +552,7 @@ impl Tabla for Acls {
 
     fn leer(&self, ctx: &Contexto, filtro: &Filtro) -> Result<Filas, MotivoNoLeible> {
         self.exige_cota(filtro)?;
-        let raices = raices_segun_filtro(ctx, filtro).ok_or(MotivoNoLeible::RequiereFiltro {
-            columnas: self.columnas_que_acotan(),
-        })?;
+        let raices = raices_segun_filtro(ctx, filtro, self.columnas_que_acotan())?;
         let mut salida = Filas::default();
         let mut avisos = Vec::new();
         let mut c = Constructor::nuevo(self.esquema());
@@ -603,9 +633,7 @@ impl Tabla for Suid {
 
     fn leer(&self, ctx: &Contexto, filtro: &Filtro) -> Result<Filas, MotivoNoLeible> {
         self.exige_cota(filtro)?;
-        let raices = raices_segun_filtro(ctx, filtro).ok_or(MotivoNoLeible::RequiereFiltro {
-            columnas: self.columnas_que_acotan(),
-        })?;
+        let raices = raices_segun_filtro(ctx, filtro, self.columnas_que_acotan())?;
         let mut salida = Filas::default();
         let mut avisos = Vec::new();
         let mut c = Constructor::nuevo(self.esquema());
@@ -682,9 +710,7 @@ impl Tabla for CapacidadesDeFichero {
 
     fn leer(&self, ctx: &Contexto, filtro: &Filtro) -> Result<Filas, MotivoNoLeible> {
         self.exige_cota(filtro)?;
-        let raices = raices_segun_filtro(ctx, filtro).ok_or(MotivoNoLeible::RequiereFiltro {
-            columnas: self.columnas_que_acotan(),
-        })?;
+        let raices = raices_segun_filtro(ctx, filtro, self.columnas_que_acotan())?;
         let mut salida = Filas::default();
         let mut avisos = Vec::new();
         let mut c = Constructor::nuevo(self.esquema());

@@ -50,5 +50,8 @@ pub mod entropia;
 /// El ejecutor de consultas.
 pub mod ejecutor;
 
+/// El puente con los proveedores de estado de la FASE 81.
+pub mod estado;
+
 /// El lado del endpoint: recibir, ejecutar y responder cacerias.
 pub mod agente;
