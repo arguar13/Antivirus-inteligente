@@ -3,7 +3,7 @@
 > FASE 80. `tools/verificar-invariantes.sh`, `tools/lineabase-agente.txt`,
 > `tools/lineabase-unsafe.txt`, `server/crates/aegis-tejido/tests/autonomia.rs`.
 
-## Por qué esta puerta existe aparte de las otras veintisiete
+## Por qué esta puerta existe aparte de las otras veintiocho
 
 Cada `tools/verificar-<fase>.sh` comprueba lo suyo, y lo comprueba mejor que ésta.
 Lo que **ninguna** puede comprobar es lo que se rompe al **sumar**:
@@ -30,7 +30,7 @@ afirmarse.
 | # | Invariante | Cómo se comprueba |
 |---:|---|---|
 | 1 | **Presupuesto** | El agente arranca de verdad y se mide su RSS contra el reparto de su perfil y contra la línea base; y el kernel lo impone desde fuera (`MemoryHigh` 321 MiB, `MemoryMax` 482 MiB) |
-| 2 | **Seguridad de memoria** | Todo crate del agente **o** declara `#![forbid(unsafe_code)]` **o** está en `tools/lineabase-unsafe.txt` con su razón escrita — hoy **32 y 22** |
+| 2 | **Seguridad de memoria** | Todo crate del agente **o** declara `#![forbid(unsafe_code)]` **o** está en `tools/lineabase-unsafe.txt` con su razón escrita — hoy **33 y 22** |
 | 3 | **Árbol de dependencias** | Las **39** dependencias directas del agente están en `tools/lineabase-agente.txt` con su justificación |
 | 4 | **Determinismo** | El circuito completo repetido: mismo veredicto, mismo caso, misma propuesta de contención |
 | 5 | **Explicabilidad** | Se recorren **todas** las combinaciones del árbitro exigiendo frase no vacía |
@@ -188,6 +188,7 @@ se comprueba aquí, y por esta razón» y el silencio.
 | `verificar-honeytoken.sh` | Los tokens, su atribución y su detección | La inyección en memoria ajena queda gated |
 | `verificar-vmi.sh` | El recorrido de EPT, el parser del kernel desde memoria física | Arrancar el hipervisor necesita VT-x/AMD-V |
 | `verificar-presupuesto.sh` | El agente arranca de verdad y se mide su RSS; el drop-in impone los dos límites | Se omite si el agente no arranca en este entorno, **diciéndolo** |
+| `verificar-estado.sh` | Las 52 tablas contra el sistema real de esta máquina, las 6 peligrosas negándose sin filtro, el rechazo en compilación, las diez consultas medidas | **osquery no está instalado**: sus cifras se citan, no se miden. Lo que esta máquina no tiene (TPM, contenedores, `/proc/modules`) se ejerce por su **motivo** |
 | `verificar-invariantes.sh` | Las trece, sobre el producto completo | — |
 
 ## Lo que esta fase encontró

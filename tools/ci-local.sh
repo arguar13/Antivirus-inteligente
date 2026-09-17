@@ -498,6 +498,30 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "share" ]; then
     fi
 fi
 
+# EL ESTADO DEL ENDPOINT, entero y consultable (AegisState, FASE 81).
+#
+# Va aqui, despues de las fases que producen veredictos y antes de las
+# invariantes, porque lo que comprueba es una capacidad y no una propiedad del
+# conjunto: que AegisQL corre sobre cincuenta y dos tablas en vez de cinco, que
+# cada una declara su coste, y que las que no se pueden leer DICEN por que en
+# lugar de devolver filas vacias.
+#
+# Esa ultima parte es la que justifica tener puerta propia. Un producto puede
+# equivocarse al detectar y se corrige; un producto que responde «cero» cuando
+# no pudo mirar convierte cada informe en una falsa tranquilidad, y eso no lo
+# ve ninguna otra puerta del arbol.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "estado" ]; then
+    printf '%s==>%s AegisState · el estado del endpoint, con su coste y su motivo\n' "$GRIS" "$FIN"
+    if ./tools/verificar-estado.sh > /tmp/aegis-estado-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-estado-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-estado-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo
