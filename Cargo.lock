@@ -142,6 +142,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-estado"
+version = "0.1.0"
+dependencies = [
+ "aegis-entidad",
+ "aegis-parser",
+ "aegis-scal",
+ "aegis-vuln",
+ "sha2",
+]
+
+[[package]]
 name = "aegis-evasion"
 version = "0.1.0"
 dependencies = [

@@ -52,3 +52,5 @@ pub mod lexico;
 pub mod plan;
 /// Analisis sintactico y semantico.
 pub mod sintaxis;
+/// Valores concretos leidos del endpoint y su comparacion con los literales.
+pub mod valor;

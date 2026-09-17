@@ -1,0 +1,34 @@
+[package]
+name = "aegis-estado"
+description = "AegisState: proveedor tipado del estado del endpoint, con coste declarado por tabla y motivo escrito cuando no se puede leer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# El esquema (tablas, columnas, tipos y coste) y el `Valor` que devuelve cada
+# celda viven en el lenguaje, no aqui. Esa direccion es deliberada: el plano de
+# control valida consultas contra el mismo esquema sin arrastrar una sola
+# llamada al sistema de Linux. Ver la cabecera de `src/lib.rs`.
+aegis-parser = { path = "../aegis-parser" }
+# Procesos, mapas de memoria y sockets-con-proceso. Es lo unico que necesita
+# `unsafe` de todo lo que este crate lee, y por eso es lo unico que se delega:
+# el resto es texto de /proc, /sys y /etc, que se lee con `std::fs`.
+aegis-scal = { path = "../aegis-scal" }
+# El nombre de las cosas. Cada fila que nombra una entidad lleva su `Eid`, de
+# modo que el resultado de una consulta se une con el linaje sin correlacionar
+# por texto (invariante 4 de la FASE 79).
+aegis-entidad = { path = "../aegis-entidad" }
+# El inventario de paquetes ya existe y ya es una tabla (`BTreeMap<String,
+# Package>` parametrizado por raiz). Escribir un segundo lector de dpkg seria
+# exactamente la duplicacion que esta fase viene a corregir.
+aegis-vuln = { path = "../aegis-vuln" }
+# La columna `sha256` de la tabla de ficheros. Ya tiene fila en
+# `tools/lineabase-agente.txt` desde la FASE 79, porque SHA-256 es el nombre de
+# una entidad de contenido en todo el producto.
+sha2 = "0.10"

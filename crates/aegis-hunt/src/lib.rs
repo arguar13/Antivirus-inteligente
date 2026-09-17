@@ -35,7 +35,14 @@
 #![forbid(unsafe_code)]
 
 /// Valores del endpoint y su comparacion.
-pub mod valor;
+///
+/// Vive en `aegis-parser` desde la FASE 81. El motivo es de direccion de
+/// dependencias: los valores ya no los produce solo este crate, sino los
+/// sesenta y cinco proveedores de `aegis-estado`, que son quienes leen el
+/// sistema. Si `Valor` se hubiera quedado aqui, el proveedor tendria que
+/// depender del ejecutor que lo llama. Se reexporta para que
+/// `aegis_hunt::valor::Valor` siga siendo el mismo tipo de siempre.
+pub use aegis_parser::valor;
 
 /// Entropia de Shannon.
 pub mod entropia;

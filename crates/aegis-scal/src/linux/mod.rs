@@ -11,6 +11,7 @@ pub mod memory;
 pub mod net;
 pub mod netfilter;
 pub mod process;
+pub mod xattr;
 
 use crate::platform::{Capabilities, Platform, Support};
 

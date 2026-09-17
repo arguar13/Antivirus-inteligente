@@ -87,6 +87,21 @@ pub enum Coste {
     Medio,
     /// Lee y procesa contenido: hashes, entropia de memoria ajena.
     Caro,
+    /// Su coste NO esta acotado por el tamano de la tabla (FASE 81).
+    ///
+    /// Los cuatro niveles anteriores comparten una propiedad: el trabajo crece
+    /// con el numero de filas, y el numero de filas tiene techo —los procesos
+    /// de una maquina, sus conexiones, sus regiones—. Hay estado del sistema
+    /// que no cumple eso: recorrer el arbol de ficheros entero para encontrar
+    /// los `suid`, o abrir cada inodo para leer sus capacidades, depende del
+    /// disco del cliente y puede tardar minutos o no terminar.
+    ///
+    /// La diferencia no es de grado sino de clase, y por eso tiene nivel
+    /// propio: una consulta que toca una tabla peligrosa SIN FILTRO no se
+    /// ejecuta. Ver `validar_coste` en [`crate::plan`]. No es una recomendacion
+    /// que el operador pueda saltarse con una opcion «avanzada»: esa opcion no
+    /// existe, porque quien paga el error son cien mil maquinas de un cliente.
+    Peligroso,
 }
 
 /// Descripcion de una columna.
@@ -120,308 +135,51 @@ impl Tabla {
     }
 }
 
-// ---------------------------------------------------------------------------
-// processes
-// ---------------------------------------------------------------------------
-const COLUMNAS_PROCESOS: &[Columna] = &[
-    Columna {
-        nombre: "pid",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "identificador del proceso",
-    },
-    Columna {
-        nombre: "ppid",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "identificador del padre",
-    },
-    Columna {
-        nombre: "start_ns",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "instante de arranque; con el pid forma la identidad estable",
-    },
-    Columna {
-        nombre: "name",
-        tipo: Tipo::Texto,
-        coste: Coste::Trivial,
-        descripcion: "nombre del ejecutable, sin ruta",
-    },
-    Columna {
-        nombre: "path",
-        tipo: Tipo::Texto,
-        coste: Coste::Barato,
-        descripcion: "ruta completa de la imagen ejecutada",
-    },
-    Columna {
-        nombre: "cmdline",
-        tipo: Tipo::Texto,
-        coste: Coste::Barato,
-        descripcion: "linea de comandos completa",
-    },
-    Columna {
-        nombre: "uid",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "usuario efectivo",
-    },
-    Columna {
-        nombre: "gid",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "grupo efectivo",
-    },
-    Columna {
-        nombre: "threads",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "numero de hilos",
-    },
-    Columna {
-        nombre: "state",
-        tipo: Tipo::Texto,
-        coste: Coste::Trivial,
-        descripcion: "estado del planificador: running, sleeping, zombie...",
-    },
-    Columna {
-        nombre: "sha256",
-        tipo: Tipo::Texto,
-        coste: Coste::Caro,
-        descripcion: "hash del ejecutable en disco",
-    },
-    // Columnas cualificadas: cuantificadores existenciales sobre la coleccion
-    // asociada al proceso. Ver la nota de cabecera sobre por que no hay JOIN.
-    Columna {
-        nombre: "network.port",
-        tipo: Tipo::Entero,
-        coste: Coste::Medio,
-        descripcion: "alguna conexion del proceso usa este puerto remoto",
-    },
-    Columna {
-        nombre: "network.local_port",
-        tipo: Tipo::Entero,
-        coste: Coste::Medio,
-        descripcion: "alguna conexion del proceso escucha o sale por este puerto local",
-    },
-    Columna {
-        nombre: "network.remote_ip",
-        tipo: Tipo::Texto,
-        coste: Coste::Medio,
-        descripcion: "alguna conexion del proceso va a esta direccion",
-    },
-    Columna {
-        nombre: "network.state",
-        tipo: Tipo::Texto,
-        coste: Coste::Medio,
-        descripcion: "alguna conexion del proceso esta en este estado TCP",
-    },
-    Columna {
-        nombre: "memory.entropy",
-        tipo: Tipo::Real,
-        coste: Coste::Caro,
-        descripcion: "entropia maxima entre las regiones privadas y ejecutables",
-    },
-    Columna {
-        nombre: "memory.rwx",
-        tipo: Tipo::Booleano,
-        coste: Coste::Medio,
-        descripcion: "el proceso tiene alguna region legible, escribible y ejecutable",
-    },
-    Columna {
-        nombre: "memory.private_exec",
-        tipo: Tipo::Entero,
-        coste: Coste::Medio,
-        descripcion: "cuantas regiones privadas y ejecutables tiene (indicio de inyeccion)",
-    },
-    Columna {
-        nombre: "graph.techniques",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "tecnicas ATT&CK observadas sobre este proceso",
-    },
-    Columna {
-        nombre: "graph.depth",
-        tipo: Tipo::Entero,
-        coste: Coste::Barato,
-        descripcion: "profundidad en el arbol de linaje",
-    },
-    Columna {
-        nombre: "graph.injected_by",
-        tipo: Tipo::Entero,
-        coste: Coste::Barato,
-        descripcion: "pid que inyecto codigo en este proceso, o 0",
-    },
-];
-
-// ---------------------------------------------------------------------------
-// connections
-// ---------------------------------------------------------------------------
-const COLUMNAS_CONEXIONES: &[Columna] = &[
-    Columna {
-        nombre: "pid",
-        tipo: Tipo::Entero,
-        coste: Coste::Barato,
-        descripcion: "proceso propietario del socket",
-    },
-    Columna {
-        nombre: "protocol",
-        tipo: Tipo::Texto,
-        coste: Coste::Trivial,
-        descripcion: "tcp o udp",
-    },
-    Columna {
-        nombre: "local_port",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "puerto local",
-    },
-    Columna {
-        nombre: "remote_ip",
-        tipo: Tipo::Texto,
-        coste: Coste::Trivial,
-        descripcion: "direccion remota",
-    },
-    Columna {
-        nombre: "remote_port",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "puerto remoto",
-    },
-    Columna {
-        nombre: "state",
-        tipo: Tipo::Texto,
-        coste: Coste::Trivial,
-        descripcion: "estado TCP: established, listen, syn_sent...",
-    },
-];
-
-// ---------------------------------------------------------------------------
-// memory_regions
-// ---------------------------------------------------------------------------
-const COLUMNAS_MEMORIA: &[Columna] = &[
-    Columna {
-        nombre: "pid",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "proceso dueno de la region",
-    },
-    Columna {
-        nombre: "start",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "direccion inicial",
-    },
-    Columna {
-        nombre: "size",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "tamano en bytes",
-    },
-    Columna {
-        nombre: "perms",
-        tipo: Tipo::Texto,
-        coste: Coste::Trivial,
-        descripcion: "permisos en formato rwxp",
-    },
-    Columna {
-        nombre: "private",
-        tipo: Tipo::Booleano,
-        coste: Coste::Trivial,
-        descripcion: "region privada, no respaldada por un fichero compartido",
-    },
-    Columna {
-        nombre: "path",
-        tipo: Tipo::Texto,
-        coste: Coste::Trivial,
-        descripcion: "fichero que respalda la region, vacio si es anonima",
-    },
-    Columna {
-        nombre: "entropy",
-        tipo: Tipo::Real,
-        coste: Coste::Caro,
-        descripcion: "entropia de Shannon del contenido; alta sugiere cifrado o empaquetado",
-    },
-];
-
-// ---------------------------------------------------------------------------
-// graph_edges
-// ---------------------------------------------------------------------------
-const COLUMNAS_ARISTAS: &[Columna] = &[
-    Columna {
-        nombre: "src_pid",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "proceso origen de la relacion",
-    },
-    Columna {
-        nombre: "dst_pid",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "proceso destino",
-    },
-    Columna {
-        nombre: "kind",
-        tipo: Tipo::Texto,
-        coste: Coste::Trivial,
-        descripcion: "spawned, injected, traced o wrote",
-    },
-    Columna {
-        nombre: "ts_ns",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "instante en que se observo",
-    },
-];
-
-// ---------------------------------------------------------------------------
-// memory (escaneo YARA sobre la memoria del proceso, FASE 57)
-// ---------------------------------------------------------------------------
-const COLUMNAS_MEMORIA_YARA: &[Columna] = &[
-    Columna {
-        nombre: "pid",
-        tipo: Tipo::Entero,
-        coste: Coste::Trivial,
-        descripcion: "proceso cuya memoria se escaneo",
-    },
-    Columna {
-        nombre: "yara_match",
-        tipo: Tipo::Texto,
-        // Caro a proposito: escanear la memoria con YARA lee y procesa contenido,
-        // como el hash o la entropia. El planificador lo evalua el ultimo, solo
-        // sobre las filas que ya pasaron los predicados baratos.
-        coste: Coste::Caro,
-        descripcion: "alguna region de la memoria del proceso coincide con esta regla YARA",
-    },
-];
+/// Ficheros, atributos extendidos, ACL y montajes (FASE 81).
+pub mod ficheros;
+/// Las cinco tablas originales de AegisQL (FASES 34, 38 y 57).
+pub mod nucleo;
+/// Procesos y todo lo que cuelga de ellos (FASE 81).
+pub mod procesos;
+/// Rutas, interfaces, vecinos, cortafuegos y sockets locales (FASE 81).
+pub mod red;
 
 /// Todas las tablas que AegisQL conoce.
+///
+/// Una sola lista, construida a partir de las constantes de cada submodulo. No
+/// es un `Vec` que se rellene al arrancar: es una constante, asi que el catalogo
+/// del lenguaje esta completo antes de que el programa ejecute una instruccion y
+/// el plano de control lo puede consultar sin inicializar nada.
 pub const TABLAS: &[Tabla] = &[
-    Tabla {
-        nombre: "processes",
-        columnas: COLUMNAS_PROCESOS,
-        descripcion: "un proceso vivo del endpoint",
-    },
-    Tabla {
-        nombre: "connections",
-        columnas: COLUMNAS_CONEXIONES,
-        descripcion: "un socket con su proceso propietario",
-    },
-    Tabla {
-        nombre: "memory_regions",
-        columnas: COLUMNAS_MEMORIA,
-        descripcion: "una region del mapa de memoria de un proceso",
-    },
-    Tabla {
-        nombre: "graph_edges",
-        columnas: COLUMNAS_ARISTAS,
-        descripcion: "una relacion causal del grafo de comportamiento",
-    },
-    Tabla {
-        nombre: "memory",
-        columnas: COLUMNAS_MEMORIA_YARA,
-        descripcion: "un proceso cuya memoria se escanea con reglas YARA (RAM hunting de la flota)",
-    },
+    // Las cinco originales.
+    nucleo::PROCESSES,
+    nucleo::CONNECTIONS,
+    nucleo::MEMORY_REGIONS,
+    nucleo::GRAPH_EDGES,
+    nucleo::MEMORY,
+    // FASE 81 — procesos.
+    procesos::PROCESS_ARGUMENTS,
+    procesos::PROCESS_ENVIRONMENT,
+    procesos::PROCESS_OPEN_FILES,
+    procesos::PROCESS_THREADS,
+    procesos::PROCESS_CAPABILITIES,
+    procesos::PROCESS_NAMESPACES,
+    procesos::PROCESS_CGROUPS,
+    procesos::PROCESS_SELINUX,
+    // FASE 81 — ficheros.
+    ficheros::FILES,
+    ficheros::FILE_XATTRS,
+    ficheros::FILE_ACLS,
+    ficheros::SUID_BINARIES,
+    ficheros::FILE_CAPABILITIES,
+    ficheros::MOUNTS,
+    ficheros::SUPERBLOCKS,
+    // FASE 81 — red.
+    red::ROUTES,
+    red::INTERFACES,
+    red::ARP_CACHE,
+    red::FIREWALL_RULES,
+    red::UNIX_SOCKETS,
 ];
 
 /// Busca una tabla por nombre.
@@ -529,10 +287,13 @@ mod pruebas {
     }
 
     #[test]
-    fn el_coste_ordena_de_trivial_a_caro() {
+    fn el_coste_ordena_de_trivial_a_peligroso() {
         assert!(Coste::Trivial < Coste::Barato);
         assert!(Coste::Barato < Coste::Medio);
         assert!(Coste::Medio < Coste::Caro);
+        // El orden importa de verdad: el planificador evalua por coste
+        // creciente, asi que lo peligroso tiene que quedar el ultimo.
+        assert!(Coste::Caro < Coste::Peligroso);
     }
 
     #[test]

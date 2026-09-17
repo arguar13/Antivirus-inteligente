@@ -1,5 +1,17 @@
 //! Valores concretos leidos del endpoint, y su comparacion.
 //!
+//! POR QUE ESTE MODULO VIVE EN EL LENGUAJE Y NO EN EL EJECUTOR
+//! ----------------------------------------------------------
+//! Hasta la FASE 81 vivia en `aegis-hunt`, junto al unico codigo que producia
+//! valores. Desde la FASE 81 los produce `aegis-estado`, que son sesenta y cinco
+//! proveedores de tabla, y `aegis-hunt` pasa a ser su consumidor. Si el tipo se
+//! hubiera quedado donde estaba, el proveedor tendria que depender del ejecutor
+//! que lo llama, que es la dependencia al reves.
+//!
+//! Colocarlo aqui no cuesta nada: `Valor` es el otro lado de [`Literal`], no
+//! tiene dependencias y no toca el sistema. `aegis-hunt` lo reexporta, de modo
+//! que `aegis_hunt::valor::Valor` sigue siendo el mismo tipo de siempre.
+//!
 //! LA DECISION QUE GOBIERNA ESTE MODULO
 //! ------------------------------------
 //! Un dato del sistema puede no estar disponible: el ejecutable de un proceso
@@ -21,9 +33,12 @@
 //! El coste de esa eleccion es real y se asume: un dato ausente es
 //! indistinguible de uno que no cumple. Por eso el ejecutor cuenta aparte
 //! cuantos valores no pudo obtener y lo devuelve con el resultado, para que el
-//! analista sepa si su caceria vio toda la maquina o solo una parte.
+//! analista sepa si su caceria vio toda la maquina o solo una parte. Desde la
+//! FASE 81 hay ademas un segundo nivel de honestidad: cuando lo que falla no es
+//! un valor suelto sino la tabla entera, el proveedor devuelve el MOTIVO por el
+//! que no se pudo leer. Ver `aegis_estado::MotivoNoLeible`.
 
-use aegis_parser::ast::{Comparador, Literal};
+use crate::ast::{Comparador, Literal};
 
 /// Un dato leido del endpoint.
 #[derive(Debug, Clone, PartialEq)]
