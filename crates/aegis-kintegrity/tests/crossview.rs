@@ -793,6 +793,23 @@ fn mi_tid() -> u32 {
     (unsafe { libc::gettid() }) as u32
 }
 
+/// El registro que las vistas del kernel traerian de ESTE hilo: su numero y su
+/// nombre, los dos de verdad. El nombre importa tanto como el numero, porque el
+/// motor comprueba los dos.
+fn rec_yo() -> TaskRecord {
+    let tid = mi_tid();
+    let comm = std::fs::read_to_string(format!("/proc/self/task/{tid}/comm"))
+        .expect("el comm propio siempre se puede leer")
+        .trim_end()
+        .to_owned();
+    TaskRecord {
+        tid,
+        tgid: std::process::id(),
+        start_boottime: Some(300),
+        comm: Some(comm),
+    }
+}
+
 #[test]
 fn un_barrido_que_no_se_encuentra_a_si_mismo_no_se_declara_limpio() {
     // Vistas coherentes entre si, pero que no contienen al que las mira: es
@@ -839,8 +856,8 @@ fn cuando_el_motor_se_ve_en_las_vistas_el_barrido_si_concluye_limpio() {
     // mismo numero, que es lo que ocurre cuando todos numeran en el mismo
     // espacio de nombres.
     let yo = mi_tid();
-    lista.insert(yo, rec(yo, yo, 300));
-    pidmap.insert(yo, rec(yo, yo, 300));
+    lista.insert(yo, rec_yo());
+    pidmap.insert(yo, rec_yo());
     procfs.insert(yo, rec_proc(yo, yo));
 
     let k = KernelGuion {
@@ -877,8 +894,8 @@ fn un_barrido_incompleto_tampoco_se_declara_limpio() {
     // el silencio no prueba limpieza.
     let (mut procfs, mut lista, mut pidmap) = sistema_limpio();
     let yo = mi_tid();
-    lista.insert(yo, rec(yo, yo, 300));
-    pidmap.insert(yo, rec(yo, yo, 300));
+    lista.insert(yo, rec_yo());
+    pidmap.insert(yo, rec_yo());
     procfs.insert(yo, rec_proc(yo, yo));
 
     let k = KernelGuion {
@@ -943,5 +960,51 @@ fn no_poder_comparar_no_silencia_las_detecciones() {
         visto,
         "el DKOM se tiene que seguir acusando: {:?} / {:?}",
         r.anomalies, r.pendientes
+    );
+}
+
+#[test]
+fn un_numero_que_coincide_pero_es_otra_tarea_no_da_por_buena_la_precondicion() {
+    // La trampa que hace insuficiente comprobar solo el numero, y que se
+    // encontro corriendo la sonda dentro de un espacio de nombres de PID nuevo:
+    // ahi los numeros bajos se reparten otra vez desde 1, asi que el numero
+    // propio EXISTE tambien en el espacio inicial —el 2 es `kthreadd`— y las
+    // vistas del kernel lo traen. El motor encontraria «su» numero y daria la
+    // comparacion por valida cuando lo que ha encontrado es otra tarea.
+    let (mut procfs, mut lista, mut pidmap) = sistema_limpio();
+    let yo = mi_tid();
+    let impostor = TaskRecord {
+        tid: yo,
+        tgid: yo,
+        start_boottime: Some(300),
+        comm: Some("kthreadd".into()), // el mismo numero, otra tarea
+    };
+    lista.insert(yo, impostor.clone());
+    pidmap.insert(yo, impostor);
+    procfs.insert(yo, rec_proc(yo, yo));
+
+    let k = KernelGuion {
+        lista: lista.clone(),
+        pidmap: pidmap.clone(),
+        ..Default::default()
+    };
+    let mut ki = motor(k);
+    let r = ki
+        .evaluar(&ViewSet {
+            procfs,
+            task_list: lista,
+            pid_space: pidmap,
+            desbordes: 0,
+        })
+        .expect("evaluar");
+
+    assert!(
+        !r.espacios_de_pid_comparables,
+        "bajo el numero propio hay otra tarea: encontrar el numero no es \
+         encontrarse, y la precondicion no se puede dar por buena"
+    );
+    assert!(
+        !r.concluye_limpio(),
+        "y sin precondicion el barrido no autoriza a declarar limpia la maquina"
     );
 }

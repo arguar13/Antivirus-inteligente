@@ -103,6 +103,25 @@ fn main() -> std::process::ExitCode {
     let _ = hijo.kill();
     let _ = hijo.wait();
 
+    // La precondicion se mira ANTES que el resultado, y no solo cuando el
+    // resultado sale mal. Si las vistas del kernel no numeran como `/proc`,
+    // `victima` —que es un numero del espacio de nombres de ESTE proceso— puede
+    // designar en las vistas a una tarea completamente distinta: dentro de un
+    // espacio de nombres nuevo el hijo es el 2, y el 2 del espacio inicial es
+    // `kthreadd`. La sonda encontraria entonces una anomalia con el numero que
+    // buscaba e imprimiria DETECTADA por una ocultacion que no es la suya.
+    // Acertar por el motivo equivocado es la unica forma de fallo que una
+    // prueba de deteccion no puede permitirse, porque no se nota.
+    if !r.espacios_de_pid_comparables {
+        eprintln!(
+            "OMITIDO: las vistas del kernel no numeran en el mismo espacio de \
+             nombres de PID que /proc, asi que el TID {victima} no designa lo \
+             mismo a los dos lados y la ocultacion no se podia demostrar aqui. \
+             No es una brecha: es una prueba que esta maquina no puede ejercer."
+        );
+        return std::process::ExitCode::from(2);
+    }
+
     let detectada = r
         .anomalies
         .iter()

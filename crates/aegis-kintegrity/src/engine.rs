@@ -264,7 +264,27 @@ impl<K: KernelViews> KernelIntegrity<K> {
             return false;
         }
         let yo = yo as u32;
-        vistas.task_list.contains_key(&yo) || vistas.pid_space.contains_key(&yo)
+        let Some(suyo) = vistas
+            .task_list
+            .get(&yo)
+            .or_else(|| vistas.pid_space.get(&yo))
+        else {
+            return false;
+        };
+        // Que el numero ESTE no basta, y creerlo dejaria la comprobacion sin
+        // valor justo donde hace falta. En un espacio de nombres de PID anidado
+        // los numeros bajos colisionan con tareas reales del espacio inicial
+        // —el 2 es `kthreadd`—, asi que encontrar "mi" numero en las vistas del
+        // kernel puede ser haber encontrado a OTRO. Se comprueba entonces que
+        // la tarea publicada bajo ese numero sea esta misma.
+        let mio = views::leer_comm(std::process::id(), yo);
+        match (&suyo.comm, &mio) {
+            (Some(kernel), Some(propio)) => kernel == propio,
+            // Sin nombre por alguno de los dos lados la identidad no se puede
+            // afirmar, y una precondicion que no se puede afirmar no se da por
+            // buena: el error se inclina hacia «aqui no se pudo comprobar».
+            _ => false,
+        }
     }
 
     /// Evalua un conjunto de vistas ya tomado.

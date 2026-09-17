@@ -179,7 +179,7 @@ pub fn resuelve_el_kernel(tid: u32) -> bool {
 }
 
 /// Nombre corto de un hilo, de `/proc/<tgid>/task/<tid>/comm`.
-fn leer_comm(tgid: u32, tid: u32) -> Option<String> {
+pub(crate) fn leer_comm(tgid: u32, tid: u32) -> Option<String> {
     std::fs::read_to_string(format!("/proc/{tgid}/task/{tid}/comm"))
         .ok()
         .map(|s| s.trim_end().to_owned())
