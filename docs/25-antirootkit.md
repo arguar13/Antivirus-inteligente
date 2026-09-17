@@ -58,10 +58,12 @@ Notas del verificador que costaron sangre y quedan escritas en el código:
 
 ---
 
-## 25.3 Las tres trampas que hacen inútil a un detector así
+## 25.3 Las trampas que hacen inútil a un detector así
 
-Cualquiera de las tres, mal resuelta, convierte el detector en un generador de
-ruido que se desinstala la primera semana.
+Cualquiera de ellas, mal resuelta, convierte el detector en un generador de ruido
+que se desinstala la primera semana. La cuarta lo demostró: contra el kernel de
+integración, el verificador acusó de rootkit a los once hilos del PID 1 de una
+máquina sin nada raro, con gravedad 95 y exigiendo mitigación.
 
 **1 · La granularidad.** `/proc/<pid>` de primer nivel lista solo líderes de
 grupo de hilos; las vistas de kernel traen una entrada por **hilo**. Comparar la
@@ -81,10 +83,44 @@ confirmaciones **consecutivas**: una carrera que parpadea nunca suma el umbral.
 `bpf_task_from_pid(0)` no las resuelve. Sin excluirlas, cada CPU produce una
 anomalía en cada barrido.
 
-Una cuarta, más sutil: la **confirmación de la vista A usa el mismo canal que la
-vista original** —el listado del directorio, es decir `getdents`—, no el acceso
-directo a `/proc/<tid>`. Confirmar por acceso directo consultaría un oráculo que
-un rootkit de `getdents` no toca, y descartaría una detección legítima.
+**4 · El espacio de nombres de PID.** Es la que más cara salió, porque no se ve
+leyendo el código: se ve la primera vez que se corre contra un kernel de verdad.
+Las vistas B y C numeran en el espacio de nombres **inicial** —`bpf_iter_task`
+publica `task_struct.pid` y `bpf_task_from_pid()` busca en `init_pid_ns`—; la
+vista A numera en el del proceso que lee `/proc`. Cuando no son el mismo, las
+tres dejan de hablar del mismo conjunto de números y **cada tarea aparece como
+una entrada de `/proc` que el kernel no conoce**: la firma exacta de la entrada
+falsificada. Un agente dentro de un contenedor acusaría a la máquina entera.
+
+Se resuelve por dos lados, y ninguno es bajar el umbral:
+
+- **Un tercer camino para preguntar.** `sched_getscheduler` resuelve el TID con
+  `find_task_by_vpid()`, es decir en el **mismo** espacio que `/proc`, sin
+  privilegios y sin efecto sobre la tarea. Solo `ESRCH` cuenta como ausencia: un
+  `EPERM` significa que no se pudo saber, y no saber jamás se anota como
+  ausencia. La detección queda **más estricta**, no más laxa — acusar a una
+  entrada de `/proc` de falsificada exige ahora que el kernel la niegue por
+  **tres** caminos independientes en vez de dos.
+- **Medir la precondición en vez de suponerla.** Comparar tres censos solo dice
+  algo si los tres numeran igual, así que el motor lo comprueba de la forma más
+  directa que hay: **se busca a sí mismo** en las vistas del kernel. Su TID
+  existe con certeza, y si las vistas numeraran como `/proc` tendrían que
+  traerlo. No basta con que el número esté —en un espacio de nombres anidado los
+  números bajos colisionan con tareas reales del inicial, y el 2 es `kthreadd`—,
+  así que se comprueba también que la tarea bajo ese número **sea esa misma**.
+  Cuando no lo es, `ScanReport::concluye_limpio()` se niega a declarar limpia la
+  máquina: un barrido sin anomalías y «aquí no hay nada oculto» son afirmaciones
+  distintas, y lo que no se pudo mirar no se cuenta como mirado.
+
+La precondición **etiqueta** el barrido; no lo apaga. Un DKOM real se sigue
+acusando aunque la sonda no aparezca: convertir un aviso de cobertura en un punto
+ciego cambiaría un fallo silencioso por otro peor.
+
+Y una quinta, más sutil: la **confirmación de la vista A usa el mismo canal que
+la vista original** —el listado del directorio, es decir `getdents`—, no el
+acceso directo a `/proc/<tid>`. Confirmar por acceso directo consultaría un
+oráculo que un rootkit de `getdents` no toca, y descartaría una detección
+legítima.
 
 ---
 
@@ -99,7 +135,8 @@ puede reproducir la causa pero sí el mecanismo:
 - **La lógica que acusa** (`verdict`, `engine`) es pura: recibe vistas ya tomadas
   y se prueba con vistas construidas a mano que reproducen cada clase de
   manipulación —DKOM, ocultación de userland, entrada fantasma, identidad
-  incoherente— y cada trampa —hilos, carrera, PID 0, barrido desbordado—.
+  incoherente— y cada trampa —hilos, carrera, PID 0, barrido desbordado, sonda
+  ausente de las vistas y sonda suplantada por otra tarea con su mismo número—.
 - **El mecanismo completo** se prueba contra el kernel **real**: se cargan las
   sondas eBPF de verdad y se comprueba que los ~115 hilos reales de la máquina no
   producen **ni un** falso positivo (una prueba tan exigente como detectar un
@@ -112,6 +149,16 @@ El escenario 10 de la simulación de Red Team ejecuta esa detección de extremo 
 extremo. En una máquina sin los kfuncs necesarios (`bpf_task_from_pid`, Linux
 6.1; `bpf_iter_task_*`, Linux 6.7) el escenario se **omite diciéndolo**, no pasa
 en falso.
+
+La sonda se ejerce además en la condición que rompe la comparación, y no solo en
+la buena: bajo `unshare --pid --fork --mount-proc` sale 2 —omitida, con el
+motivo— en vez de dar un veredicto. Importa que lo haga por ahí y no por la rama
+de brecha, porque dentro de un espacio de nombres nuevo el hijo es el PID 2 y el
+2 del espacio inicial es `kthreadd`: antes de mirar la precondición **primero**,
+la sonda encontraba una anomalía con el número que buscaba e imprimía
+`DETECTADA` por una ocultación que no era la suya. Una prueba de detección que
+pasa por el motivo equivocado es peor que una que falla, porque nada en ella
+parece mal.
 
 ---
 
