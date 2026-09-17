@@ -79,6 +79,37 @@ pub struct ScanReport {
     pub candidatos: usize,
     /// Candidatos que se desvanecieron al confirmarlos: carreras, no rootkits.
     pub descartados_por_carrera: usize,
+    /// Entradas de `/proc` que el kernel SI conoce, pero con otro numero.
+    ///
+    /// Las vistas de eBPF numeran en el espacio de nombres de PID inicial y
+    /// `/proc` numera en el del proceso que lee. Cuando no son el mismo, una
+    /// entrada aparece solo en `/proc` sin que nadie la haya falsificado: el
+    /// planificador la resuelve sin problema. No es una anomalia y tampoco es
+    /// una carrera, asi que se cuenta aparte en vez de mezclarla con ninguna de
+    /// las dos. Un numero alto y sostenido aqui significa que este agente corre
+    /// en un espacio de nombres distinto del que ve el kernel, y que la
+    /// verificacion cruzada NO esta cubriendo esas tareas. Quien quiera esa
+    /// conclusion no tiene que deducirla de este contador:
+    /// [`ScanReport::espacios_de_pid_comparables`] la da medida.
+    pub numeracion_distinta: usize,
+    /// Si las tres vistas numeran en el mismo espacio de nombres de PID.
+    ///
+    /// Es la **precondicion** de todo este crate: comparar tres censos solo
+    /// dice algo si los tres nombran a las mismas tareas con los mismos
+    /// numeros. Las vistas de kernel numeran en el espacio inicial y `/proc` en
+    /// el del proceso que lee, asi que la precondicion no se cumple sola.
+    ///
+    /// Se mide de la forma mas directa que hay, y no deduciendola de los
+    /// contadores: **el agente se busca a si mismo** en las vistas del kernel.
+    /// Si no se encuentra —existiendo, y estando su TID dentro del rango
+    /// barrido—, es que los dos lados no numeran igual.
+    ///
+    /// En `false` el barrido **no verifico nada** de lo que no cuadra: las
+    /// ausencias que vea son de numeracion, no de ocultacion. Un informe con
+    /// `anomalies` vacio y esto en `false` no significa «la maquina esta
+    /// limpia», significa «aqui no se pudo mirar». Son cosas distintas y se
+    /// dicen distinto.
+    pub espacios_de_pid_comparables: bool,
     /// Entradas que no cupieron en los mapas del kernel.
     pub desbordes: u32,
 }
@@ -92,6 +123,19 @@ impl ScanReport {
     /// Gravedad maxima observada.
     pub fn severidad_maxima(&self) -> u8 {
         self.anomalies.iter().map(|a| a.severity).max().unwrap_or(0)
+    }
+
+    /// Indica si de este barrido se puede concluir «no hay nada oculto».
+    ///
+    /// Un barrido sin anomalias NO autoriza esa frase por si solo. Solo la
+    /// autoriza si ademas la comparacion era posible —los tres censos numeran
+    /// igual— y estaba completa —nada se quedo fuera de los mapas del kernel—.
+    /// Lo que no se pudo mirar se cuenta como no mirado, nunca como limpio.
+    pub fn concluye_limpio(&self) -> bool {
+        self.anomalies.is_empty()
+            && self.pendientes.is_empty()
+            && self.espacios_de_pid_comparables
+            && self.desbordes == 0
     }
 }
 
@@ -194,6 +238,35 @@ impl<K: KernelViews> KernelIntegrity<K> {
         (self.procfs_confirm)()
     }
 
+    /// Comprueba la precondicion de la verificacion cruzada: que las vistas del
+    /// kernel numeren en el mismo espacio de nombres de PID que `/proc`.
+    ///
+    /// La sonda es el propio agente. Su TID existe con certeza —lo esta
+    /// ejecutando—, `/proc` lo publica con ese numero, y si las vistas del
+    /// kernel numeraran igual tendrian que traerlo. Que no lo traigan solo
+    /// admite dos lecturas, y las dos invalidan el barrido:
+    ///
+    /// - Las vistas numeran en otro espacio de nombres. Entonces ninguna
+    ///   ausencia significa ocultacion, porque no se estan comparando censos
+    ///   del mismo conjunto de numeros.
+    /// - Algo esconde al agente de las vistas del kernel. Entonces el
+    ///   observador ya esta comprometido y sus censos no valen nada.
+    ///
+    /// No se puede concluir nada en ninguno de los dos casos, que es justo lo
+    /// que el informe pasa a decir.
+    fn vistas_comparables(&self, vistas: &ViewSet) -> bool {
+        // SAFETY: `gettid` no recibe argumentos ni toca memoria del proceso.
+        let yo = unsafe { libc::gettid() };
+        // Fuera del rango barrido su ausencia no prueba nada: no se le pidio al
+        // kernel que lo trajera. Sin sonda no hay comprobacion, y sin
+        // comprobacion la precondicion no se da por buena.
+        if yo < self.config.primero || yo > self.config.ultimo {
+            return false;
+        }
+        let yo = yo as u32;
+        vistas.task_list.contains_key(&yo) || vistas.pid_space.contains_key(&yo)
+    }
+
     /// Evalua un conjunto de vistas ya tomado.
     ///
     /// Publico para poder ejercitar el motor con vistas construidas a mano que
@@ -204,6 +277,7 @@ impl<K: KernelViews> KernelIntegrity<K> {
             en_pidmap: vistas.pid_space.len(),
             en_procfs: vistas.procfs.len(),
             desbordes: vistas.desbordes,
+            espacios_de_pid_comparables: self.vistas_comparables(vistas),
             ..Default::default()
         };
 
@@ -235,10 +309,19 @@ impl<K: KernelViews> KernelIntegrity<K> {
                     .as_ref()
                     .map(|v| v.contains_key(&c.tid))
                     .unwrap_or(false),
+                // El tercer camino, y el unico que numera igual que `/proc`. Se
+                // pregunta solo cuando hace falta —cuando las dos vistas de
+                // kernel dicen que no esta—, que es el unico caso en el que su
+                // respuesta cambia el veredicto.
+                en_vpid: !en_lista && !en_pidmap && views::resuelve_el_kernel(c.tid),
                 start_boottime: start,
             };
             let Some(kind) = verdict::juzgar(c, &conf) else {
-                informe.descartados_por_carrera += 1;
+                if conf.en_procfs && conf.en_vpid {
+                    informe.numeracion_distinta += 1;
+                } else {
+                    informe.descartados_por_carrera += 1;
+                }
                 continue;
             };
 

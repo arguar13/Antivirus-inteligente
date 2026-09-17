@@ -117,6 +117,13 @@ pub struct Confirmation {
     pub en_pidmap: bool,
     /// Sigue en `/proc`.
     pub en_procfs: bool,
+    /// El kernel lo resuelve en el espacio de nombres de PID de este proceso.
+    ///
+    /// Es el tercer camino, y el unico que numera igual que `/proc`. Ver
+    /// [`crate::views::resuelve_el_kernel`]: separa «los dos lados numeran
+    /// distinto» de «la entrada de `/proc` esta falsificada», que hasta que se
+    /// midio contra un kernel de verdad se escribian igual.
+    pub en_vpid: bool,
     /// Instante de arranque leido en la confirmacion, si se pudo.
     pub start_boottime: Option<u64>,
 }
@@ -241,8 +248,13 @@ pub fn candidatos(v: &ViewSet, cfg: &VerdictConfig) -> Vec<Candidate> {
 
 /// Juzga un candidato a la luz de su confirmacion.
 ///
-/// Devuelve `None` cuando la discrepancia se desvanecio, que es el caso normal:
-/// el proceso habia muerto entre las vistas y el barrido lo capto a medias.
+/// Devuelve `None` por dos motivos distintos, y quien llama los separa:
+///
+/// - La discrepancia **se desvanecio**, que es el caso normal: el proceso habia
+///   muerto entre las vistas y el barrido lo capto a medias.
+/// - La discrepancia **no es comparable**: la tarea aparece solo en `/proc` y el
+///   kernel la resuelve por el camino que numera como `/proc`, de modo que
+///   existe y lo que falla es la comparacion. Ver [`Confirmation::en_vpid`].
 pub fn juzgar(c: &Candidate, conf: &Confirmation) -> Option<AnomalyKind> {
     // Una tarea que ya no esta en ninguna parte era una carrera, no un rootkit.
     if !conf.en_lista && !conf.en_pidmap && !conf.en_procfs {
@@ -252,7 +264,18 @@ pub fn juzgar(c: &Candidate, conf: &Confirmation) -> Option<AnomalyKind> {
         (_, false, true) => AnomalyKind::DkomUnlinked,
         (false, true, true) => AnomalyKind::UserlandHidden,
         (_, true, false) => AnomalyKind::PidSpaceDetached,
-        (true, false, false) => AnomalyKind::PhantomProcEntry,
+        // Solo `/proc` lo ve. Antes de acusar hay que descartar la explicacion
+        // aburrida: que las vistas de eBPF numeren en otro espacio de nombres de
+        // PID que el que `/proc` usa. Si el kernel resuelve el TID por el camino
+        // que numera COMO `/proc`, la tarea existe y lo que falla es la
+        // comparacion, no la maquina. Acusar ahi seria acusar de rootkit a cada
+        // proceso de un contenedor.
+        (true, false, false) => {
+            if conf.en_vpid {
+                return None;
+            }
+            AnomalyKind::PhantomProcEntry
+        }
         // Coherente por los tres caminos: la unica sospecha que puede quedar es
         // la de identidad, y solo si es la que se venia siguiendo.
         (true, true, true) => {
@@ -290,8 +313,11 @@ pub fn anomalia(c: &Candidate, kind: AnomalyKind, confirmaciones: u32) -> Anomal
             c.tid
         ),
         AnomalyKind::PhantomProcEntry => format!(
-            "/proc publica el TID {} pero el kernel no lo conoce por ninguna de \
-             sus dos estructuras: la entrada de /proc esta falsificada.",
+            "/proc publica el TID {} y el kernel no lo conoce por NINGUNO de los \
+             tres caminos: ni recorriendo la lista de tareas, ni resolviendolo \
+             en el espacio de PID, ni por el planificador —que numera en el \
+             mismo espacio de nombres que /proc—. La entrada de /proc esta \
+             falsificada.",
             c.tid
         ),
         AnomalyKind::IdentityMismatch => format!(

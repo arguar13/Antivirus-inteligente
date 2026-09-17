@@ -11,9 +11,9 @@
 
 use std::collections::BTreeMap;
 
-use aegis_kintegrity::engine::{KernelIntegrity, KernelViews, KiConfig};
+use aegis_kintegrity::engine::{pid_max, KernelIntegrity, KernelViews, KiConfig};
 use aegis_kintegrity::error::KiError;
-use aegis_kintegrity::verdict::{AnomalyKind, VerdictConfig};
+use aegis_kintegrity::verdict::{juzgar, AnomalyKind, Candidate, Confirmation, VerdictConfig};
 use aegis_kintegrity::views::{TaskRecord, ViewSet, Vista};
 
 // ---------------------------------------------------------------------------
@@ -208,8 +208,16 @@ fn la_ocultacion_en_userland_se_detecta_por_estar_en_el_kernel_pero_no_en_proc()
 fn una_entrada_fantasma_en_proc_se_detecta() {
     // La direccion contraria a esconder: /proc publica un PID que el kernel no
     // conoce, para desviar la atencion o hacer perseguir un proceso inexistente.
+    //
+    // El TID tiene que ser uno que el kernel de ESTA maquina no pueda resolver:
+    // la confirmacion de una entrada que solo aparece en /proc pregunta ademas
+    // al planificador, que numera en el mismo espacio de nombres que /proc. Un
+    // numero cualquiera valdria hasta el dia que la maquina de integracion
+    // tuviera un proceso con ese PID, y la prueba empezaria a fallar sin que
+    // nada estuviera mal. `pid_max` es el limite SUPERIOR EXCLUSIVO del
+    // asignador: no se le concede nunca a nadie.
     let (mut procfs, lista, pidmap) = sistema_limpio();
-    let fantasma = 8_000u32;
+    let fantasma = pid_max() as u32;
     procfs.insert(fantasma, rec_proc(fantasma, fantasma));
 
     let k = KernelGuion {
@@ -219,9 +227,9 @@ fn una_entrada_fantasma_en_proc_se_detecta() {
         ..Default::default()
     };
     // La relectura de /proc lo sigue publicando.
-    let relectura = || {
+    let relectura = move || {
         let mut v = Vista::new();
-        v.insert(8_000, rec_proc(8_000, 8_000));
+        v.insert(fantasma, rec_proc(fantasma, fantasma));
         v
     };
     let mut m = KernelIntegrity::con_relectura(k, KiConfig::default(), relectura);
@@ -238,6 +246,136 @@ fn una_entrada_fantasma_en_proc_se_detecta() {
     assert!(
         !r.anomalies[0].exige_mitigacion(),
         "una entrada fantasma no justifica matar nada: no hay proceso que matar"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// El espacio de nombres de PID: los dos lados tienen que numerar igual
+// ---------------------------------------------------------------------------
+//
+// Las dos vistas de kernel llegan por eBPF y numeran en el espacio de nombres
+// INICIAL —`bpf_iter_task` publica `task_struct.pid` y `bpf_task_from_pid()`
+// busca en `init_pid_ns`—. La vista de `/proc` numera en el espacio de nombres
+// del proceso que lee. Cuando no son el mismo, las tres vistas dejan de hablar
+// del mismo conjunto de numeros, y la comparacion produce una entrada «solo en
+// /proc» POR CADA TAREA: un agente dentro de un contenedor acusaria a la maquina
+// entera de estar llena de procesos falsificados, que es la forma mas rapida de
+// que alguien desinstale el producto.
+//
+// Esto no es hipotetico: se encontro midiendo contra el kernel de la maquina de
+// integracion, donde el grupo de hilos del PID 1 esta en `/proc` y no lo
+// resuelve ninguna de las dos vistas de eBPF.
+
+#[test]
+fn el_planificador_resuelve_esta_misma_tarea() {
+    // SAFETY: `gettid` no recibe argumentos ni toca memoria del proceso.
+    let yo = unsafe { libc::syscall(libc::SYS_gettid) } as u32;
+    assert!(
+        aegis_kintegrity::views::resuelve_el_kernel(yo),
+        "el hilo que ejecuta la prueba existe, y el kernel lo resuelve por el \
+         mismo espacio de nombres en el que /proc lo publica"
+    );
+}
+
+#[test]
+fn el_planificador_no_resuelve_un_tid_que_no_puede_existir() {
+    // `pid_max` es el limite superior EXCLUSIVO del asignador de PID: nunca se
+    // le concede a nadie, asi que la respuesta correcta es ESRCH en cualquier
+    // maquina y en cualquier momento.
+    assert!(
+        !aegis_kintegrity::views::resuelve_el_kernel(pid_max() as u32),
+        "un TID que el asignador no reparte jamas no puede resolverse"
+    );
+}
+
+#[test]
+fn una_entrada_solo_en_proc_que_el_kernel_resuelve_no_es_una_anomalia() {
+    // El caso de la numeracion distinta, aislado: `/proc` la publica, las dos
+    // vistas de eBPF no la tienen, y el planificador SI la resuelve. La tarea
+    // existe; lo que falla es la comparacion, no la maquina.
+    let c = Candidate {
+        tid: 4_242,
+        kind: AnomalyKind::PhantomProcEntry,
+        record: None,
+    };
+    let conf = Confirmation {
+        en_lista: false,
+        en_pidmap: false,
+        en_procfs: true,
+        en_vpid: true,
+        start_boottime: None,
+    };
+    assert_eq!(
+        juzgar(&c, &conf),
+        None,
+        "con la tarea existiendo de verdad no hay nada que acusar"
+    );
+}
+
+#[test]
+fn una_entrada_solo_en_proc_que_nadie_resuelve_si_lo_es() {
+    // Y la deteccion sigue viva: cuando NINGUNO de los tres caminos la conoce,
+    // la entrada de /proc esta falsificada y se acusa.
+    let c = Candidate {
+        tid: 4_242,
+        kind: AnomalyKind::PhantomProcEntry,
+        record: None,
+    };
+    let conf = Confirmation {
+        en_lista: false,
+        en_pidmap: false,
+        en_procfs: true,
+        en_vpid: false,
+        start_boottime: None,
+    };
+    assert_eq!(juzgar(&c, &conf), Some(AnomalyKind::PhantomProcEntry));
+}
+
+#[test]
+fn lo_que_no_es_comparable_se_cuenta_aparte_y_no_como_carrera() {
+    // La diferencia importa en el informe: una carrera es ruido normal, y una
+    // numeracion distinta significa que la verificacion cruzada NO esta
+    // cubriendo esas tareas. Mezclarlas escondería la segunda dentro de la
+    // primera, que es la clase de silencio que este proyecto no se permite.
+    //
+    // Se monta con TID reales de esta maquina —los hilos de /proc que las vistas
+    // de kernel de mentira no incluyen—, porque el motor pregunta al kernel de
+    // verdad por ellos.
+    let procfs = aegis_kintegrity::views::leer_procfs();
+    let Some((&tid, _)) = procfs.iter().find(|(t, _)| **t > 1) else {
+        panic!("/proc tiene que publicar alguna tarea");
+    };
+    let mut solo_en_proc = Vista::new();
+    solo_en_proc.insert(tid, rec_proc(tid, tid));
+
+    // Las dos vistas de kernel no lo tienen; la confirmacion tampoco.
+    let k = KernelGuion {
+        lista: Vista::new(),
+        pidmap: Vista::new(),
+        confirmaciones: [(tid, (false, false, None))].into(),
+        ..Default::default()
+    };
+    let vista = solo_en_proc.clone();
+    let mut m = KernelIntegrity::con_relectura(k, KiConfig::default(), move || vista.clone());
+    let r = m
+        .evaluar(&ViewSet {
+            procfs: solo_en_proc,
+            task_list: Vista::new(),
+            pid_space: Vista::new(),
+            desbordes: 0,
+        })
+        .unwrap();
+
+    assert_eq!(r.candidatos, 1, "la discrepancia se detecta igual");
+    assert!(r.anomalies.is_empty(), "pero no se acusa a una tarea viva");
+    assert!(r.pendientes.is_empty());
+    assert_eq!(
+        r.numeracion_distinta, 1,
+        "y queda DICHO que esa tarea no se pudo comparar"
+    );
+    assert_eq!(
+        r.descartados_por_carrera, 0,
+        "no es una carrera: la tarea sigue ahi"
     );
 }
 
@@ -632,5 +770,178 @@ fn el_kernel_de_verdad_confirma_una_ocultacion_de_userland_inyectada() {
         "el hilo real escondido de /proc pero visible para el kernel tiene que \
          detectarse como ocultacion de userland: {:?}",
         r.anomalies
+    );
+}
+
+// ---------------------------------------------------------------------------
+// La precondicion: que los tres censos numeren igual
+// ---------------------------------------------------------------------------
+//
+// Comparar tres vistas solo dice algo si las tres nombran a las mismas tareas
+// con los mismos numeros. Las de kernel numeran en el espacio de nombres de PID
+// inicial y `/proc` en el del proceso que lee, asi que la precondicion NO se
+// cumple sola: dentro de un contenedor no se cumple nunca. El motor la
+// comprueba buscandose a si mismo en las vistas del kernel, y cuando no se
+// encuentra lo DICE en vez de devolver un informe vacio que se leeria como
+// «aqui no hay nada oculto».
+
+/// TID de este hilo. El arnes de pruebas corre cada prueba en su propio hilo,
+/// asi que no coincide con el PID del proceso: es el numero que el motor usa
+/// como sonda y el que las vistas tienen que traer.
+fn mi_tid() -> u32 {
+    // SAFETY: `gettid` no recibe argumentos ni toca memoria del proceso.
+    (unsafe { libc::gettid() }) as u32
+}
+
+#[test]
+fn un_barrido_que_no_se_encuentra_a_si_mismo_no_se_declara_limpio() {
+    // Vistas coherentes entre si, pero que no contienen al que las mira: es
+    // exactamente la forma que tienen las vistas cuando el agente corre en otro
+    // espacio de nombres de PID.
+    let (procfs, lista, pidmap) = sistema_limpio();
+    let k = KernelGuion {
+        lista: lista.clone(),
+        pidmap: pidmap.clone(),
+        ..Default::default()
+    };
+    let mut ki = motor(k);
+    let r = ki
+        .evaluar(&ViewSet {
+            procfs,
+            task_list: lista,
+            pid_space: pidmap,
+            desbordes: 0,
+        })
+        .expect("evaluar");
+
+    assert!(
+        r.anomalies.is_empty(),
+        "no hay nada que acusar en vistas coherentes: {:?}",
+        r.anomalies
+    );
+    assert!(
+        !r.espacios_de_pid_comparables,
+        "el motor no aparece en las vistas del kernel: no puede dar por buena \
+         la precondicion de la comparacion"
+    );
+    assert!(
+        !r.concluye_limpio(),
+        "sin anomalias PERO sin poder comparar, el barrido no autoriza la frase \
+         «no hay nada oculto»: lo que no se pudo mirar no es lo mismo que lo \
+         que se miro y estaba limpio"
+    );
+}
+
+#[test]
+fn cuando_el_motor_se_ve_en_las_vistas_el_barrido_si_concluye_limpio() {
+    let (mut procfs, mut lista, mut pidmap) = sistema_limpio();
+    // La sonda: el propio hilo que evalua, presente en las tres vistas con el
+    // mismo numero, que es lo que ocurre cuando todos numeran en el mismo
+    // espacio de nombres.
+    let yo = mi_tid();
+    lista.insert(yo, rec(yo, yo, 300));
+    pidmap.insert(yo, rec(yo, yo, 300));
+    procfs.insert(yo, rec_proc(yo, yo));
+
+    let k = KernelGuion {
+        lista: lista.clone(),
+        pidmap: pidmap.clone(),
+        ..Default::default()
+    };
+    let mut ki = motor(k);
+    let r = ki
+        .evaluar(&ViewSet {
+            procfs,
+            task_list: lista,
+            pid_space: pidmap,
+            desbordes: 0,
+        })
+        .expect("evaluar");
+
+    assert!(
+        r.espacios_de_pid_comparables,
+        "el motor se encuentra a si mismo en las vistas del kernel: los tres \
+         censos numeran igual y la comparacion es valida"
+    );
+    assert!(
+        r.concluye_limpio(),
+        "comparacion posible, completa y sin anomalias: aqui si se puede decir \
+         que no hay nada oculto"
+    );
+}
+
+#[test]
+fn un_barrido_incompleto_tampoco_se_declara_limpio() {
+    // Misma sonda que arriba —la comparacion es posible— pero el kernel avisa
+    // de que no le cupo todo. Una ausencia podria deberse al desborde, asi que
+    // el silencio no prueba limpieza.
+    let (mut procfs, mut lista, mut pidmap) = sistema_limpio();
+    let yo = mi_tid();
+    lista.insert(yo, rec(yo, yo, 300));
+    pidmap.insert(yo, rec(yo, yo, 300));
+    procfs.insert(yo, rec_proc(yo, yo));
+
+    let k = KernelGuion {
+        lista: lista.clone(),
+        pidmap: pidmap.clone(),
+        desbordes: 7,
+        ..Default::default()
+    };
+    let mut ki = motor(k);
+    let r = ki
+        .evaluar(&ViewSet {
+            procfs,
+            task_list: lista,
+            pid_space: pidmap,
+            desbordes: 7,
+        })
+        .expect("evaluar");
+
+    assert!(r.espacios_de_pid_comparables, "la sonda si esta");
+    assert_eq!(r.desbordes, 7);
+    assert!(
+        !r.concluye_limpio(),
+        "con entradas que no cupieron en los mapas, el barrido esta incompleto \
+         y no autoriza a concluir limpieza"
+    );
+}
+
+#[test]
+fn no_poder_comparar_no_silencia_las_detecciones() {
+    // La precondicion es una etiqueta sobre lo que el barrido puede concluir,
+    // NO un interruptor que apague el motor. Un DKOM real se sigue acusando
+    // aunque la sonda no aparezca: callarlo seria convertir un aviso de
+    // cobertura en un punto ciego.
+    let (procfs, mut lista, pidmap) = sistema_limpio();
+    lista.remove(&43); // desenlazado de la lista de tareas, vivo en el pidmap
+
+    let k = KernelGuion {
+        lista: lista.clone(),
+        pidmap: pidmap.clone(),
+        ..Default::default()
+    };
+    let mut ki = motor(k);
+    let r = ki
+        .evaluar(&ViewSet {
+            procfs,
+            task_list: lista,
+            pid_space: pidmap,
+            desbordes: 0,
+        })
+        .expect("evaluar");
+
+    assert!(
+        !r.espacios_de_pid_comparables,
+        "la sonda no esta en las vistas"
+    );
+    let visto = r
+        .anomalies
+        .iter()
+        .chain(r.pendientes.iter())
+        .any(|a| a.kind == AnomalyKind::DkomUnlinked && a.tid == 43);
+    assert!(
+        visto,
+        "el DKOM se tiene que seguir acusando: {:?} / {:?}",
+        r.anomalies, r.pendientes
     );
 }
