@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**55 crates · 2041 pruebas**
+**55 crates · 2042 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -302,7 +302,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-ipc` | Contrato ABI y consumidor del ring buffer compartido Ring 0 <-> Ring 3 de AegisCore | 17 | `verificar-resiliencia.sh` | — |
 | `aegis-ips` | Prevencion en linea: decide que flujos cortar y baja el veredicto al kernel | 76 | `verificar-ips.sh` | sí |
 | `aegis-kguard` | Integridad del bytecode eBPF y bloqueo de permisos de mapas | 11 | — | sí |
-| `aegis-kintegrity` | Verificacion cruzada de la integridad del kernel: deteccion de rootkits DKOM y procesos ocultos | 23 | — | — |
+| `aegis-kintegrity` | Verificacion cruzada de la integridad del kernel: deteccion de rootkits DKOM y procesos ocultos | 24 | — | — |
 | `aegis-l7hunter` | Extraccion de telemetria L7 en claro por uprobes de eBPF sobre SSL_read/SSL_write, y caza de balizas C2 sin romper el certificate pinning | 56 | `verificar-l7hunter.sh` | sí |
 | `aegis-memhunter` | Analisis de VAD y de la tabla de paginas (PTE) para delatar codigo sin fichero, inyeccion reflexiva y module stomping, sin leer la memoria del proceso | 39 | `verificar-memhunter.sh` | — |
 | `aegis-mesh` | Malla P2P de la red local: propagacion cifrada y autenticada de vacunas entre agentes | 19 | — | — |

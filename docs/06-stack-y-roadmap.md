@@ -264,7 +264,7 @@ criterios de salida medibles y su puerta en `make ci`. El recuento de hoy:
 | | |
 |---|---|
 | Crates propios | **68** (55 en el agente, 13 en el plano de control) |
-| Pruebas | **3 012** (2 041 + 971) |
+| Pruebas | **3 013** (2 042 + 971) |
 | Puertas de verificación | **29**, todas en `make ci` |
 | Dependencias directas del agente | **39**, cada una justificada por escrito |
 | Crates del agente con `forbid(unsafe_code)` | **33**; los otros 22, declarados con su razón |
