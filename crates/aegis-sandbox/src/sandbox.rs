@@ -19,8 +19,16 @@ pub struct Applied {
     pub blocked_syscalls: usize,
     /// Version de ABI de Landlock aplicada, si se aplico.
     pub landlock_abi: Option<u32>,
-    /// Numero de rutas permitidas.
+    /// Numero de rutas que recibieron una regla de verdad.
     pub allowed_paths: usize,
+    /// Rutas de la politica que no admitian ni uno de los derechos pedidos.
+    ///
+    /// Ocurre cuando la politica pide derechos de directorio sobre algo que no
+    /// lo es. La ruta queda PROHIBIDA, que es la direccion segura, pero quien
+    /// despliega tiene que poder ver la diferencia entre lo que escribio y lo
+    /// que el kernel acepto: contarla como permitida seria la mentira de
+    /// siempre, que la politica y la realidad digan cosas distintas.
+    pub skipped_paths: usize,
     /// Cierto si la restriccion de red de Landlock no cupo por ABI antigua.
     ///
     /// No es fatal: seccomp ya bloquea la red entera, y esta bandera solo dice
@@ -47,6 +55,7 @@ pub struct CompiledSandbox {
     programa: Vec<SockFilter>,
     ruleset: Option<Ruleset>,
     rutas: usize,
+    rutas_sin_regla: usize,
     net_omitida: bool,
     bloqueadas: usize,
 }
@@ -66,6 +75,7 @@ impl CompiledSandbox {
         let programa = seccomp::compile(&denegadas, p.denied_action);
 
         let mut rutas = 0usize;
+        let mut rutas_sin_regla = 0usize;
         let mut net_omitida = false;
         let ruleset = match landlock::Abi::detect() {
             Some(abi) if !p.fs.is_empty() || p.handled_net() != 0 => {
@@ -73,13 +83,18 @@ impl CompiledSandbox {
                     net_omitida = true;
                 }
                 let rs = Ruleset::new(abi, p.handled_fs(abi), p.handled_net())?;
+                let mut anotar = |aplicada: bool| {
+                    if aplicada {
+                        rutas += 1;
+                    } else {
+                        rutas_sin_regla += 1;
+                    }
+                };
                 for ruta in &p.fs.read_only {
-                    rs.allow_path(ruta, landlock::LECTURA)?;
-                    rutas += 1;
+                    anotar(rs.allow_path(ruta, landlock::LECTURA)?);
                 }
                 for ruta in &p.fs.read_write {
-                    rs.allow_path(ruta, landlock::LECTURA | landlock::ESCRITURA)?;
-                    rutas += 1;
+                    anotar(rs.allow_path(ruta, landlock::LECTURA | landlock::ESCRITURA)?);
                 }
                 Some(rs)
             }
@@ -91,6 +106,7 @@ impl CompiledSandbox {
             programa,
             ruleset,
             rutas,
+            rutas_sin_regla,
             net_omitida,
         })
     }
@@ -106,6 +122,7 @@ impl CompiledSandbox {
             blocked_syscalls: self.bloqueadas,
             landlock_abi: self.ruleset.as_ref().map(|r| r.abi().0),
             allowed_paths: self.rutas,
+            skipped_paths: self.rutas_sin_regla,
             landlock_net_skipped: self.net_omitida,
         }
     }

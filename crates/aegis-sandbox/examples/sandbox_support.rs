@@ -44,6 +44,14 @@ fn main() -> std::process::ExitCode {
                      La capa de llamadas al sistema si."
                 );
             }
+            if r.skipped_paths > 0 {
+                println!(
+                    "AVISO: {} ruta(s) de la politica no admitian ni uno de los \
+                     derechos pedidos —derechos de directorio sobre algo que no \
+                     lo es— y quedan PROHIBIDAS.",
+                    r.skipped_paths
+                );
+            }
             if r.landlock_net_skipped {
                 println!(
                     "AVISO: la restriccion de puertos de Landlock necesita ABI 4; \

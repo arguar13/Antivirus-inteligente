@@ -78,6 +78,21 @@ pub const NET_BIND_TCP: u64 = 1 << 0;
 /// Conectar a un puerto TCP.
 pub const NET_CONNECT_TCP: u64 = 1 << 1;
 
+/// Derechos que el kernel acepta sobre un objeto que NO es un directorio.
+///
+/// No es una preferencia de este codigo: es la regla del kernel. Una regla
+/// `PATH_BENEATH` cuyo objetivo no es un directorio y cuyos derechos incluyen
+/// uno que solo tiene sentido sobre un directorio —listar, crear, borrar,
+/// reubicar— se rechaza entera con `EINVAL`, y con ella se pierde el sandbox
+/// completo. Ver `landlock_append_fs_rule` en `security/landlock/fs.c`.
+///
+/// Importa porque las politicas nombran ficheros sueltos a proposito:
+/// `/etc/ld.so.cache` es un fichero regular y `/dev/null` un dispositivo de
+/// caracteres, y los dos aparecen en listas de rutas legibles perfectamente
+/// razonables.
+pub const ACCESO_DE_FICHERO: u64 =
+    FS_EXECUTE | FS_WRITE_FILE | FS_READ_FILE | FS_TRUNCATE | FS_IOCTL_DEV;
+
 /// Derechos de solo lectura y ejecucion.
 pub const LECTURA: u64 = FS_EXECUTE | FS_READ_FILE | FS_READ_DIR;
 
@@ -259,7 +274,24 @@ impl Ruleset {
     }
 
     /// Permite `derechos` sobre `ruta` y todo lo que cuelgue de ella.
-    pub fn allow_path(&self, ruta: &Path, derechos: u64) -> Result<(), SandboxError> {
+    ///
+    /// Devuelve `false` cuando la ruta no admitia NI UNO de los derechos
+    /// pedidos —pedir «crear ficheros» sobre un dispositivo de caracteres, por
+    /// ejemplo— y por tanto no se anadio regla alguna. No es un error: la ruta
+    /// simplemente sigue prohibida, que es la direccion segura en una lista
+    /// blanca. Es `bool` y no `()` para que el resumen pueda decir cuantas
+    /// rutas de la politica quedaron sin regla en vez de contarlas como
+    /// aplicadas.
+    ///
+    /// # Estrechamiento por tipo de objeto
+    ///
+    /// El kernel rechaza con `EINVAL` una regla sobre un no-directorio que pida
+    /// derechos de directorio, y ese rechazo **tumba el sandbox entero**: el
+    /// proceso acaba sin confinar. Por eso aqui se pregunta al kernel que clase
+    /// de objeto es —`fstat` sobre el descriptor `O_PATH` que ya se abrio, sin
+    /// una segunda resolucion de la ruta que abriria una carrera— y se recorta
+    /// la mascara a [`ACCESO_DE_FICHERO`] cuando no es un directorio.
+    pub fn allow_path(&self, ruta: &Path, derechos: u64) -> Result<bool, SandboxError> {
         let c = CString::new(ruta.as_os_str().as_bytes()).map_err(|_| SandboxError::Path {
             path: ruta.display().to_string(),
             source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "ruta con NUL"),
@@ -278,8 +310,36 @@ impl Ruleset {
         // SAFETY: descriptor recien abierto y valido.
         let guard = unsafe { OwnedFd::from_raw_fd(dirfd) };
 
+        // Se pregunta por el descriptor y no por la ruta: entre el `open` y un
+        // segundo `stat` la ruta puede haber cambiado de objeto, y la regla se
+        // aplicaria sobre uno mientras la decision se tomo sobre otro.
+        // SAFETY: `libc::stat` es una estructura de enteros sin invariantes, de
+        // modo que todo ceros es un valor valido; ademas el kernel la sobrescribe
+        // entera antes de que nadie la lea.
+        let mut est: libc::stat = unsafe { std::mem::zeroed() };
+        // SAFETY: `dirfd` esta vivo —lo sostiene `guard`— y `est` es una `stat`
+        // completa y alineada que el kernel rellena entera.
+        if unsafe { libc::fstat(dirfd, &mut est) } != 0 {
+            return Err(SandboxError::Path {
+                path: ruta.display().to_string(),
+                source: std::io::Error::last_os_error(),
+            });
+        }
+        let es_directorio = est.st_mode & libc::S_IFMT == libc::S_IFDIR;
+
+        let mut concedidos = derechos & self.abi.supported_fs();
+        if !es_directorio {
+            concedidos &= ACCESO_DE_FICHERO;
+        }
+        if concedidos == 0 {
+            // El kernel devuelve `ENOMSG` ante una regla sin derechos. Mandarla
+            // seria pedir un error para tener que ignorarlo: mejor no mandarla
+            // y decir que esta ruta no recibio ninguna regla.
+            return Ok(false);
+        }
+
         let attr = PathBeneathAttr {
-            allowed_access: derechos & self.abi.supported_fs(),
+            allowed_access: concedidos,
             parent_fd: dirfd,
         };
         // SAFETY: la estructura esta empaquetada y su tamano es el que espera
@@ -300,7 +360,7 @@ impl Ruleset {
                 source: std::io::Error::last_os_error(),
             });
         }
-        Ok(())
+        Ok(true)
     }
 
     /// Permite un puerto TCP concreto. Requiere ABI 4.

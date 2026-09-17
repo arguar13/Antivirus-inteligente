@@ -158,8 +158,22 @@ impl SandboxPolicy {
     /// Se gobiernan TODOS los que la ABI conozca: lo que no se gobierna queda
     /// permitido, y una politica que solo gobierna la escritura deja al binario
     /// leer cualquier cosa de la maquina.
+    ///
+    /// Con una excepcion que no es un matiz: **una politica sin rutas no
+    /// gobierna nada del sistema de ficheros**. Landlock es una lista blanca, de
+    /// modo que gobernar los derechos sin anadir ni una regla que los conceda
+    /// prohibe el sistema de ficheros ENTERO, y el proceso ni siquiera llega a
+    /// ejecutarse: `execve` devuelve `EACCES` antes de su primera instruccion.
+    ///
+    /// Importa porque es la forma exacta de [`SandboxPolicy::agent_helper`], que
+    /// prohibe la red y no dice nada de rutas: sin esta condicion, todo proceso
+    /// auxiliar del agente muere al arrancar en cuanto el kernel trae Landlock.
     pub fn handled_fs(&self, abi: landlock::Abi) -> u64 {
-        abi.supported_fs()
+        if self.fs.is_empty() {
+            0
+        } else {
+            abi.supported_fs()
+        }
     }
 
     /// Derechos de red que la politica gobierna con Landlock.

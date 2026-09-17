@@ -42,6 +42,13 @@ enum Accion {
     Trazar,
     /// Abrir un fichero.
     Abrir(&'static str),
+    /// Abrir un fichero PARA ESCRIBIR.
+    ///
+    /// Es una accion propia y no un parametro de la anterior porque lo que
+    /// distingue a las dos es exactamente lo que Landlock separa: el derecho de
+    /// leer y el de escribir son bits distintos, y una regla puede conceder uno
+    /// sin el otro.
+    AbrirParaEscribir(&'static str),
     /// Nada: solo comprobar que el proceso sigue funcionando.
     Vivir,
 }
@@ -107,6 +114,10 @@ fn ejecutar(accion: Accion) -> i32 {
         // SAFETY: la ruta es una cadena literal terminada en NUL.
         Accion::Abrir(ruta) => unsafe {
             libc::open(ruta.as_ptr() as *const libc::c_char, libc::O_RDONLY) as i64
+        },
+        // SAFETY: igual que la anterior, con la intencion de escribir.
+        Accion::AbrirParaEscribir(ruta) => unsafe {
+            libc::open(ruta.as_ptr() as *const libc::c_char, libc::O_WRONLY) as i64
         },
         // SAFETY: consulta pura.
         Accion::Vivir => unsafe { libc::getpid() as i64 },
@@ -377,4 +388,180 @@ fn las_rutas_base_existen_de_verdad() {
     for r in &base {
         assert!(PathBuf::from(r).exists(), "{r:?} no existe");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Reglas sobre objetos que no son directorios
+// ---------------------------------------------------------------------------
+//
+// El kernel rechaza con EINVAL una regla PATH_BENEATH sobre un no-directorio
+// que pida derechos de directorio —listar, crear, borrar, reubicar—, y ese
+// rechazo se lleva por delante la construccion ENTERA del sandbox: el binario
+// acaba corriendo sin confinar. Es el peor fallo que este crate puede tener,
+// porque no se nota: no hay excepcion, hay un proceso suelto.
+//
+// No es un caso rebuscado. `FsPolicy::base_del_sistema()` nombra
+// `/etc/ld.so.cache`, que es un fichero regular, y cualquier politica razonable
+// nombra `/dev/null`, que es un dispositivo de caracteres.
+
+/// Un conjunto de reglas para probar, o `None` si aqui no hay Landlock.
+fn conjunto_de_pruebas() -> Option<aegis_sandbox::landlock::Ruleset> {
+    let abi = aegis_sandbox::landlock::Abi::detect()?;
+    Some(
+        aegis_sandbox::landlock::Ruleset::new(abi, abi.supported_fs(), 0)
+            .expect("el conjunto de reglas se crea con la mascara que el propio kernel declara"),
+    )
+}
+
+#[test]
+fn una_regla_sobre_un_fichero_regular_no_tumba_el_sandbox() {
+    let Some(rs) = conjunto_de_pruebas() else {
+        eprintln!("OMITIDA: este kernel no trae Landlock");
+        return;
+    };
+    let fichero = std::env::temp_dir().join("aegis-landlock-fichero-regular");
+    std::fs::write(&fichero, b"x").expect("se puede escribir en el directorio temporal");
+
+    let aplicada = rs
+        .allow_path(&fichero, aegis_sandbox::landlock::LECTURA)
+        .expect("LECTURA sobre un fichero regular tiene que aceptarse, recortada");
+    assert!(
+        aplicada,
+        "quedaban derechos que conceder —leer y ejecutar—, asi que la regla existe"
+    );
+    let _ = std::fs::remove_file(&fichero);
+}
+
+#[test]
+fn una_regla_sobre_un_dispositivo_de_caracteres_no_tumba_el_sandbox() {
+    let Some(rs) = conjunto_de_pruebas() else {
+        eprintln!("OMITIDA: este kernel no trae Landlock");
+        return;
+    };
+    let dev = PathBuf::from("/dev/null");
+    if !dev.exists() {
+        eprintln!("OMITIDA: esta maquina no tiene /dev/null");
+        return;
+    }
+    // Lectura Y escritura: la mascara mas ancha que la politica llega a pedir,
+    // y la que mas derechos de directorio arrastra.
+    let derechos = aegis_sandbox::landlock::LECTURA | aegis_sandbox::landlock::ESCRITURA;
+    assert!(
+        rs.allow_path(&dev, derechos)
+            .expect("un dispositivo de caracteres acepta la parte de la mascara que le toca"),
+        "leer, escribir y truncar si valen sobre un dispositivo"
+    );
+}
+
+#[test]
+fn una_ruta_sin_ningun_derecho_aplicable_se_declara_en_vez_de_contarse() {
+    let Some(rs) = conjunto_de_pruebas() else {
+        eprintln!("OMITIDA: este kernel no trae Landlock");
+        return;
+    };
+    let fichero = std::env::temp_dir().join("aegis-landlock-sin-derechos");
+    std::fs::write(&fichero, b"x").expect("se puede escribir en el directorio temporal");
+
+    // «Crear un directorio dentro» no significa nada sobre un fichero regular.
+    // La respuesta correcta no es un error —la politica no es incoherente, solo
+    // inaplicable ahi— ni un exito silencioso, sino decir que no hubo regla.
+    let aplicada = rs
+        .allow_path(&fichero, aegis_sandbox::landlock::FS_MAKE_DIR)
+        .expect("pedir un derecho inaplicable no es un fallo del sandbox");
+    assert!(
+        !aplicada,
+        "sin ningun derecho que conceder no hay regla, y la ruta sigue prohibida"
+    );
+    let _ = std::fs::remove_file(&fichero);
+}
+
+#[test]
+fn una_politica_sin_rutas_no_prohibe_el_sistema_de_ficheros_entero() {
+    // Landlock es una LISTA BLANCA: gobernar los derechos de fichero sin anadir
+    // ni una regla que los conceda prohibe el arbol completo, y el proceso no
+    // llega a ejecutarse —`execve` devuelve EACCES antes de su primera
+    // instruccion—. Es la forma exacta de `agent_helper`, que prohibe la red y
+    // no dice nada de rutas: sin esta comprobacion, todo proceso auxiliar del
+    // agente muere al arrancar en cuanto el kernel trae Landlock.
+    let p = SandboxPolicy::agent_helper();
+    assert!(p.fs.is_empty(), "esta politica no nombra ninguna ruta");
+    assert!(p.deny_network, "y si prohibe la red, que es lo que la crea");
+
+    if let Some(abi) = aegis_sandbox::landlock::Abi::detect() {
+        assert_eq!(
+            p.handled_fs(abi),
+            0,
+            "sin rutas no se gobierna ni un derecho de fichero"
+        );
+    }
+
+    let compilado = Arc::new(CompiledSandbox::compile(&p).expect("la politica compila"));
+    assert_eq!(compilado.summary().allowed_paths, 0);
+
+    let mut cmd = Command::new("/bin/sh");
+    cmd.args(["-c", "exit 9"]);
+    compilado.confine(&mut cmd);
+    let estado = cmd
+        .status()
+        .expect("un auxiliar del agente tiene que poder arrancar");
+    assert_eq!(estado.code(), Some(9), "y ejecutarse con normalidad");
+}
+
+#[test]
+fn el_resumen_distingue_las_rutas_con_regla_de_las_que_no_la_tienen() {
+    let soporte = Support::detect();
+    if soporte.landlock_abi.is_none() {
+        eprintln!("OMITIDA: este kernel no trae Landlock");
+        return;
+    }
+    let fichero = std::env::temp_dir().join("aegis-landlock-resumen");
+    std::fs::write(&fichero, b"x").expect("se puede escribir en el directorio temporal");
+
+    let mut p = SandboxPolicy::untrusted_binary();
+    // Un directorio, que recibe la mascara entera, y un fichero suelto al que
+    // solo le corresponde parte de ella.
+    p.fs.read_write = vec![std::env::temp_dir(), fichero.clone()];
+    let c = CompiledSandbox::compile(&p).expect("la politica se compila con un fichero dentro");
+    let r = c.summary();
+
+    assert_eq!(
+        r.allowed_paths,
+        p.fs.read_only.len() + p.fs.read_write.len(),
+        "todas las rutas de esta politica admiten al menos un derecho"
+    );
+    assert_eq!(r.skipped_paths, 0, "y por tanto ninguna se queda sin regla");
+    let _ = std::fs::remove_file(&fichero);
+}
+
+#[test]
+fn un_fichero_de_solo_lectura_sigue_siendo_de_solo_lectura() {
+    // La comprobacion que de verdad importa: recortar la mascara para que el
+    // kernel acepte la regla NO puede acabar concediendo de mas. Un fichero en
+    // `read_only` tiene que poder leerse y NO poder escribirse, y se comprueba
+    // ejerciendolo dentro del sandbox, no leyendo la mascara.
+    let soporte = Support::detect();
+    if !soporte.can_restrict_paths() {
+        eprintln!("OMITIDA: este kernel no trae Landlock");
+        return;
+    }
+    let fichero = std::env::temp_dir().join("aegis-landlock-solo-lectura");
+    std::fs::write(&fichero, b"x").expect("se puede escribir en el directorio temporal");
+
+    let mut p = SandboxPolicy::untrusted_binary();
+    p.fs.read_only = FsPolicy::base_del_sistema();
+    p.fs.read_only.push(fichero.clone());
+    p.fs.read_write = Vec::new();
+
+    let ruta: &'static str = Box::leak(format!("{}\0", fichero.display()).into_boxed_str());
+    assert_eq!(
+        en_hijo(&p, Accion::Abrir(ruta)).code(),
+        Some(PERMITIDA),
+        "una ruta de solo lectura se tiene que poder leer"
+    );
+    assert_eq!(
+        en_hijo(&p, Accion::AbrirParaEscribir(ruta)).code(),
+        Some(DENEGADA_EACCES),
+        "y el recorte de la mascara no puede haber concedido la escritura"
+    );
+    let _ = std::fs::remove_file(&fichero);
 }
