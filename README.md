@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**56 crates · 2113 pruebas**
+**57 crates · 2155 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -310,6 +310,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-ml` | Extraccion de atributos estaticos PE/ELF e inferencia local ONNX para AegisCore | 22 | — | sí |
 | `aegis-net` | IDS de red y filtro XDP de AegisCore | 45 | — | — |
 | `aegis-parser` | Lexer, parser y validador del lenguaje de consulta de telemetria de AegisCore | 69 | — | sí |
+| `aegis-pe` | Lector de ejecutables de Windows (PE/COFF) y de la huella Authenticode, endurecido contra entrada hostil | 42 | `verificar-pe.sh` | sí |
 | `aegis-pqc` | Criptografia post-cuantica hibrida (ML-KEM-768 + ML-DSA-65) para el canal C2 y el firmado de actualizaciones | 39 | — | sí |
 | `aegis-presupuesto` | Presupuesto de memoria del agente: reparto por host, regimenes y obligacion desde el kernel | 50 | `verificar-presupuesto.sh` | sí |
 | `aegis-ptguard` | Trazado de ejecucion por hardware (Intel PT) para detectar ROP/JOP (FASE 51) | 12 | `verificar-ptguard.sh` | — |

@@ -1,0 +1,18 @@
+[package]
+name = "aegis-pe"
+description = "Lector de ejecutables de Windows (PE/COFF) y del huella Authenticode, endurecido contra entrada hostil"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+sha2 = "0.10"
+
+[dev-dependencies]
+sha2 = "0.10"

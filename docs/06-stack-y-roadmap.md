@@ -96,13 +96,13 @@ a desactivar el producto, y la UI es el componente con más superficie de ataque
 
 ```
 shared/include/aegis_abi.h    Contrato ABI Ring 0 <-> Ring 3. Fuente de verdad, en C.
-crates/                       Workspace del AGENTE: sincrono, panic=abort, 56 crates
+crates/                       Workspace del AGENTE: sincrono, panic=abort, 57 crates
 server/crates/                Workspace del PLANO DE CONTROL: tokio/axum/sqlx, 13 crates
 swarm-net/                    Transporte libp2p del enjambre, FUERA del agente a proposito
 drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf)
 kernel/windows/aegis/         Minifilter + ObCallbacks + politica (C, WDK)
 deploy/terraform/             Aprovisionamiento del plano de control
-tools/                        30 puertas de verificacion + ABI check + CI local
+tools/                        31 puertas de verificacion + ABI check + CI local
 docs/                         Una pagina por fase
 ```
 
@@ -117,7 +117,7 @@ Cada fase tiene **criterios de salida medibles**. Una fase no se cierra por
 calendario; se cierra cuando sus números se cumplen.
 
 Las seis que siguen son el **plan original**, y están hechas. El estado real del
-proyecto —ochenta y dos fases, con lo que eso cambió— está en
+proyecto —ochenta y tres fases, con lo que eso cambió— está en
 [«Dónde está el proyecto hoy»](#dónde-está-el-proyecto-hoy), al final de esta
 sección.
 
@@ -263,11 +263,11 @@ criterios de salida medibles y su puerta en `make ci`. El recuento de hoy:
 
 | | |
 |---|---|
-| Crates propios | **69** (56 en el agente, 13 en el plano de control) |
-| Pruebas | **3 084** (2 113 + 971) |
-| Puertas de verificación | **30**, todas en `make ci` |
+| Crates propios | **70** (57 en el agente, 13 en el plano de control) |
+| Pruebas | **3 126** (2 155 + 971) |
+| Puertas de verificación | **31**, todas en `make ci` |
 | Dependencias directas del agente | **39**, cada una justificada por escrito |
-| Crates del agente con `forbid(unsafe_code)` | **34**; los otros 22, declarados con su razón |
+| Crates del agente con `forbid(unsafe_code)` | **35**; los otros 22, declarados con su razón |
 
 Las tres últimas fases son las que cambian la naturaleza del conjunto:
 

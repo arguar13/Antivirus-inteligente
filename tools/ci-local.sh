@@ -551,6 +551,24 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "custodia" ]; then
     fi
 fi
 
+# AegisWin (FASE 83): el lector de ejecutables de Windows.
+#
+# Hasta aqui el agente sabia mirar un proceso de Windows por fuera y no sabia
+# abrir su fichero, que es de donde sale todo lo que un EDR decide antes de
+# dejarlo correr. Esta puerta lo comprueba contra PE reales construidos en esta
+# misma maquina con clang y lld-link, y cotejados con llvm-readobj.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "pe" ]; then
+    printf '%s==>%s AegisWin · el ejecutable de Windows por dentro, y su huella\n' "$GRIS" "$FIN"
+    if ./tools/verificar-pe.sh > /tmp/aegis-pe-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-pe-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-pe-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo

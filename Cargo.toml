@@ -33,6 +33,7 @@ members = [
     "crates/aegis-update",
     "crates/aegis-forensics",
     "crates/aegis-custodia",
+    "crates/aegis-pe",
     "crates/aegis-sync",
     "crates/aegis-fim",
     "crates/aegis-watchdog",
