@@ -586,6 +586,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "mac" ]; then
     fi
 fi
 
+# AegisDisasm (FASE 85): desensamblado, grafos y capacidades con evidencia.
+#
+# Una firma dice «esto es Emotet» y no dice por que; cuando se equivoca no hay
+# forma de saberlo sin repetir el analisis a mano. Una capacidad dice «esto
+# inyecta codigo en otro proceso» y ensena las instrucciones que lo hacen.
+#
+# Esta puerta mide ademas lo que casi nunca se mide: lo que el catalogo dice de
+# los ficheros que NO son malware, que son el 99,99 % de los que va a ver.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "disasm" ]; then
+    printf '%s==>%s AegisDisasm · desensamblado, grafos y capacidades con evidencia\n' "$GRIS" "$FIN"
+    if ./tools/verificar-disasm.sh > /tmp/aegis-disasm-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-disasm-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-disasm-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo

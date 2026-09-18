@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**59 crates · 2192 pruebas**
+**60 crates · 2356 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -281,6 +281,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-ctl` | Protocolo de control por socket Unix y CLI de administracion aegisctl | 10 | — | sí |
 | `aegis-custodia` | Cadena de custodia verificable para la evidencia forense de una flota: sello de procedencia, encadenado por resumen y veredicto que enumera lo que NO prueba | 67 | `verificar-custodia.sh` | sí |
 | `aegis-deception` | Servicios senuelo de red y deteccion de reconocimiento sin falsos positivos | 18 | — | — |
+| `aegis-disasm` | Desensamblado de x86-64 y A64, grafo de flujo, grafo de llamadas con indirectas resueltas por constantes, y capacidades con la evidencia dentro del tipo | 164 | `verificar-disasm.sh` | sí |
 | `aegis-e2e` | Pruebas de integracion de extremo a extremo de AegisCore | 15 | — | sí |
 | `aegis-edgeml` | Inferencia TinyML en el borde: deteccion de zero-day por comportamiento, sin nube (FASE 53) | 6 | — | sí |
 | `aegis-emu` | Micro-sandbox de emulacion x86-64 en memoria: desempaqueta binarios desconocidos y observa su comportamiento sin ejecutarlos en el host | 39 | — | sí |
