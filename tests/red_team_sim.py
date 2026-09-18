@@ -32,6 +32,20 @@ import time
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Donde cargo deja lo compilado.
+#
+# No es siempre `<raiz>/target`: con `CARGO_TARGET_DIR` puesto, cargo escribe en
+# otro sitio, y eso no es un caso raro —hace falta, por ejemplo, cuando el codigo
+# vive en un montaje lento y los artefactos tienen que ir a disco nativo—. Dando
+# por hecho `<raiz>/target`, esta simulacion no encontraba NI UN binario y
+# reportaba seis BRECHAS seguidas con el mensaje "no se pudo compilar", que
+# describe un producto indefenso cuando lo unico que pasaba es que miraba donde
+# no era.
+#
+# Una puerta de seguridad que grita brecha por un error suyo es peor que una que
+# no se ejecuta: la primera vez se investiga, y a partir de la tercera se ignora.
+DESTINO = os.environ.get("CARGO_TARGET_DIR") or os.path.join(RAIZ, "target")
+
 VERDE = "\033[32m"
 ROJO = "\033[31m"
 GRIS = "\033[90m"
@@ -60,7 +74,7 @@ def run(cmd, **kw):
 
 def ejemplo(paquete, nombre):
     """Ruta al binario de ejemplo, compilandolo si no existe."""
-    ruta = os.path.join(RAIZ, "target", "debug", "examples", nombre)
+    ruta = os.path.join(DESTINO, "debug", "examples", nombre)
     if not os.path.exists(ruta):
         run(["cargo", "build", "-q", "-p", paquete, "--example", nombre])
     return ruta
@@ -74,8 +88,8 @@ def escenario_autodefensa():
     titulo(1, "auto-defensa del binario: cadenas cifradas y simbolos eliminados")
     # Se prefiere el binario de release (endurecido); si no esta, el de debug.
     candidatos = [
-        os.path.join(RAIZ, "target", "release", "aegis-agent"),
-        os.path.join(RAIZ, "target", "debug", "aegis-agent"),
+        os.path.join(DESTINO, "release", "aegis-agent"),
+        os.path.join(DESTINO, "debug", "aegis-agent"),
     ]
     binario = next((c for c in candidatos if os.path.exists(c)), None)
     if binario is None:
@@ -274,11 +288,11 @@ def hijos_de(pid):
 
 def bin_release_o_debug(nombre):
     for perfil in ("release", "debug"):
-        ruta = os.path.join(RAIZ, "target", perfil, nombre)
+        ruta = os.path.join(DESTINO, perfil, nombre)
         if os.path.exists(ruta):
             return ruta
     run(["cargo", "build", "-q", "-p", nombre])
-    return os.path.join(RAIZ, "target", "debug", nombre)
+    return os.path.join(DESTINO, "debug", nombre)
 
 
 def escenario_watchdog():
