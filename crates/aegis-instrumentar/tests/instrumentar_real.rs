@@ -60,6 +60,45 @@ fn texto_de(ruta: &Path) -> Option<Codigo> {
 
 const BINARIOS: &[&str] = &["/bin/ls", "/bin/bash"];
 
+/// Cuantos simbolos de funcion DENTRO de `.text` hacen falta para que el analisis
+/// tenga por donde empezar.
+///
+/// El analisis no hace barrido lineal: parte de puntos de entrada conocidos y
+/// sigue el flujo. Con solo `e_entry` no llega a ninguna parte, porque `_start`
+/// salta al cargador por la PLT y ahi se acaba lo que se puede seguir en
+/// estatico.
+const MINIMO_ENTRADAS: usize = 50;
+
+/// Un binario del sistema que sirva para comprobar el analisis, con su nombre.
+///
+/// # Por que se elige comprobando y no por nombre
+///
+/// Porque la premisa que este modulo necesita del binario no es "que exista":
+/// es que **tenga simbolos de funcion dentro de `.text`**. Y eso depende de como
+/// lo empaquete la distribucion, no del nombre.
+///
+/// Ubuntu 26.04 lo enseño: `/bin/ls` paso a ser uutils coreutils, un binario de
+/// 11 MB y stripped cuyos 270 simbolos son TODOS importaciones con direccion 0.
+/// Ninguno cae en `.text`, asi que el analisis arrancaba solo desde `e_entry` y
+/// encontraba 0 llamadas directas —en un binario que tiene 37.564—. El test
+/// fallaba diciendo "un binario real tiene muchas llamadas directas; salieron 0",
+/// que es verdad y no dice nada de la causa.
+///
+/// Medido en esta maquina: /bin/ls 0 simbolos utiles, /bin/dash 0, /bin/bash
+/// 1761. Por eso se prueban los candidatos y se coge el primero que sirva, en vez
+/// de fijar uno y confiar.
+fn binario_analizable() -> Option<(&'static str, Codigo)> {
+    for ruta in BINARIOS {
+        let Some(c) = texto_de(Path::new(ruta)) else {
+            continue;
+        };
+        if c.entradas.len() >= MINIMO_ENTRADAS {
+            return Some((ruta, c));
+        }
+    }
+    None
+}
+
 #[test]
 fn el_plan_de_un_binario_real_es_pequeno_y_cada_punto_esta_justificado() {
     let mut probados = 0;
@@ -108,12 +147,17 @@ fn el_plan_de_un_binario_real_es_pequeno_y_cada_punto_esta_justificado() {
 
 #[test]
 fn el_plan_no_instrumenta_lo_que_el_analisis_estatico_ya_resolvio() {
-    // La propiedad que hace utilizable esto. En `/bin/ls` hay cientos de
+    // La propiedad que hace utilizable esto. En un binario real hay cientos de
     // llamadas directas, y ninguna necesita instrumentacion: su destino ya se
     // sabe. Instrumentarlas gastaria el presupuesto entero en confirmar lo
     // conocido.
-    let Some(c) = texto_de(Path::new("/bin/ls")) else {
-        panic!("no hay binario con el que comprobar esto");
+    let Some((nombre, c)) = binario_analizable() else {
+        panic!(
+            "ningun binario de {BINARIOS:?} tiene al menos {MINIMO_ENTRADAS} simbolos de \
+             funcion dentro de .text.\nSin ellos el analisis solo puede arrancar en \
+             `e_entry` y no descubre nada, asi que la prueba no probaria nada. Pasa con \
+             binarios stripped cuyos simbolos son solo importaciones."
+        );
     };
     let e = Entrada::minima(&c.bytes, c.base, Arquitectura::X86_64, &c.entradas);
     let mut plazo = Plazo::nuevo(std::time::Duration::from_secs(30), u64::MAX);
@@ -129,8 +173,10 @@ fn el_plan_no_instrumenta_lo_que_el_analisis_estatico_ya_resolvio() {
         .collect();
     assert!(
         directas.len() > 50,
-        "un binario real tiene muchas llamadas directas; salieron {}",
-        directas.len()
+        "{nombre} tiene muchas llamadas directas y el analisis solo vio {} \
+         (entradas de funcion: {})",
+        directas.len(),
+        c.entradas.len()
     );
     for p in plan.puntos() {
         if p.que != Que::DestinoDeLaTransferencia {
