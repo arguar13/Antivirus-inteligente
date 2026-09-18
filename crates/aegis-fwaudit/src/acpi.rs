@@ -78,6 +78,14 @@ pub enum ErrorAcpi {
 /// Los desplazamientos estan fijados por la especificacion ACPI y **verificados
 /// contra las tablas reales de esta maquina** en las pruebas: si alguno estuviera
 /// mal, el checksum de una tabla autentica no daria cero.
+///
+/// # Salvo en la FACS
+///
+/// La FACS no usa esta cabecera: a partir del desplazamiento 8 tiene campos
+/// propios (`Hardware Signature`, `Firmware Waking Vector`…). De ella solo son
+/// significativos `firma` y `longitud`, que comparten sitio; `revision`,
+/// `checksum`, `oem_id` y lo demas son OTROS campos leidos como si fueran estos,
+/// y no deben interpretarse. Ver [`lleva_checksum`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CabeceraAcpi {
     /// Firma de cuatro caracteres (`APIC`, `DSDT`, `WPBT`...).
@@ -175,12 +183,75 @@ fn texto_ascii(bytes: &[u8]) -> String {
 /// implante casi siempre falle aqui, salvo que el atacante se moleste en
 /// recalcularlo — cosa que, medido en los implantes publicos, muchas veces no
 /// hacen.
+///
+/// **No vale para todas las tablas**: ver [`lleva_checksum`].
 #[must_use]
 pub fn checksum_valido(tabla: &[u8]) -> bool {
     tabla
         .iter()
         .fold(0u8, |acumulado, b| acumulado.wrapping_add(*b))
         == 0
+}
+
+/// Si una tabla ACPI lleva checksum, segun su firma.
+///
+/// # La excepcion: FACS
+///
+/// Casi toda tabla ACPI empieza por la cabecera comun de 36 bytes, con su byte de
+/// checksum en el desplazamiento 9. La **FACS** (Firmware ACPI Control Structure)
+/// no: la especificacion la define aparte, con sus propios campos desde el
+/// desplazamiento 8 —`Hardware Signature`, `Firmware Waking Vector`, `Global
+/// Lock`…— y **sin ningun campo de checksum**. Solo comparte con las demas la
+/// firma y la longitud, que estan en el mismo sitio.
+///
+/// Sumar sus bytes y exigir cero es, por tanto, exigirle algo que la norma no le
+/// pide. Medido en esta maquina: FACP, DSDT y APIC suman 0; la FACS suma 95, y no
+/// porque este alterada, sino porque nadie ajusto nunca un byte para que sumara
+/// cero.
+///
+/// Esto importa mas de lo que parece: esa comprobacion emitia una anomalia de
+/// severidad **Critica** —«fue reescrita despues de que el firmware la generara»—
+/// sobre una tabla intacta, en cualquier maquina que exponga FACS. Un producto de
+/// seguridad que grita «firmware alterado» sin motivo enseña a desconfiar de sus
+/// propias alertas, que es peor que no tenerlas.
+#[must_use]
+pub fn lleva_checksum(firma: &[u8; 4]) -> bool {
+    firma != b"FACS"
+}
+
+/// Que dice el checksum de una tabla.
+///
+/// Es un enumerado y no un `bool` porque hay TRES estados, y juntar dos de ellos
+/// fue justo el defecto: «no se puede comprobar» no es lo mismo que «esta mal».
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Checksum {
+    /// La suma da cero, como exige la especificacion.
+    Valido,
+    /// La suma no da cero: la tabla se reescribio despues de generarse.
+    Invalido,
+    /// Esta tabla no lleva checksum. Ver [`lleva_checksum`].
+    NoAplica,
+}
+
+impl Checksum {
+    /// Si esto es motivo de sospecha.
+    ///
+    /// Solo [`Checksum::Invalido`] lo es. `NoAplica` no es un hallazgo: es la
+    /// norma.
+    #[must_use]
+    pub fn es_sospechoso(self) -> bool {
+        matches!(self, Checksum::Invalido)
+    }
+
+    /// Como se escribe en un informe.
+    #[must_use]
+    pub fn frase(self) -> &'static str {
+        match self {
+            Checksum::Valido => "OK",
+            Checksum::Invalido => "ROTO",
+            Checksum::NoAplica => "no lleva",
+        }
+    }
 }
 
 /// Una tabla ACPI leida y analizada.
@@ -192,8 +263,8 @@ pub struct TablaAcpi {
     pub cabecera: CabeceraAcpi,
     /// El contenido completo.
     pub bytes: Vec<u8>,
-    /// Si el checksum cuadra.
-    pub checksum_ok: bool,
+    /// Que dice el checksum: valido, roto, o que esta tabla no lleva.
+    pub checksum: Checksum,
     /// Si venia del directorio de tablas cargadas dinamicamente.
     pub dinamica: bool,
 }
@@ -237,12 +308,18 @@ pub fn analizar_tabla(ruta: &Path, bytes: Vec<u8>, dinamica: bool) -> Result<Tab
             fichero: bytes.len(),
         });
     }
-    let checksum_ok = checksum_valido(&bytes);
+    let checksum = if !lleva_checksum(&cabecera.firma) {
+        Checksum::NoAplica
+    } else if checksum_valido(&bytes) {
+        Checksum::Valido
+    } else {
+        Checksum::Invalido
+    };
     Ok(TablaAcpi {
         ruta: ruta.to_path_buf(),
         cabecera,
         bytes,
-        checksum_ok,
+        checksum,
         dinamica,
     })
 }
@@ -453,7 +530,7 @@ pub(crate) mod pruebas {
                 t.bytes.len(),
                 t.cabecera.revision,
                 t.cabecera.oem_texto(),
-                if t.checksum_ok { "OK" } else { "ROTO" }
+                t.checksum.frase()
             );
             assert_eq!(
                 t.cabecera.longitud as usize,
@@ -461,13 +538,26 @@ pub(crate) mod pruebas {
                 "{}: Length no cuadra con el tamano servido por sysfs",
                 t.nombre()
             );
-            assert!(
-                t.checksum_ok,
-                "{}: el checksum de una tabla REAL del firmware tiene que dar cero; \
-                 si no, o el firmware de esta maquina esta alterado o los \
-                 desplazamientos de la cabecera estan mal",
-                t.nombre()
-            );
+            // Las que LLEVAN checksum tienen que cuadrar. La FACS no lleva, y
+            // exigirselo era pedirle algo que la norma no le pide: ver
+            // `lleva_checksum`.
+            if lleva_checksum(&t.cabecera.firma) {
+                assert_eq!(
+                    t.checksum,
+                    Checksum::Valido,
+                    "{}: el checksum de una tabla REAL del firmware tiene que dar cero; \
+                     si no, o el firmware de esta maquina esta alterado o los \
+                     desplazamientos de la cabecera estan mal",
+                    t.nombre()
+                );
+            } else {
+                assert_eq!(
+                    t.checksum,
+                    Checksum::NoAplica,
+                    "{}: no lleva checksum, asi que no se le puede dar por valido ni por roto",
+                    t.nombre()
+                );
+            }
             assert!(
                 t.cabecera.firma.iter().all(u8::is_ascii_graphic),
                 "{}: la firma tiene que ser ASCII imprimible",

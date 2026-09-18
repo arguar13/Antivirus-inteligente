@@ -86,7 +86,12 @@ pub fn auditar_tabla(t: &TablaAcpi) -> Vec<Anomalia> {
     // 1. CHECKSUM ROTO. No tiene explicacion benigna: el firmware calcula el
     //    checksum al generar la tabla, asi que uno roto significa que alguien la
     //    reescribio DESPUES. Es la senal mas fuerte de todo el modulo.
-    if !t.checksum_ok {
+    //
+    //    Solo cuenta `Invalido`. Una tabla que NO lleva checksum —la FACS— no es
+    //    un hallazgo: antes se la acusaba de reescrita en cualquier maquina que la
+    //    expusiera, que es la peor clase de falso positivo porque es Critico y
+    //    habla del firmware.
+    if t.checksum.es_sospechoso() {
         salida.push(Anomalia::nueva(
             "acpi-checksum-invalido",
             Severidad::Critica,
@@ -333,7 +338,7 @@ mod pruebas {
         // `analizar_tabla` acepta la tabla (la longitud cuadra) y marca el
         // checksum; es el decisor el que decide la gravedad.
         let t = tabla_de(bytes, false);
-        assert!(!t.checksum_ok);
+        assert_eq!(t.checksum, crate::acpi::Checksum::Invalido);
         let a = auditar_tabla(&t);
         let c = a
             .iter()
