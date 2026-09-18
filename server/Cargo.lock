@@ -41,6 +41,7 @@ version = "0.1.0"
 dependencies = [
  "aegis-invitado",
  "aegis-presupuesto",
+ "aegis-vmi",
  "aegis-wire",
  "libc",
  "serde",
@@ -346,6 +347,13 @@ dependencies = [
  "aegis-pqc",
  "ed25519-dalek",
  "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-vmi"
+version = "0.1.0"
+dependencies = [
  "thiserror 2.0.20",
 ]
 

@@ -46,10 +46,17 @@
 
 pub mod ept;
 pub mod introspeccion;
+pub mod modo;
 
 #[cfg(feature = "kvm")]
 #[allow(unsafe_code)]
 pub mod kvm_vivo;
+
+// Las trampas de la tabla de paginas extendida se MODELAN sin necesitar el
+// hipervisor: programarlas si lo necesita, y comprobar que no cambian la memoria
+// del invitado no. Dejarlas detras de la caracteristica kvm haria que la
+// invariante central de la FASE 88 no se comprobara en ninguna compilacion de CI.
+pub mod trampa;
 
 use introspeccion::{MemoriaFisica, PerfilKernel, Proceso};
 

@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**62 crates · 2454 pruebas**
+**62 crates · 2473 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -330,7 +330,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-syscallguard` | Deteccion de syscalls directas respaldada por hardware (PMU/DRx) y verificacion cruzada del origen de cada syscall | 15 | — | — |
 | `aegis-unpacker` | Desempaquetado dinamico en memoria: detecta el OEP de un binario empaquetado y extrae el codigo real | 7 | — | — |
 | `aegis-update` | Actualizacion firmada (hibrida Ed25519+ML-DSA-65) con rollback atomico | 18 | `verificar-resiliencia.sh` | sí |
-| `aegis-vmi` | Introspeccion de maquina virtual (VMI) DEFENSIVA: EPT y lectura de estructuras del kernel desde memoria fisica para detectar rootkits por debajo del SO | 10 | `verificar-vmi.sh` | — |
+| `aegis-vmi` | Introspeccion de maquina virtual (VMI) DEFENSIVA: EPT y lectura de estructuras del kernel desde memoria fisica para detectar rootkits por debajo del SO |  29  | `verificar-vmi.sh` | — |
 | `aegis-volcado` | Forense de memoria: mapa de regiones, codigo sin respaldo de fichero, capacidades del codigo que solo existe en memoria, y vista cruzada de tres caminos para procesos ocultos. Sin ninguna operacion de escritura | 54 | `verificar-volcado.sh` | sí |
 | `aegis-vuln` | Escaner de postura y vulnerabilidades del host para AegisCore | 45 | — | sí |
 | `aegis-watchdog` | Watchdog de alta disponibilidad del agente y el driver | 8 | — | — |
@@ -338,12 +338,12 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del plano de control (`server/crates/`)
 
-**13 crates · 971 pruebas**
+**13 crates · 976 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia |
 |---|---|---:|---|
 | `aegis-case` | Ciclo de vida del incidente: de alerta a caso cerrado, con cronologia automatica y rastro inmutable | 79 | `verificar-case.sh` |
-| `aegis-detonate` | Detonacion de muestras en microVM con invitado hostil e informe de comportamiento determinista | 94 | `verificar-detonate.sh` |
+| `aegis-detonate` | Detonacion de muestras en microVM con invitado hostil, informe determinista y MODO de observacion declarado: con agente dentro y cero eventos no hay camino a «sin hallazgos» | 99 | `verificar-detonate.sh` |
 | `aegis-enrich` | Orquestacion de enriquecimiento con declaracion obligatoria de exposicion de datos y modo sin salida | 125 | `verificar-enrich.sh` |
 | `aegis-itdr` | Deteccion y respuesta a amenazas de identidad (ITDR): Kerberoasting, Golden/Silver Ticket y grafo de identidad con centralidad | 25 | `verificar-itdr.sh` |
 | `aegis-orchestrator` | Maquina de estados transaccional de remediacion de flota; ante una deteccion critica lanza en paralelo el playbook de respuesta, resiliente a fallos parciales e idempotente en el reintento | 6 | `verificar-orchestrator.sh` |

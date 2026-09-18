@@ -9,6 +9,7 @@
 //! El unico muro es arrancar el hipervisor, que necesita `/dev/kvm`. Todo lo
 //! demas ocurre.
 
+use aegis_vmi::modo::Modo;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -70,6 +71,9 @@ fn peticion(dir: &Path, muestra: PathBuf, agente: PathBuf, plazo: Duration) -> P
         agente_invitado: agente,
         trabajo: dir.join("trabajo"),
         muestra_real: false,
+        // Estas pruebas detonan con el agente invitado, que es el camino que ya
+        // existia: lo que ejercitan es la frontera y el canal, no el modo.
+        modo: Modo::ConAgente,
     }
 }
 

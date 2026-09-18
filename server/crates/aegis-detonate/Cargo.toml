@@ -30,6 +30,7 @@ libc = "0.2"
 # invitado escribe: dos definiciones del mismo formato acaban divergiendo, y el
 # dia que diverjan la traza se interpretara mal en silencio.
 aegis-invitado = { path = "../../../crates/aegis-invitado" }
+aegis-vmi = { path = "../../../crates/aegis-vmi" }
 # El trafico del invitado se diseca con el MISMO motor que el trafico real del
 # endpoint. Aqui se cobra haber hecho la FASE 70 antes: lo que el malware manda
 # por la red se analiza con el disector de produccion, no con uno de juguete.

@@ -60,6 +60,7 @@ pub mod maquina;
 pub mod receptor;
 pub mod red_simulada;
 
+use aegis_vmi::modo::Modo;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -90,6 +91,14 @@ pub struct Peticion {
     /// Lo sabe quien llama y nadie mas, por eso es un campo suyo. Decide si el
     /// aislamiento debil se acepta.
     pub muestra_real: bool,
+    /// Como se observa a la muestra.
+    ///
+    /// Con agente dentro se ve mas contexto, y ese agente EXISTE dentro: una
+    /// muestra que lo busque lo encuentra. En modo fantasma se ve menos y no hay
+    /// nada que encontrar. La eleccion la hace quien llama porque depende de si
+    /// la maquina trae hipervisor con tabla de paginas extendida, y el informe la
+    /// DECLARA porque cambia lo que significa no haber visto nada.
+    pub modo: Modo,
 }
 
 /// Lo que puede salir mal.
@@ -195,6 +204,7 @@ pub fn detonar(peticion: &Peticion) -> Result<Informe, ErrorDetonacion> {
         final_,
         &recepcion,
         &observado,
+        peticion.modo,
     ))
 }
 
@@ -341,6 +351,7 @@ mod pruebas {
             agente_invitado: PathBuf::from("/no/existe/agente"),
             trabajo: std::env::temp_dir().join("aegis-det-orden"),
             muestra_real: true, // con aislamiento debil, esto tiene que cortar
+            modo: Modo::Fantasma,
         };
         assert!(matches!(
             detonar(&p),
@@ -359,6 +370,7 @@ mod pruebas {
             agente_invitado: PathBuf::from("/no/existe/agente"),
             trabajo: std::env::temp_dir().join("aegis-det-sinmuestra"),
             muestra_real: false,
+            modo: Modo::Fantasma,
         };
         match detonar(&p) {
             Err(ErrorDetonacion::SinMuestra(r)) => assert!(r.contains("muestra.bin")),
@@ -378,6 +390,7 @@ mod pruebas {
             agente_invitado: PathBuf::from("/tmp/a"),
             trabajo: PathBuf::from("/tmp/t"),
             muestra_real: false,
+            modo: Modo::Fantasma,
         };
         let args = argumentos_del_agente(&base, Path::new("/tmp/t/canal.sock"));
         assert!(args.contains(&"--canal-unix".to_string()));

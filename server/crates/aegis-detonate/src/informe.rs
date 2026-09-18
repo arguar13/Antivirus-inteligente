@@ -38,6 +38,8 @@ use aegis_invitado::protocolo::{AccionFichero, AccionProceso, AccionRed, Evento}
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use aegis_vmi::modo::{Delator, Modo, Observacion};
+
 use crate::antivm::{self, Cobertura, Sospecha, Tecnica};
 use crate::receptor::{Anomalia, Recepcion};
 use crate::red_simulada::Observado;
@@ -222,10 +224,53 @@ pub struct Informe {
     pub tecnicas_vistas: BTreeSet<Tecnica>,
     /// Que se contrarresta y que no, tal cual.
     pub cobertura_antivm: Vec<Cobertura>,
+    /// Como se observo a la muestra: con agente dentro, o desde el hipervisor.
+    ///
+    /// # Por que esto va DENTRO del informe
+    ///
+    /// Porque «sin hallazgos» significa cosas distintas segun el modo, y separar
+    /// las dos cosas en dos valores permite que una viaje sin la otra. Cuando eso
+    /// pasa —y pasa, en cuanto alguien serializa solo el veredicto— el informe
+    /// queda diciendo algo cierto y enganoso.
+    ///
+    /// Con agente dentro, cero sucesos es indistinguible de «la muestra encontro
+    /// el agente y se marcho». Sin nada dentro, cero sucesos es cero sucesos.
+    #[serde(with = "modo_como_texto")]
+    pub modo: Modo,
     /// Lo que no puede repetirse entre detonaciones.
     pub indeterminismo: Vec<Indeterminismo>,
     /// Eventos recibidos.
     pub eventos: u64,
+}
+
+/// El modo, en el informe, va como su nombre y no como un numero de variante.
+///
+/// Un informe archivado se lee meses despues, con otra version del binario. El
+/// nombre de un modo no cambia; el orden de las variantes de un enum si puede, y
+/// entonces un informe viejo diria que se detono de la otra forma — que es
+/// exactamente la confusion que declarar el modo existe para evitar.
+mod modo_como_texto {
+    use super::Modo;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    /// Escribe el nombre.
+    pub fn serialize<S: Serializer>(m: &Modo, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(m.nombre())
+    }
+
+    /// Lee el nombre. Un nombre desconocido es un ERROR y no un modo por
+    /// defecto: dar por bueno el modo equivocado es peor que no poder leer el
+    /// informe, porque nadie lo notaria.
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Modo, D::Error> {
+        let s = String::deserialize(d)?;
+        Modo::de_nombre(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "modo de detonacion desconocido: {s:?}. No se elige uno por defecto \
+                 porque dar por bueno el modo equivocado hace que el informe mienta \
+                 sobre lo que se pudo ver"
+            ))
+        })
+    }
 }
 
 impl Informe {
@@ -237,6 +282,7 @@ impl Informe {
         final_: Final,
         recepcion: &Recepcion,
         red: &Observado,
+        modo: Modo,
     ) -> Informe {
         let eventos = recepcion.eventos();
         let (sospecha, tecnicas_vistas) = antivm::analizar(&eventos);
@@ -252,15 +298,53 @@ impl Informe {
             sospecha,
             tecnicas_vistas,
             cobertura_antivm: antivm::catalogo(),
+            modo,
             indeterminismo,
             eventos: recepcion.len() as u64,
         }
     }
 
     /// Si el informe cubre la detonacion entera sin agujeros.
+    ///
+    /// # La condicion que anadio el modo fantasma
+    ///
+    /// Una detonacion CON AGENTE que no produjo ni un evento no esta completa,
+    /// aunque la muestra arrancara y terminara limpiamente. El agente es un
+    /// proceso del invitado: tiene nombre, fichero, canal con el anfitrion y sus
+    /// propias llamadas al sistema, y una muestra que lo busque lo encuentra.
+    /// Cero eventos con el dentro es indistinguible de «lo encontro y se
+    /// marcho», y las dos lecturas llevan a decisiones opuestas.
+    ///
+    /// En modo fantasma no hay nada dentro que encontrar, asi que cero sucesos
+    /// es cero sucesos y la detonacion si esta completa.
     #[must_use]
     pub fn completo(&self) -> bool {
-        self.final_.tuvo_ocasion() && !self.anomalias.iter().any(Anomalia::deja_hueco)
+        if !self.final_.tuvo_ocasion() || self.anomalias.iter().any(Anomalia::deja_hueco) {
+            return false;
+        }
+        self.observacion().la_ausencia_significa_algo()
+    }
+
+    /// Lo observado, con su modo, para poder preguntarle que significa su
+    /// silencio.
+    #[must_use]
+    pub fn observacion(&self) -> Observacion {
+        Observacion {
+            modo: self.modo,
+            sucesos: self.eventos as usize,
+            arranco: self.final_.tuvo_ocasion(),
+        }
+    }
+
+    /// Que formas de detectar el analisis NO contrarresta el modo que se uso.
+    ///
+    /// El catalogo anti-VM general dice que se contrarresta del entorno; esto
+    /// dice que se contrarresta de la OBSERVACION, y cambia con el modo. Sin las
+    /// dos mitades, un informe puede presumir de cubrir doce tecnicas mientras
+    /// el agente que lo produjo era visible desde dentro.
+    #[must_use]
+    pub fn delatores_del_modo(&self) -> &'static [Delator] {
+        self.modo.tecnicas_que_no_contrarresta()
     }
 
     /// Que se puede afirmar.
@@ -273,6 +357,26 @@ impl Informe {
     /// que reordenar el `match` a proposito, y eso se ve en una revision.
     #[must_use]
     pub fn veredicto(&self) -> Veredicto {
+        // El caso que anadio el modo fantasma, y va PRIMERO porque es el mas
+        // enganoso: la detonacion salio bien, la muestra arranco y termino, y no
+        // se vio absolutamente nada. Con un agente dentro eso no significa que la
+        // muestra sea inofensiva: significa que no hizo nada mientras ese agente
+        // estaba ahi, y el agente se puede encontrar.
+        if self.modo.deja_rastro_dentro() && self.eventos == 0 && self.final_.tuvo_ocasion() {
+            return Veredicto::NoConcluyente {
+                motivo: format!(
+                    "la muestra arranco y no produjo ni un evento, y se detono {}. Eso es \
+                     indistinguible de que encontrara el agente y se marchara. Lo que este \
+                     modo NO contrarresta: {}",
+                    self.modo.frase(),
+                    self.delatores_del_modo()
+                        .iter()
+                        .map(|d| d.frase())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
+            };
+        }
         if !self.completo() {
             return Veredicto::NoConcluyente {
                 motivo: format!(
@@ -619,13 +723,24 @@ mod pruebas {
         }
     }
 
+    /// Un informe de detonacion en modo fantasma.
+    ///
+    /// Es el que usan las pruebas que NO estan comprobando el efecto del modo:
+    /// sin nada dentro del invitado, cero eventos significa cero eventos, asi
+    /// que el resto de las propiedades se pueden comprobar sin que el modo se
+    /// meta por medio.
     fn informe_de(eventos: Vec<Evento>, final_: Final) -> Informe {
+        informe_en(eventos, final_, Modo::Fantasma)
+    }
+
+    fn informe_en(eventos: Vec<Evento>, final_: Final, modo: Modo) -> Informe {
         Informe::montar(
             Muestra::de_bytes("muestra.bin", b"unos bytes cualesquiera"),
             &Frontera::namespaces(),
             final_,
             &recepcion(eventos),
             &Observado::default(),
+            modo,
         )
     }
 
@@ -719,6 +834,7 @@ mod pruebas {
             Final::Termino { codigo: 0 },
             &r,
             &Observado::default(),
+            Modo::Fantasma,
         );
         assert!(!i.completo());
         assert!(matches!(i.veredicto(), Veredicto::NoConcluyente { .. }));
@@ -755,6 +871,7 @@ mod pruebas {
                 },
             ]),
             &Observado::default(),
+            Modo::Fantasma,
         );
         assert_eq!(
             a.huella(),
@@ -780,6 +897,7 @@ mod pruebas {
             Final::Termino { codigo: 0 },
             &recepcion(vec![escribe("/tmp/x")]),
             &Observado::default(),
+            Modo::Fantasma,
         );
         let b = Informe::montar(
             Muestra::de_bytes("b", b"bbb"),
@@ -787,6 +905,7 @@ mod pruebas {
             Final::Termino { codigo: 0 },
             &recepcion(vec![escribe("/tmp/x")]),
             &Observado::default(),
+            Modo::Fantasma,
         );
         assert_ne!(a.huella(), b.huella());
     }
@@ -838,6 +957,7 @@ mod pruebas {
             Final::Termino { codigo: 0 },
             &recepcion(Vec::new()),
             &red,
+            Modo::Fantasma,
         );
         assert!(i
             .indeterminismo
@@ -896,5 +1016,95 @@ mod pruebas {
         let vuelta: Informe = serde_json::from_str(&texto).unwrap();
         assert_eq!(vuelta, i);
         assert_eq!(vuelta.huella(), i.huella());
+    }
+
+    #[test]
+    fn con_agente_dentro_y_cero_eventos_no_hay_camino_a_sin_hallazgos() {
+        // El caso que esta fase existe para cerrar, y el mas enganoso de todos:
+        // la detonacion salio bien, la muestra arranco y termino limpiamente, y
+        // no se vio absolutamente nada. Con un agente dentro eso es
+        // indistinguible de que la muestra lo encontrara y se marchara.
+        let i = informe_en(Vec::new(), Final::Termino { codigo: 0 }, Modo::ConAgente);
+        assert!(!i.completo());
+        let v = i.veredicto();
+        assert!(matches!(v, Veredicto::NoConcluyente { .. }), "{v:?}");
+        if let Veredicto::NoConcluyente { motivo } = v {
+            assert!(motivo.contains("encontrara el agente"), "{motivo}");
+            assert!(
+                motivo.contains("lista de procesos"),
+                "el motivo tiene que decir QUE pudo mirar la muestra: {motivo}"
+            );
+        }
+    }
+
+    #[test]
+    fn en_modo_fantasma_cero_eventos_si_deja_concluir() {
+        // Sin nada dentro que encontrar, no haber hecho nada es no haber hecho
+        // nada. Es exactamente lo que el modo fantasma compra, y si no lo
+        // comprara no habria razon para tenerlo.
+        let i = informe_en(Vec::new(), Final::Termino { codigo: 0 }, Modo::Fantasma);
+        assert!(i.completo());
+        assert!(
+            matches!(i.veredicto(), Veredicto::SinHallazgos),
+            "{:?}",
+            i.veredicto()
+        );
+    }
+
+    #[test]
+    fn el_catalogo_de_delatores_cambia_con_el_modo() {
+        // Sin esto, declarar el modo no diria nada. El catalogo anti-VM general
+        // dice que se contrarresta del ENTORNO; este dice que se contrarresta de
+        // la OBSERVACION, y son dos mitades distintas.
+        let con = informe_en(
+            vec![escribe("/tmp/x")],
+            Final::Termino { codigo: 0 },
+            Modo::ConAgente,
+        );
+        let sin = informe_en(
+            vec![escribe("/tmp/x")],
+            Final::Termino { codigo: 0 },
+            Modo::Fantasma,
+        );
+        assert_eq!(con.delatores_del_modo().len(), 4);
+        assert_eq!(sin.delatores_del_modo().len(), 1);
+        for d in con.delatores_del_modo() {
+            assert!(
+                !sin.delatores_del_modo().contains(d),
+                "{d:?} tendria que desaparecer sin agente dentro"
+            );
+        }
+    }
+
+    #[test]
+    fn el_modo_sobrevive_a_guardar_y_recuperar_el_informe() {
+        // Un informe archivado se lee meses despues. Si el modo se perdiera por
+        // el camino, el informe quedaria diciendo algo cierto y enganoso.
+        let i = informe_en(
+            vec![escribe("/tmp/x")],
+            Final::Termino { codigo: 0 },
+            Modo::ConAgente,
+        );
+        let texto = serde_json::to_string(&i).unwrap();
+        assert!(texto.contains("con-agente"), "va por su nombre: {texto}");
+        let vuelta: Informe = serde_json::from_str(&texto).unwrap();
+        assert_eq!(vuelta.modo, Modo::ConAgente);
+    }
+
+    #[test]
+    fn un_modo_desconocido_en_un_informe_guardado_es_un_error_y_no_un_valor_por_defecto() {
+        // Dar por bueno el modo equivocado es peor que no poder leer el informe,
+        // porque nadie lo notaria: el informe seguiria pareciendo valido y
+        // diria otra cosa de lo que se pudo ver.
+        let i = informe_en(
+            vec![escribe("/tmp/x")],
+            Final::Termino { codigo: 0 },
+            Modo::ConAgente,
+        );
+        let texto = serde_json::to_string(&i)
+            .unwrap()
+            .replace("con-agente", "lo-que-sea");
+        let r: Result<Informe, _> = serde_json::from_str(&texto);
+        assert!(r.is_err(), "un modo desconocido tiene que ser un error");
     }
 }

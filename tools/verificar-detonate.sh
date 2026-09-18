@@ -142,6 +142,34 @@ else
     echo "    ${GRIS}estaba encerrada la muestra.${FIN}"
 fi
 
+echo "==> AegisGhost: el modo de observacion, declarado en el informe (FASE 88)"
+if cargo test -q -p aegis-vmi --lib modo:: > /tmp/aegis-ghost-modo.log 2>&1 \
+   && cargo test -q -p aegis-vmi --lib trampa:: > /tmp/aegis-ghost-trampa.log 2>&1; then
+    echo "    ${VERDE}OK${FIN} ($(grep -h '^test result' /tmp/aegis-ghost-modo.log | head -1))"
+    echo "    ${GRIS}Una muestra que detecta el agente invitado no hace nada, y el informe${FIN}"
+    echo "    ${GRIS}dice «sin hallazgos». Esa frase es cierta y es inutil: no distingue${FIN}"
+    echo "    ${GRIS}«esta muestra no hace nada» de «no hizo nada MIENTRAS LA MIRABAMOS${FIN}"
+    echo "    ${GRIS}ASI». Con el modo dentro del informe, las dos se separan — y con${FIN}"
+    echo "    ${GRIS}agente dentro y cero eventos NO HAY CAMINO a «sin hallazgos».${FIN}"
+    echo "    ${GRIS}El catalogo de lo que NO se contrarresta cambia con el modo: cuatro${FIN}"
+    echo "    ${GRIS}delatores con agente —proceso, fichero, canal y sus propias llamadas—${FIN}"
+    echo "    ${GRIS}y uno sin el, que es el tiempo que cuestan las trampas.${FIN}"
+    echo "    ${GRIS}Y la invariante de las trampas: poner, disparar y consultar no cambia${FIN}"
+    echo "    ${GRIS}ni un byte de la memoria del invitado, comprobado con su resumen antes${FIN}"
+    echo "    ${GRIS}y despues. Un depurador pone un 0xCC y el invitado lo ve leyendose a${FIN}"
+    echo "    ${GRIS}si mismo; aqui no hay nada que ver porque no hay nada que cambiar.${FIN}"
+else
+    echo "    ${ROJO}FALLO${FIN} (ver /tmp/aegis-ghost-modo.log y /tmp/aegis-ghost-trampa.log)"
+    tail -20 /tmp/aegis-ghost-modo.log | sed 's/^/    | /'
+    FALLOS=$((FALLOS + 1))
+fi
+
+echo "==> AegisGhost: lo que la FASE 88 NO cierra"
+echo "    ${GRIS}AUSENTE${FIN}: el hipervisor arrancado. Sin VT-x o AMD-V no hay tabla de"
+echo "    ${GRIS}paginas extendida que programar, y esta maquina no los expone. Lo que SI${FIN}"
+echo "    ${GRIS}se ejerce entero es el modelo y su invariante —que la memoria del${FIN}"
+echo "    ${GRIS}invitado no cambia—, comprobada sobre memoria de verdad.${FIN}"
+
 if [ "$FALLOS" -eq 0 ]; then
     echo "${VERDE}==> AegisDetonate verificado${FIN}"
 else
