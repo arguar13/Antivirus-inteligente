@@ -148,6 +148,14 @@ pub struct TablaDeSaltos {
 pub struct Cfg {
     /// Por donde se empezo.
     pub entradas: Vec<u64>,
+    /// Entradas de funcion descubiertas: los destinos de las llamadas directas.
+    ///
+    /// Van aparte de [`Cfg::entradas`] —que son las que pidio quien llamo— y
+    /// **no** son sucesores de nadie: el control no pasa del que llama al
+    /// llamado dentro de una misma funcion. Estan aqui porque son codigo y hay
+    /// que desensamblarlo, y porque [`crate::llamadas`] necesita saber donde
+    /// empieza cada funcion.
+    pub raices: Vec<u64>,
     bloques: BTreeMap<u64, Bloque>,
     /// Direcciones de transferencias de control cuyo destino no se conoce.
     ///
@@ -171,6 +179,18 @@ pub const MAX_BLOQUES: usize = 200_000;
 /// Ningun bloque basico real es tan largo; uno que lo sea es codigo generado
 /// para agotar al analizador.
 pub const MAX_INSTRUCCIONES_POR_BLOQUE: usize = 100_000;
+
+/// Por donde sigue el descenso despues de construir un bloque.
+///
+/// Los sucesores y las raices son cosas distintas y por eso viajan separados:
+/// un sucesor es a donde va el control dentro de esta funcion, y una raiz es
+/// otra funcion que hay que desensamblar. Devolverlos en una sola lista haria
+/// que el cuerpo de cada funcion incluyera el de todas las que llama.
+#[derive(Debug, Clone, Default)]
+struct Continuacion {
+    sucesores: Vec<u64>,
+    raices: Vec<u64>,
+}
 
 /// Cuantas instrucciones hacia atras se busca la cota de una tabla de saltos.
 const VENTANA_DE_COTA: usize = 8;
@@ -206,11 +226,14 @@ impl Cfg {
                 break;
             }
             match cfg.construir_bloque(d, datos, inicio, plazo) {
-                Some(sucesores) => {
-                    for s in sucesores {
-                        if !vistos.contains(&s) {
-                            pendientes.push_back(s);
+                Some(c) => {
+                    for s in c.sucesores.iter().chain(c.raices.iter()) {
+                        if !vistos.contains(s) {
+                            pendientes.push_back(*s);
                         }
+                    }
+                    for r in c.raices {
+                        cfg.raices.push(r);
                     }
                 }
                 None => {
@@ -220,8 +243,20 @@ impl Cfg {
             }
         }
 
+        // El orden importa: partir antes de enlazar, o los predecesores serian
+        // los de un grafo que ya no existe.
+        cfg.partir_solapados();
         cfg.enlazar_predecesores();
-        cfg.cobertura.funciones = cfg.entradas.len();
+        cfg.raices.sort_unstable();
+        cfg.raices.dedup();
+        cfg.raices.retain(|r| cfg.bloques.contains_key(r));
+        // Las funciones que se han llegado a desensamblar son las entradas mas
+        // los destinos de llamada directa, no solo las entradas que pidio quien
+        // llamo: contar solo esas ultimas diria «una funcion» de un binario del
+        // que se han desensamblado cuarenta.
+        let mut funciones: BTreeSet<u64> = cfg.raices.iter().copied().collect();
+        funciones.extend(cfg.entradas.iter().filter(|e| cfg.bloques.contains_key(e)));
+        cfg.cobertura.funciones = funciones.len();
         cfg.cobertura.instrucciones = plazo.gastadas();
         cfg.cobertura.transferencias_indirectas = cfg.indirectos.len();
         cfg.cobertura.bytes_cubiertos = cfg
@@ -234,18 +269,19 @@ impl Cfg {
         cfg
     }
 
-    /// Construye un bloque desde `inicio`. Devuelve sus sucesores, o `None` si
-    /// se agoto el plazo a mitad.
+    /// Construye un bloque desde `inicio`. Devuelve por donde seguir, o `None`
+    /// si se agoto el plazo a mitad.
     fn construir_bloque(
         &mut self,
         d: &dyn Decodifica,
         datos: &dyn LeeDatos,
         inicio: u64,
         plazo: &mut Plazo,
-    ) -> Option<Vec<u64>> {
+    ) -> Option<Continuacion> {
         let mut instrucciones: Vec<Instruccion> = Vec::new();
         let mut pc = inicio;
         let mut sucesores = Vec::new();
+        let mut raices = Vec::new();
 
         loop {
             if !plazo.sigue() {
@@ -269,11 +305,20 @@ impl Cfg {
 
             match flujo {
                 Flujo::Secuencial | Flujo::Frontera | Flujo::Llamada { .. } => {
-                    // Una llamada no termina el bloque —vuelve— pero su destino
-                    // si es una entrada nueva para el grafo de llamadas. Aqui
-                    // solo se anota si es indirecta.
-                    if flujo.indirecta() {
-                        self.indirectos.push(pc);
+                    // Una llamada no termina el bloque —vuelve— y su destino
+                    // **no** es sucesor de este bloque: el control no pasa de
+                    // aqui a alli dentro de esta funcion, se va y vuelve.
+                    //
+                    // Pero si es codigo, y hay que desensamblarlo: es la entrada
+                    // de otra funcion. Sale como RAIZ, no como sucesor. Meterlo
+                    // de sucesor uniria el cuerpo del callee al del caller y
+                    // haria que el grafo de flujo de una funcion contuviera
+                    // todas las que llama; separarlos es lo que permite que el
+                    // grafo de llamadas signifique algo.
+                    match flujo {
+                        Flujo::Llamada { destino: Some(dd) } => raices.push(dd),
+                        Flujo::Llamada { destino: None } => self.indirectos.push(pc),
+                        _ => {}
                     }
                     pc = siguiente;
                 }
@@ -303,7 +348,7 @@ impl Cfg {
 
         if instrucciones.is_empty() {
             self.cobertura.no_decodificables += 1;
-            return Some(Vec::new());
+            return Some(Continuacion::default());
         }
         let fin = instrucciones
             .last()
@@ -319,7 +364,64 @@ impl Cfg {
                 predecesores: Vec::new(),
             },
         );
-        Some(sucesores)
+        Some(Continuacion { sucesores, raices })
+    }
+
+    /// Parte los bloques que contienen dentro el principio de otro.
+    ///
+    /// # El problema que resuelve
+    ///
+    /// El descenso recursivo construye cada bloque de corrido hasta su
+    /// terminador, sin mirar si por el camino ha pasado por encima del principio
+    /// de otro bloque. Con un `switch`, un `if` o cualquier salto hacia adelante
+    /// pasa constantemente: el bloque que cae por debajo del destino del salto
+    /// llega hasta el final, y ademas se crea un bloque en el destino. Las
+    /// mismas instrucciones quedan en dos bloques a la vez.
+    ///
+    /// # Por que no es cosmetico
+    ///
+    /// Un grafo con bloques solapados no sirve para ningun analisis de flujo de
+    /// datos. La misma instruccion se analiza dos veces con dos estados
+    /// distintos, y de las dos respuestas ninguna es la buena: en
+    /// [`crate::llamadas`] eso salia como un `call rax` resuelto **a dos
+    /// direcciones a la vez**, cada una cierta por un camino. Y la FASE 100
+    /// construye el decompilador sobre este grafo, donde instrucciones
+    /// duplicadas serian sentencias duplicadas.
+    ///
+    /// # Como se parte
+    ///
+    /// El bloque se trunca en el principio del otro y se le pone como unico
+    /// sucesor. No hace falta mover instrucciones: el bloque que ya existe en
+    /// esa direccion se decodifico desde ahi, sobre los mismos bytes, asi que
+    /// contiene exactamente la cola que se quita —y sus mismos sucesores.
+    ///
+    /// Solo se parte en una direccion que sea **frontera de instruccion** del
+    /// bloque largo. En x86 dos flujos de instrucciones pueden solaparse de
+    /// verdad —es una tecnica de ofuscacion conocida—, y ahi las dos lecturas
+    /// son legitimas y distintas: partir seria inventarse que son la misma.
+    fn partir_solapados(&mut self) {
+        let inicios: BTreeSet<u64> = self.bloques.keys().copied().collect();
+        let mut cambios: Vec<(u64, u64)> = Vec::new();
+        for b in self.bloques.values() {
+            // El primer principio ajeno que cae dentro y es frontera de
+            // instruccion. Al truncar ahi, ningun otro puede quedar dentro.
+            let corte = b
+                .instrucciones
+                .iter()
+                .map(|i| i.direccion)
+                .find(|dir| *dir != b.inicio && inicios.contains(dir));
+            if let Some(c) = corte {
+                cambios.push((b.inicio, c));
+            }
+        }
+        for (inicio, corte) in cambios {
+            let Some(b) = self.bloques.get_mut(&inicio) else {
+                continue;
+            };
+            b.instrucciones.retain(|i| i.direccion < corte);
+            b.fin = corte;
+            b.sucesores = vec![corte];
+        }
     }
 
     /// Intenta resolver una tabla de saltos detras de un salto indirecto.
@@ -494,18 +596,83 @@ mod pruebas {
     }
 
     #[test]
-    fn una_llamada_no_parte_el_bloque() {
+    fn una_llamada_no_parte_el_bloque_de_quien_llama() {
         // Una llamada vuelve. Partir el bloque en cada llamada convertiria
         // cualquier funcion normal en una cadena de bloques de una instruccion,
         // y la forma del grafo —que es lo que miran las reglas— dejaria de decir
         // nada.
-        // 0x1000: call +0  (5 bytes) ; 0x1005: ret
-        let bytes = [0xE8, 0x00, 0x00, 0x00, 0x00, 0xC3];
+        //
+        //   0x1000 call 0x1010   (5 bytes)
+        //   0x1005 nop
+        //   0x1006 ret
+        //   0x1010 ret           <- el llamado
+        let mut bytes = vec![0x90u8; 0x11];
+        bytes[0..5].copy_from_slice(&[0xE8, 0x0B, 0x00, 0x00, 0x00]);
+        bytes[6] = 0xC3;
+        bytes[0x10] = 0xC3;
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
         let mut p = Plazo::default();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
-        assert_eq!(g.cuantos_bloques(), 1);
-        assert_eq!(g.bloque(0x1000).unwrap().longitud(), 2);
+        let b = g.bloque(0x1000).unwrap();
+        assert_eq!(b.longitud(), 3, "call, nop y ret en un solo bloque");
+        assert!(
+            b.sucesores.is_empty(),
+            "el llamado NO es sucesor: el control va y vuelve"
+        );
+    }
+
+    #[test]
+    fn el_destino_de_una_llamada_directa_si_se_desensambla() {
+        // Es codigo, y hay que mirarlo: sin esto, un binario cuyo `main` solo
+        // llama a otras funciones saldria como una funcion de tres
+        // instrucciones. Va como RAIZ, no como sucesor.
+        let mut bytes = vec![0x90u8; 0x11];
+        bytes[0..5].copy_from_slice(&[0xE8, 0x0B, 0x00, 0x00, 0x00]);
+        bytes[6] = 0xC3;
+        bytes[0x10] = 0xC3;
+        let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
+        let mut p = Plazo::default();
+        let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
+        assert!(g.bloque(0x1010).is_some(), "el llamado se desensamblo");
+        assert_eq!(g.raices, vec![0x1010]);
+        assert_eq!(g.cobertura.funciones, 2, "la entrada y el llamado");
+    }
+
+    #[test]
+    fn un_bloque_que_pasa_por_encima_de_otro_se_parte() {
+        // El defecto que hacia inservible el grafo para cualquier analisis de
+        // flujo de datos: con un salto hacia adelante, el bloque que cae por
+        // debajo del destino llegaba hasta el final Y ademas se creaba un bloque
+        // en el destino, con las mismas instrucciones en los dos.
+        //
+        //   0x1000 cmp edi, 0
+        //   0x1003 je  0x1008
+        //   0x1005 nop ; nop ; nop   <- cae por debajo de 0x1008
+        //   0x1008 ret
+        let bytes = [
+            0x83, 0xFF, 0x00, // cmp edi, 0
+            0x74, 0x03, // je 0x1008
+            0x90, 0x90, 0x90, // nop nop nop
+            0xC3, // 0x1008 ret
+        ];
+        let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
+        let mut p = Plazo::default();
+        let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
+        let caido = g.bloque(0x1005).unwrap();
+        assert_eq!(caido.fin, 0x1008, "se trunca donde empieza el otro");
+        assert_eq!(caido.longitud(), 3, "los tres nop, y el ret no");
+        assert_eq!(caido.sucesores, vec![0x1008]);
+        // La propiedad general: ninguna instruccion esta en dos bloques.
+        let mut vistas = BTreeSet::new();
+        for b in g.bloques() {
+            for i in &b.instrucciones {
+                assert!(
+                    vistas.insert(i.direccion),
+                    "{:#x} aparece en dos bloques",
+                    i.direccion
+                );
+            }
+        }
     }
 
     #[test]

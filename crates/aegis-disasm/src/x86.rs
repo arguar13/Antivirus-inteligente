@@ -202,6 +202,7 @@ fn traducir(i: &iced_x86::Instruction, bitness: u32) -> Instruccion {
     // llamada indirecta hacia una direccion inventada. La invariante se guarda
     // en el dato, no en la disciplina de quien lo lee.
     let valor_definido = valor_definido_de(i).filter(|_| regs.definidos != 0);
+    let copia_de = copia_de_de(i).filter(|_| regs.definidos != 0);
     let delta = delta_de(i).filter(|_| match regs.unico_escrito() {
         Some(r) => regs.lee(r),
         None => false,
@@ -222,6 +223,7 @@ fn traducir(i: &iced_x86::Instruction, bitness: u32) -> Instruccion {
         escribe_memoria: i.op_count() > 0 && i.op0_kind() == OpKind::Memory,
         regs,
         valor_definido,
+        copia_de,
         delta,
         destino_reg: destino_reg_de(i, flujo),
     }
@@ -364,6 +366,22 @@ fn valor_definido_de(i: &iced_x86::Instruction) -> Option<u64> {
         }
         _ => None,
     }
+}
+
+/// El registro cuyo valor pasa tal cual al registro que se define.
+///
+/// Solo el `mov` puro entre dos registros. `movsxd rax, ebx` **no** vale: extiende
+/// el signo, asi que el valor de `RAX` no es el de `RBX` en cuanto el bit alto de
+/// `EBX` este puesto, y dar por igual lo que no lo es es como se resuelve una
+/// llamada hacia una direccion equivocada.
+fn copia_de_de(i: &iced_x86::Instruction) -> Option<u8> {
+    if i.mnemonic() != Mnemonic::Mov || i.op_count() < 2 {
+        return None;
+    }
+    if i.op0_kind() != OpKind::Register || i.op1_kind() != OpKind::Register {
+        return None;
+    }
+    numero_de_registro(i.op1_register())
 }
 
 /// La constante que la instruccion suma al registro que lee y escribe.

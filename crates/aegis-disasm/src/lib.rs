@@ -99,6 +99,7 @@ pub mod arm64;
 pub mod cfg;
 pub mod error;
 pub mod instruccion;
+pub mod llamadas;
 pub mod plazo;
 pub mod x86;
 

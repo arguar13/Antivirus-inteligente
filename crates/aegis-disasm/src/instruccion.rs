@@ -229,6 +229,18 @@ pub struct Instruccion {
     /// que resuelve llamadas indirectas. Confundirlas obligaria al analisis a
     /// adivinar cual de los inmediatos es el valor, y a acertar por convenio.
     pub valor_definido: Option<u64>,
+    /// El registro cuyo valor pasa TAL CUAL al registro que la instruccion
+    /// define.
+    ///
+    /// Es un `mov rax, rbx`, y es la tercera forma de que un registro tenga un
+    /// valor conocido: heredarlo de otro. Sin esto, el analisis pierde el rastro
+    /// en cuanto el valor cambia de registro —que es una de las ofuscaciones mas
+    /// baratas que existen, y que ademas el compilador hace por su cuenta.
+    ///
+    /// Va aparte de [`Instruccion::valor_definido`] porque no es un valor: es una
+    /// referencia a otro registro, y solo significa algo mirando el estado del
+    /// analisis en ese punto.
+    pub copia_de: Option<u8>,
     /// La constante que la instruccion SUMA al registro que lee y escribe.
     ///
     /// Es la otra mitad de la formacion de direcciones en dos pasos: `adrp x8,
@@ -471,6 +483,7 @@ mod pruebas {
             escribe_memoria: false,
             regs: Registros::nada(),
             valor_definido: None,
+            copia_de: None,
             delta: None,
             destino_reg: None,
         };
@@ -489,6 +502,7 @@ mod pruebas {
             escribe_memoria: false,
             regs: Registros::nada(),
             valor_definido: None,
+            copia_de: None,
             delta: None,
             destino_reg: None,
         };
@@ -509,6 +523,7 @@ mod pruebas {
             escribe_memoria: false,
             regs: Registros::nada(),
             valor_definido: None,
+            copia_de: None,
             delta: None,
             destino_reg: None,
         };

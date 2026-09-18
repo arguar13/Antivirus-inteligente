@@ -173,6 +173,7 @@ pub fn decodificar(w: u32, pc: u64) -> Instruccion {
         escribe_memoria: es_almacenamiento(w),
         regs: a.regs,
         valor_definido: a.valor_definido,
+        copia_de: a.copia_de,
         delta: a.delta,
         destino_reg: a.destino_reg,
     }
@@ -189,6 +190,7 @@ struct Analisis {
     inmediatos: Vec<u64>,
     regs: Registros,
     valor_definido: Option<u64>,
+    copia_de: Option<u8>,
     delta: Option<i64>,
     destino_reg: Option<u8>,
 }
@@ -202,6 +204,7 @@ impl Analisis {
             inmediatos: Vec::new(),
             regs: Registros::nada(),
             valor_definido: None,
+            copia_de: None,
             delta: None,
             destino_reg: None,
         }
@@ -254,6 +257,26 @@ impl Analisis {
         self
     }
 
+    /// Anota que el registro `destino` pasa a valer lo que vale `origen`.
+    fn copia(mut self, destino: u32, origen: u32) -> Analisis {
+        match (reg_seguido(destino), reg_seguido(origen)) {
+            (Some(d), Some(o)) => {
+                self.regs.anota_leido(o);
+                self.regs.anota_definido(d);
+                self.copia_de = Some(o);
+            }
+            // Copiar DESDE `XZR` es poner el registro a cero, que si es un valor
+            // conocido. Es como A64 escribe `mov x0, #0` la mitad de las veces.
+            (Some(d), None) => {
+                self.regs.anota_definido(d);
+                self.valor_definido = Some(0);
+            }
+            // Copiar HACIA `XZR` es tirar el valor: no hay efecto que seguir.
+            (None, _) => {}
+        }
+        self
+    }
+
     /// Anota que la instruccion suma una constante al registro que lee y
     /// escribe.
     fn suma(mut self, reg: u32, delta: i64) -> Analisis {
@@ -282,6 +305,7 @@ impl Analisis {
         self.regs.escritos = u32::MAX;
         self.regs.definidos = 0;
         self.valor_definido = None;
+        self.copia_de = None;
         self.delta = None;
         self
     }
@@ -510,6 +534,20 @@ fn analizar(w: u32, pc: u64) -> Analisis {
     // SHA1/SHA256: 0101 1110 000. .... 0... ....
     if w & 0xFF00_0000 == 0x5E00_0000 && (w & 0x00F0_0000) == 0 {
         return Analisis::nueva(Clase::Cripto, Flujo::Secuencial);
+    }
+
+    // --- Copia entre registros ----------------------------------------------
+    // En A64 `mov Xd, Xm` no existe como instruccion: es `ORR Xd, XZR, Xm` sin
+    // desplazamiento. Se reconoce aqui porque seguir un valor cuando cambia de
+    // registro es la diferencia entre resolver una llamada y perderla, y mover
+    // el valor de registro es de las ofuscaciones mas baratas que hay —ademas de
+    // algo que el compilador hace por su cuenta todo el rato.
+    //
+    // La mascara deja libres el bit de anchura y el campo `Rm`, y exige lo que
+    // hace que sea una copia limpia: sin desplazamiento, sin negacion y con
+    // `Rn` = `XZR`.
+    if w & 0x7FE0_FFE0 == 0x2A00_03E0 {
+        return Analisis::nueva(Clase::Mov, Flujo::Secuencial).copia(rd(w), rm(w));
     }
 
     // --- Clases generales, por el grupo mayor de la codificacion -------------
