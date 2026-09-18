@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**57 crates · 2155 pruebas**
+**59 crates · 2192 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -284,6 +284,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-e2e` | Pruebas de integracion de extremo a extremo de AegisCore | 15 | — | sí |
 | `aegis-edgeml` | Inferencia TinyML en el borde: deteccion de zero-day por comportamiento, sin nube (FASE 53) | 6 | — | sí |
 | `aegis-emu` | Micro-sandbox de emulacion x86-64 en memoria: desempaqueta binarios desconocidos y observa su comportamiento sin ejecutarlos en el host | 39 | — | sí |
+| `aegis-enforce` | Postura de aplicacion: que se impone de verdad en esta maquina y que solo se observa | 9 | `verificar-mac.sh` | sí |
 | `aegis-entidad` | Modelo de entidad unico y arbitro de veredictos para todos los subsistemas de deteccion | 61 | `verificar-fabric.sh` | sí |
 | `aegis-estado` | El estado del endpoint entero y consultable: 52 tablas tipadas con coste declarado por tabla, empuje de predicados y motivo escrito cuando una tabla no se puede leer | 174 | `verificar-estado.sh` | sí |
 | `aegis-evasion` | Deteccion de vaciado de procesos, inyeccion reflectiva y manipulacion de hooks | 22 | — | sí |
@@ -306,6 +307,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-kintegrity` | Verificacion cruzada de la integridad del kernel: deteccion de rootkits DKOM y procesos ocultos | 24 | — | — |
 | `aegis-l7hunter` | Extraccion de telemetria L7 en claro por uprobes de eBPF sobre SSL_read/SSL_write, y caza de balizas C2 sin romper el certificate pinning | 56 | `verificar-l7hunter.sh` | sí |
 | `aegis-memhunter` | Analisis de VAD y de la tabla de paginas (PTE) para delatar codigo sin fichero, inyeccion reflexiva y module stomping, sin leer la memoria del proceso | 39 | `verificar-memhunter.sh` | — |
+| `aegis-macho` | Lector de binarios de macOS (Mach-O y universales), endurecido contra entrada hostil | 28 | `verificar-mac.sh` | sí |
 | `aegis-mesh` | Malla P2P de la red local: propagacion cifrada y autenticada de vacunas entre agentes | 19 | — | — |
 | `aegis-ml` | Extraccion de atributos estaticos PE/ELF e inferencia local ONNX para AegisCore | 22 | — | sí |
 | `aegis-net` | IDS de red y filtro XDP de AegisCore | 45 | — | — |

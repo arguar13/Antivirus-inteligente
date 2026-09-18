@@ -1,0 +1,15 @@
+[package]
+name = "aegis-macho"
+description = "Lector de binarios de macOS (Mach-O y universales), endurecido contra entrada hostil"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+aegis-pe = { path = "../aegis-pe" }

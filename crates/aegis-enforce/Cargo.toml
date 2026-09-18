@@ -1,0 +1,16 @@
+[package]
+name = "aegis-enforce"
+description = "Postura de aplicacion: que se impone de verdad en esta maquina y que solo se observa"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+aegis-sandbox = { path = "../aegis-sandbox" }
+aegis-scal = { path = "../aegis-scal" }

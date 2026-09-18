@@ -569,6 +569,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "pe" ]; then
     fi
 fi
 
+# AegisMac + AegisEnforce (FASE 84): macOS, y la pregunta que cierra el proyecto.
+#
+# Un EDR tiene dos modos que se parecen mucho por fuera: mirar y bloquear. La
+# diferencia la nota el cliente el dia del incidente. Esta puerta mide cual de
+# los dos es este agente EN ESTA MAQUINA, en vez de creerse la configuracion.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "mac" ]; then
+    printf '%s==>%s AegisMac + AegisEnforce · macOS, y que se impone de verdad\n' "$GRIS" "$FIN"
+    if ./tools/verificar-mac.sh > /tmp/aegis-mac-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-mac-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-mac-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo

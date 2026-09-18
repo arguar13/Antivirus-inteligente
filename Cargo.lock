@@ -145,6 +145,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-enforce"
+version = "0.1.0"
+dependencies = [
+ "aegis-sandbox",
+ "aegis-scal",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-entidad"
 version = "0.1.0"
 dependencies = [
@@ -361,6 +370,14 @@ dependencies = [
  "libc",
  "thiserror 2.0.20",
  "tract-onnx",
+]
+
+[[package]]
+name = "aegis-macho"
+version = "0.1.0"
+dependencies = [
+ "aegis-pe",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
