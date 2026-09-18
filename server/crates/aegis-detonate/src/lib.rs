@@ -61,6 +61,11 @@ pub mod receptor;
 pub mod red_simulada;
 
 use aegis_vmi::modo::Modo;
+
+// El modo forma parte de la API de esta caja: esta en `Peticion` y en `Informe`.
+// Se reexporta para que quien use la detonacion pueda nombrarlo sin tener que
+// conocer el crate del hipervisor ni anadirlo a sus dependencias.
+pub use aegis_vmi::modo::{Delator, Modo as ModoDeObservacion, Observacion};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 

@@ -56,6 +56,7 @@ use aegis_detonate::frontera::{Frontera, Salida as SalidaDetonacion};
 use aegis_detonate::informe::{Final, Informe as InformeDetonacion, Muestra};
 use aegis_detonate::receptor::{Receptor, Topes};
 use aegis_detonate::red_simulada::Observado;
+use aegis_detonate::ModoDeObservacion;
 use aegis_enrich::analizador::Registro;
 use aegis_enrich::locales::{Dga, Listas};
 use aegis_enrich::observable::Observable as ObservableEnrich;
@@ -417,6 +418,12 @@ fn fase_detonacion(
         Final::Termino { codigo: 0 },
         &recepcion,
         &Observado::default(),
+        // Este circuito alimenta tramas del AGENTE INVITADO, asi que el modo es
+        // ese y no el fantasma. Importa decirlo bien: con agente dentro, una
+        // detonacion sin eventos no puede concluir nada, y este circuito si los
+        // tiene — declarar el otro modo haria que el veredicto se apoyara en una
+        // observacion que no es la que se hizo.
+        ModoDeObservacion::ConAgente,
     );
 
     // LA ENTIDAD DEL ARTEFACTO NO ES LA DEL FICHERO. Detonar el mismo fichero con
