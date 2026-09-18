@@ -606,6 +606,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "disasm" ]; then
     fi
 fi
 
+# AegisMemForensics (FASE 86): analisis forense de memoria.
+#
+# Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion
+# con otro nombre. Esta puerta comprueba la ausencia de ese camino, que es la
+# unica forma de comprobar una ausencia: buscando lo que no deberia estar.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "volcado" ]; then
+    printf '%s==>%s AegisMemForensics · memoria inerte, y el camino que no existe\n' "$GRIS" "$FIN"
+    if ./tools/verificar-volcado.sh > /tmp/aegis-volcado-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-volcado-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-volcado-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo

@@ -612,6 +612,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-volcado"
+version = "0.1.0"
+dependencies = [
+ "aegis-disasm",
+ "aegis-entidad",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-vuln"
 version = "0.1.0"
 dependencies = [

@@ -50,6 +50,7 @@ members = [
     "crates/aegis-pqc",
     "crates/aegis-emu",
     "crates/aegis-vmi",
+    "crates/aegis-volcado",
     "crates/aegis-selfdefense",
     "crates/aegis-hardsense",
     "crates/aegis-cloudnative",
