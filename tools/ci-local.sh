@@ -28,6 +28,31 @@ VERDE=$'\033[32m'; ROJO=$'\033[31m'; GRIS=$'\033[90m'; FIN=$'\033[0m'
 FALLOS=0
 SOLO="${1:-}"
 
+# Donde van las salidas de cada comprobacion, PRIVADO de esta ejecucion.
+#
+# POR QUE NO UNA RUTA FIJA EN /tmp
+#
+# Porque produjo el peor fallo que puede tener una puerta: uno que MIENTE. Las
+# salidas iban a rutas fijas en /tmp, una por grupo mas la del helper `paso`.
+# Cuando la misma maquina corre la tanda dos veces con usuarios distintos —una
+# como usuario normal y otra como root, que es lo que hace falta para las pruebas
+# que inspeccionan memoria ajena—, el fichero ya existe y es del otro usuario: la
+# redireccion falla con «Permission denied», porque los ficheros ajenos en un
+# directorio con sticky bit estan protegidos por `fs.protected_regular`.
+#
+# Y entonces pasa lo grave: el comando NO se ejecuta, el `if` se va por la rama
+# del fallo, y lo que se imprime es el contenido VIEJO del fichero. Una tanda
+# entera "fallando" en un segundo con la salida de otra ejecucion, PID incluidos.
+# Cuesta mas descubrir el engaño que arreglar el fallo que se estaba buscando.
+#
+# Con un directorio propio por ejecucion no hay colision posible: ni entre
+# usuarios, ni entre dos tandas simultaneas, y se borra al salir.
+LOGS="$(mktemp -d -t aegis-ci-XXXXXXXX)" || {
+    printf '%sNo se pudo crear el directorio temporal de salidas.%s\n' "$ROJO" "$FIN"
+    exit 1
+}
+trap 'rm -rf "$LOGS"' EXIT
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Reanudacion
 #
@@ -184,16 +209,21 @@ if [ "$SOLO" = "--reanudar" ]; then
     exit 0
 fi
 
+SALIDA_PASO="$LOGS/paso.log"
+
 paso() {
     local grupo="$1"; shift
     local titulo="$1"; shift
     if [ -n "$SOLO" ] && [ "$SOLO" != "$grupo" ]; then return 0; fi
     printf '%s==>%s %s\n' "$GRIS" "$FIN" "$titulo"
-    if "$@" > /tmp/ci-local.log 2>&1; then
+    # Se vacia antes de cada paso: si el comando no llega a escribir nada, lo que
+    # se muestre tiene que ser vacio y no lo que dejo el paso anterior.
+    : > "$SALIDA_PASO"
+    if "$@" > "$SALIDA_PASO" 2>&1; then
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/ci-local.log | tail -40
+        sed 's/^/    | /' "$SALIDA_PASO" | tail -40
         FALLOS=$((FALLOS + 1))
     fi
 }
@@ -231,11 +261,11 @@ fi
 # la red, OMITE con aviso (exit 0) en vez de volver fragil la puerta obligatoria.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "kafka" ]; then
     printf '%s==>%s Firehose · destino Kafka de extremo a extremo\n' "$GRIS" "$FIN"
-    if ./tools/verificar-kafka.sh > /tmp/aegis-kafka.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-kafka.log | tail -5
+    if ./tools/verificar-kafka.sh > $LOGS/aegis-kafka.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-kafka.log | tail -5
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
-        sed 's/^/    | /' /tmp/aegis-kafka.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-kafka.log | tail -20
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
         FALLOS=$((FALLOS + 1))
     fi
@@ -279,36 +309,36 @@ fi
 # no quedarse en un comentario del codigo.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "sandbox" ]; then
     printf '%s==>%s Sandbox · capacidades de aislamiento del kernel\n' "$GRIS" "$FIN"
-    if cargo run -q -p aegis-sandbox --example sandbox_support > /tmp/aegis-sandbox.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-sandbox.log
+    if cargo run -q -p aegis-sandbox --example sandbox_support > $LOGS/aegis-sandbox.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-sandbox.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-sandbox.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-sandbox.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
 
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "firmware" ]; then
     printf '%s==>%s Firmware · capacidades de arranque medido de la maquina\n' "$GRIS" "$FIN"
-    if cargo run -q -p aegis-firmware --example firmware_support > /tmp/aegis-firmware.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-firmware.log
+    if cargo run -q -p aegis-firmware --example firmware_support > $LOGS/aegis-firmware.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-firmware.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-firmware.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-firmware.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
 
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "unpacker" ]; then
     printf '%s==>%s Unpacker · capacidades de desempaquetado dinamico\n' "$GRIS" "$FIN"
-    if cargo run -q -p aegis-unpacker --example unpacker_support > /tmp/aegis-unpacker.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-unpacker.log
+    if cargo run -q -p aegis-unpacker --example unpacker_support > $LOGS/aegis-unpacker.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-unpacker.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-unpacker.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-unpacker.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -318,12 +348,12 @@ fi
 # constancia de lo que ofrece la maquina donde corre.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "syscallguard" ]; then
     printf '%s==>%s SyscallGuard · deteccion de syscalls directas (PMU/DRx)\n' "$GRIS" "$FIN"
-    if cargo run -q -p aegis-syscallguard --example syscallguard_support > /tmp/aegis-syscallguard.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-syscallguard.log
+    if cargo run -q -p aegis-syscallguard --example syscallguard_support > $LOGS/aegis-syscallguard.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-syscallguard.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-syscallguard.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-syscallguard.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -335,12 +365,12 @@ fi
 # —que sin intel_pt, no—.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ptguard" ]; then
     printf '%s==>%s PTGuard · trazado Intel PT (nucleo probado; captura gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-ptguard.sh > /tmp/aegis-ptguard.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-ptguard.log
+    if ./tools/verificar-ptguard.sh > $LOGS/aegis-ptguard.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-ptguard.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-ptguard.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-ptguard.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -352,12 +382,12 @@ fi
 # real.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "honeytoken" ]; then
     printf '%s==>%s Honeytoken · decepcion activa (nucleo probado; inyeccion gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-honeytoken.sh > /tmp/aegis-honeytoken.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-honeytoken.log
+    if ./tools/verificar-honeytoken.sh > $LOGS/aegis-honeytoken.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-honeytoken.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-honeytoken.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-honeytoken.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -368,12 +398,12 @@ fi
 # capa de identidad necesita un dominio Active Directory real, que no hay aqui.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "itdr" ]; then
     printf '%s==>%s ITDR · deteccion de identidad (nucleo probado; captura en vivo gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-itdr.sh > /tmp/aegis-itdr-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-itdr-ci.log
+    if ./tools/verificar-itdr.sh > $LOGS/aegis-itdr-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-itdr-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-itdr-ci.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-itdr-ci.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -386,12 +416,12 @@ fi
 # un sistema real, por gRPC/mTLS.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "orchestrator" ]; then
     printf '%s==>%s AI-RO · orquestador de remediacion (nucleo probado; ejecucion en flota gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-orchestrator.sh > /tmp/aegis-orchestrator-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-orchestrator-ci.log
+    if ./tools/verificar-orchestrator.sh > $LOGS/aegis-orchestrator-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-orchestrator-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-orchestrator-ci.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-orchestrator-ci.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -403,12 +433,12 @@ fi
 # enganchar en un proceso vivo que hable TLS.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "l7hunter" ]; then
     printf '%s==>%s AegisL7Hunter · inspeccion L7 de TLS por uprobes y caza de balizas C2\n' "$GRIS" "$FIN"
-    if ./tools/verificar-l7hunter.sh > /tmp/aegis-l7hunter-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-l7hunter-ci.log
+    if ./tools/verificar-l7hunter.sh > $LOGS/aegis-l7hunter-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-l7hunter-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-l7hunter-ci.log | tail -25
+        sed 's/^/    | /' $LOGS/aegis-l7hunter-ci.log | tail -25
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -422,12 +452,12 @@ fi
 # ABI si se verifica en compilacion.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "memhunter" ]; then
     printf '%s==>%s AegisMemHunter · VAD/PTE contra codigo sin fichero y module stomping\n' "$GRIS" "$FIN"
-    if ./tools/verificar-memhunter.sh > /tmp/aegis-memhunter-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-memhunter-ci.log
+    if ./tools/verificar-memhunter.sh > $LOGS/aegis-memhunter-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-memhunter-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-memhunter-ci.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-memhunter-ci.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -441,12 +471,12 @@ fi
 # muro es LEER la ROM, que exige que el kernel exponga la flash como MTD.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fwaudit" ]; then
     printf '%s==>%s AegisFirmwareAudit · auditoria de ROM SPI y ACPI, estrictamente de solo lectura\n' "$GRIS" "$FIN"
-    if ./tools/verificar-fwaudit.sh > /tmp/aegis-fwaudit-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-fwaudit-ci.log
+    if ./tools/verificar-fwaudit.sh > $LOGS/aegis-fwaudit-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-fwaudit-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-fwaudit-ci.log | tail -25
+        sed 's/^/    | /' $LOGS/aegis-fwaudit-ci.log | tail -25
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -460,12 +490,12 @@ fi
 # por bueno porque compile: dos nodos reales por loopback.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "swarm" ]; then
     printf '%s==>%s AegisSwarm · enjambre autonomo con el plano de control caido\n' "$GRIS" "$FIN"
-    if ./tools/verificar-swarm.sh > /tmp/aegis-swarm-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-swarm-ci.log
+    if ./tools/verificar-swarm.sh > $LOGS/aegis-swarm-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-swarm-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-swarm-ci.log | tail -25
+        sed 's/^/    | /' $LOGS/aegis-swarm-ci.log | tail -25
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -480,12 +510,12 @@ fi
 # la prediccion fabricando aristas— se ejercen los dos.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "predict" ]; then
     printf '%s==>%s AegisPredict · caminos de ataque, radio de explosion y contencion preventiva\n' "$GRIS" "$FIN"
-    if ./tools/verificar-predict.sh > /tmp/aegis-predict-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-predict-ci.log
+    if ./tools/verificar-predict.sh > $LOGS/aegis-predict-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-predict-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-predict-ci.log | tail -25
+        sed 's/^/    | /' $LOGS/aegis-predict-ci.log | tail -25
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -500,12 +530,12 @@ fi
 # IP, y no se mira dentro de lo cifrado (eso es aegis-l7hunter).
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "wire" ]; then
     printf '%s==>%s AegisWire · diseccion de protocolos y reensamblado resistente a evasion\n' "$GRIS" "$FIN"
-    if ./tools/verificar-wire.sh > /tmp/aegis-wire-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-wire-ci.log
+    if ./tools/verificar-wire.sh > $LOGS/aegis-wire-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-wire-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-wire-ci.log | tail -25
+        sed 's/^/    | /' $LOGS/aegis-wire-ci.log | tail -25
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -522,12 +552,12 @@ fi
 # movimiento lateral— es el que mas importa cortar en un endpoint).
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ips" ]; then
     printf '%s==>%s AegisIPS · prevencion en linea con veredictos cacheados en el kernel\n' "$GRIS" "$FIN"
-    if ./tools/verificar-ips.sh > /tmp/aegis-ips-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-ips-ci.log
+    if ./tools/verificar-ips.sh > $LOGS/aegis-ips-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-ips-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-ips-ci.log | tail -25
+        sed 's/^/    | /' $LOGS/aegis-ips-ci.log | tail -25
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -539,12 +569,12 @@ fi
 # proceso que compila el contenido de seguridad de la flota entera.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ruleforge" ]; then
     printf '%s==>%s AegisRuleForge · el corpus mundial compilado, con canario y corpus firmado\n' "$GRIS" "$FIN"
-    if ./tools/verificar-ruleforge.sh > /tmp/aegis-ruleforge-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-ruleforge-ci.log
+    if ./tools/verificar-ruleforge.sh > $LOGS/aegis-ruleforge-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-ruleforge-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-ruleforge-ci.log | tail -25
+        sed 's/^/    | /' $LOGS/aegis-ruleforge-ci.log | tail -25
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -556,12 +586,12 @@ fi
 # una direccion de verdad desde dentro y no la alcanza.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "detonate" ]; then
     printf '%s==>%s AegisDetonate · detonacion con invitado hostil e informe que no puede mentir\n' "$GRIS" "$FIN"
-    if ./tools/verificar-detonate.sh > /tmp/aegis-detonate-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-detonate-ci.log
+    if ./tools/verificar-detonate.sh > $LOGS/aegis-detonate-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-detonate-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-detonate-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-detonate-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -575,12 +605,12 @@ fi
 # afirmaciones, incluida una prueba de carga de cien mil agentes.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "scale" ]; then
     printf '%s==>%s AegisScale · plano de control para 100.000 agentes\n' "$GRIS" "$FIN"
-    if ./tools/verificar-scale.sh > /tmp/aegis-scale-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-scale-ci.log
+    if ./tools/verificar-scale.sh > $LOGS/aegis-scale-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-scale-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-scale-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-scale-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -595,12 +625,12 @@ fi
 # de extremo a extremo, orden por OCURRENCIA y no por llegada, y perdida contada.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "ingest" ]; then
     printf '%s==>%s AegisIngest · registros de cualquier origen, sin perder ni inventar\n' "$GRIS" "$FIN"
-    if ./tools/verificar-ingest.sh > /tmp/aegis-ingest-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-ingest-ci.log
+    if ./tools/verificar-ingest.sh > $LOGS/aegis-ingest-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-ingest-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-ingest-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-ingest-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -615,12 +645,12 @@ fi
 # solo hacen ruido.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "case" ]; then
     printf '%s==>%s AegisCase · de alerta a caso cerrado, con rastro inalterable\n' "$GRIS" "$FIN"
-    if ./tools/verificar-case.sh > /tmp/aegis-case-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-case-ci.log
+    if ./tools/verificar-case.sh > $LOGS/aegis-case-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-case-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-case-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-case-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -635,12 +665,12 @@ fi
 # concurrencia y una fusion determinista y explicable.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "enrich" ]; then
     printf '%s==>%s AegisEnrich · preguntar a muchas fuentes sin contar lo que no toca\n' "$GRIS" "$FIN"
-    if ./tools/verificar-enrich.sh > /tmp/aegis-enrich-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-enrich-ci.log
+    if ./tools/verificar-enrich.sh > $LOGS/aegis-enrich-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-enrich-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-enrich-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-enrich-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -655,12 +685,12 @@ fi
 # de la FASE 68 sigue intacta: transporta autoridad, no la concede.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "share" ]; then
     printf '%s==>%s AegisShare · STIX/TAXII con difusion impuesta en el codigo\n' "$GRIS" "$FIN"
-    if ./tools/verificar-share.sh > /tmp/aegis-share-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-share-ci.log
+    if ./tools/verificar-share.sh > $LOGS/aegis-share-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-share-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-share-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-share-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -679,12 +709,12 @@ fi
 # ve ninguna otra puerta del arbol.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "estado" ]; then
     printf '%s==>%s AegisState · el estado del endpoint, con su coste y su motivo\n' "$GRIS" "$FIN"
-    if ./tools/verificar-estado.sh > /tmp/aegis-estado-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-estado-ci.log
+    if ./tools/verificar-estado.sh > $LOGS/aegis-estado-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-estado-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-estado-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-estado-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -699,12 +729,12 @@ fi
 # esta puerta, seria el dia que hiciera falta.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "custodia" ]; then
     printf '%s==>%s AegisArtifact · la evidencia, con su procedencia y su cadena\n' "$GRIS" "$FIN"
-    if ./tools/verificar-custodia.sh > /tmp/aegis-custodia-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-custodia-ci.log
+    if ./tools/verificar-custodia.sh > $LOGS/aegis-custodia-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-custodia-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-custodia-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-custodia-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -717,12 +747,12 @@ fi
 # misma maquina con clang y lld-link, y cotejados con llvm-readobj.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "pe" ]; then
     printf '%s==>%s AegisWin · el ejecutable de Windows por dentro, y su huella\n' "$GRIS" "$FIN"
-    if ./tools/verificar-pe.sh > /tmp/aegis-pe-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-pe-ci.log
+    if ./tools/verificar-pe.sh > $LOGS/aegis-pe-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-pe-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-pe-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-pe-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -734,12 +764,12 @@ fi
 # los dos es este agente EN ESTA MAQUINA, en vez de creerse la configuracion.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "mac" ]; then
     printf '%s==>%s AegisMac + AegisEnforce · macOS, y que se impone de verdad\n' "$GRIS" "$FIN"
-    if ./tools/verificar-mac.sh > /tmp/aegis-mac-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-mac-ci.log
+    if ./tools/verificar-mac.sh > $LOGS/aegis-mac-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-mac-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-mac-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-mac-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -754,12 +784,12 @@ fi
 # los ficheros que NO son malware, que son el 99,99 % de los que va a ver.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "disasm" ]; then
     printf '%s==>%s AegisDisasm · desensamblado, grafos y capacidades con evidencia\n' "$GRIS" "$FIN"
-    if ./tools/verificar-disasm.sh > /tmp/aegis-disasm-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-disasm-ci.log
+    if ./tools/verificar-disasm.sh > $LOGS/aegis-disasm-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-disasm-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-disasm-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-disasm-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -771,12 +801,12 @@ fi
 # unica forma de comprobar una ausencia: buscando lo que no deberia estar.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "volcado" ]; then
     printf '%s==>%s AegisMemForensics · memoria inerte, y el camino que no existe\n' "$GRIS" "$FIN"
-    if ./tools/verificar-volcado.sh > /tmp/aegis-volcado-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-volcado-ci.log
+    if ./tools/verificar-volcado.sh > $LOGS/aegis-volcado-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-volcado-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-volcado-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-volcado-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -789,12 +819,12 @@ fi
 # COMPILA. La puerta lo comprueba con dos ejemplos atados a su codigo de error.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "instrumentar" ]; then
     printf '%s==>%s AegisInstrument · instrumentacion confinada por el tipo\n' "$GRIS" "$FIN"
-    if ./tools/verificar-instrumentar.sh > /tmp/aegis-instr-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-instr-ci.log
+    if ./tools/verificar-instrumentar.sh > $LOGS/aegis-instr-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-instr-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-instr-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-instr-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -811,12 +841,12 @@ fi
 # cota global signifique algo con un crate nuevo.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "disectores" ]; then
     printf '%s==>%s AegisDissect · diseccion ampliada con cobertura declarada\n' "$GRIS" "$FIN"
-    if ./tools/verificar-disectores.sh > /tmp/aegis-disectores-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-disectores-ci.log
+    if ./tools/verificar-disectores.sh > $LOGS/aegis-disectores-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-disectores-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-disectores-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-disectores-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -831,12 +861,12 @@ fi
 # limites configurables que alguien pueda subir.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "captura" ]; then
     printf '%s==>%s AegisCapture · captura por entidad con retencion por veredicto\n' "$GRIS" "$FIN"
-    if ./tools/verificar-captura.sh > /tmp/aegis-captura-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-captura-ci.log
+    if ./tools/verificar-captura.sh > $LOGS/aegis-captura-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-captura-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-captura-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-captura-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -852,12 +882,12 @@ fi
 # distinto atado a su sitio, que es lo que contesta «por donde entraron».
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "senuelos" ]; then
     printf '%s==>%s AegisLure · senuelos que conversan, con procedencia por destino\n' "$GRIS" "$FIN"
-    if ./tools/verificar-senuelos.sh > /tmp/aegis-senuelos-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-senuelos-ci.log
+    if ./tools/verificar-senuelos.sh > $LOGS/aegis-senuelos-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-senuelos-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-senuelos-ci.log | tail -30
+        sed 's/^/    | /' $LOGS/aegis-senuelos-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -873,12 +903,12 @@ fi
 # del endpoint no crece ni un crate.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fabric" ]; then
     printf '%s==>%s AegisFabric · un solo modelo de entidad, un solo veredicto\n' "$GRIS" "$FIN"
-    if ./tools/verificar-fabric.sh > /tmp/aegis-fabric-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-fabric-ci.log
+    if ./tools/verificar-fabric.sh > $LOGS/aegis-fabric-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-fabric-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-fabric-ci.log | tail -40
+        sed 's/^/    | /' $LOGS/aegis-fabric-ci.log | tail -40
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -889,12 +919,12 @@ fi
 # necesita privilegios/driver, y el estrangulado real lo pone el SO (cgroups).
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "memhunt" ]; then
     printf '%s==>%s RAM YARA · forense de memoria a escala (nucleo probado; lectura fisica gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-memscanner.sh > /tmp/aegis-memscanner-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-memscanner-ci.log
+    if ./tools/verificar-memscanner.sh > $LOGS/aegis-memscanner-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-memscanner-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-memscanner-ci.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-memscanner-ci.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -906,12 +936,12 @@ fi
 # KVM COMPILA y se declara el muro: arrancar el hipervisor necesita VT-x/AMD-V.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "vmi" ]; then
     printf '%s==>%s VMI Ring -1 · introspeccion por EPT (nucleo probado; hipervisor gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-vmi.sh > /tmp/aegis-vmi-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-vmi-ci.log
+    if ./tools/verificar-vmi.sh > $LOGS/aegis-vmi-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-vmi-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-vmi-ci.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-vmi-ci.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -925,12 +955,12 @@ fi
 # que el kernel conceda PPL, imponer un SIGKILL) necesita Windows + WDK + cert AM.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "resiliencia" ]; then
     printf '%s==>%s Resiliencia · autodefensa ELAM/PPL + tamper crypto (nucleo probado; puesta en vivo gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-resiliencia.sh > /tmp/aegis-resiliencia-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-resiliencia-ci.log
+    if ./tools/verificar-resiliencia.sh > $LOGS/aegis-resiliencia-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-resiliencia-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-resiliencia-ci.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-resiliencia-ci.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -942,12 +972,12 @@ fi
 # la exponga, y este runner (microVM) no lo hace (perf_event_open -> ENOENT).
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "hardsense" ]; then
     printf '%s==>%s AegisHPC · telemetria PMU anti canal-lateral/ROP (nucleo probado; PMU en vivo gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-hardsense.sh > /tmp/aegis-hardsense-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-hardsense-ci.log
+    if ./tools/verificar-hardsense.sh > $LOGS/aegis-hardsense-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-hardsense-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-hardsense-ci.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-hardsense-ci.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -960,12 +990,12 @@ fi
 # privilegios, bytecode cargado).
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "cloudnative" ]; then
     printf '%s==>%s AegisCloudNative · escape de contenedor (nucleo probado; enganche eBPF gated)\n' "$GRIS" "$FIN"
-    if ./tools/verificar-cloudnative.sh > /tmp/aegis-cloudnative-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-cloudnative-ci.log
+    if ./tools/verificar-cloudnative.sh > $LOGS/aegis-cloudnative-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-cloudnative-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-cloudnative-ci.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-cloudnative-ci.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -975,12 +1005,12 @@ fi
 # el informe lo confirma donde corre la puerta de calidad.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fleet" ]; then
     printf '%s==>%s Flota · gestion sobre gRPC/mTLS con certificados rotativos\n' "$GRIS" "$FIN"
-    if cargo run -q -p aegis-fleet --example fleet_support > /tmp/aegis-fleet.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-fleet.log
+    if cargo run -q -p aegis-fleet --example fleet_support > $LOGS/aegis-fleet.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-fleet.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-fleet.log | tail -20
+        sed 's/^/    | /' $LOGS/aegis-fleet.log | tail -20
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -1006,12 +1036,12 @@ fi
 # via cgroup v2 y no depende de que el agente se porte bien.
 if [ -n "${SOLO:-}" ] && [ "$SOLO" != "budget" ]; then :; else
     printf '%s==>%s Presupuesto de memoria del agente\n' "$GRIS" "$FIN"
-    if ./tools/verificar-presupuesto.sh > /tmp/aegis-presupuesto-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-presupuesto-ci.log
+    if ./tools/verificar-presupuesto.sh > $LOGS/aegis-presupuesto-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-presupuesto-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-presupuesto-ci.log | tail -25
+        sed 's/^/    | /' $LOGS/aegis-presupuesto-ci.log | tail -25
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -1035,11 +1065,11 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
         cargo build -q -p aegis-syscallguard --example syscall_probe 2>/dev/null
         cargo build -q -p aegis-fleet --example fleet_probe 2>/dev/null
         make -C drivers/linux/aegis-bpf build sign >/dev/null 2>&1 || true
-        if python3 tests/red_team_sim.py > /tmp/aegis-redteam.log 2>&1; then
+        if python3 tests/red_team_sim.py > $LOGS/aegis-redteam.log 2>&1; then
             printf '    %sOK%s\n' "$VERDE" "$FIN"
         else
             printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-            sed 's/^/    | /' /tmp/aegis-redteam.log | tail -30
+            sed 's/^/    | /' $LOGS/aegis-redteam.log | tail -30
             FALLOS=$((FALLOS + 1))
         fi
     else
@@ -1064,12 +1094,12 @@ fi
 # invariante y pasa a ser una aspiracion.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "invariantes" ]; then
     printf '%s==>%s AegisProof · las trece invariantes sobre el producto completo\n' "$GRIS" "$FIN"
-    if ./tools/verificar-invariantes.sh > /tmp/aegis-invariantes-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-invariantes-ci.log
+    if ./tools/verificar-invariantes.sh > $LOGS/aegis-invariantes-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-invariantes-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-invariantes-ci.log
+        sed 's/^/    | /' $LOGS/aegis-invariantes-ci.log
         FALLOS=$((FALLOS + 1))
     fi
 fi
