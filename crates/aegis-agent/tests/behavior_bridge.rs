@@ -23,13 +23,27 @@ fn dormilon() -> Child {
         .unwrap()
 }
 
-/// Directorio de trabajo con copias REALES de `sleep` renombradas.
+/// Directorio de trabajo con copias REALES de un binario, renombradas.
 ///
 /// Hace falta porque la capa de abstraccion resuelve la imagen leyendo
 /// `/proc/<pid>/exe`, que es el binario que el kernel ejecuto de verdad. Un
-/// guion no valdria: el `exe` de un guion es su interprete. Copiando `sleep`
+/// guion no valdria: el `exe` de un guion es su interprete. Copiando un binario
 /// con el nombre que interesa se consiguen procesos vivos cuya imagen resuelta
 /// es la que la prueba necesita, sin simular nada.
+///
+/// # Por que un INTERPRETE DE ORDENES y ya no `sleep`
+///
+/// Porque no todo binario funciona bajo otro nombre. Ubuntu 26.04 sustituyo GNU
+/// coreutils por uutils (paquete `rust-coreutils`), que es un unico binario
+/// MULTI-LLAMADA: mira su `argv[0]` para saber que orden ejecutar. Una copia de
+/// `sleep` llamada `nginx` responde «coreutils: unknown program 'nginx'» y muere
+/// al instante, asi que no habia proceso vivo ni `exe` que resolver, y la prueba
+/// fallaba diciendo que no veia la cadena —un sintoma que no apunta a la causa—.
+///
+/// Un interprete de ordenes no tiene ese problema por diseño: distinguir el
+/// comportamiento por `argv[0]` es justo lo que hace (`sh` frente a `bash`), asi
+/// que arranca con el nombre que se le ponga. Es la propiedad que esta prueba
+/// necesita, y [`fuente_del_laboratorio`] la COMPRUEBA en vez de suponerla.
 struct Lab(PathBuf);
 
 impl Lab {
@@ -40,10 +54,16 @@ impl Lab {
         Lab(p)
     }
 
-    /// Lanza una copia de `sleep` con el nombre indicado y devuelve el hijo.
+    /// Lanza una copia del interprete con el nombre indicado y devuelve el hijo.
+    ///
+    /// Queda bloqueado en `read`, no dormido: su entrada estandar es una tuberia
+    /// que este proceso conserva abierta, asi que el hijo espera indefinidamente
+    /// y muere solo en cuanto la prueba suelta el [`Child`]. Con `sleep 300` en su
+    /// lugar quedarian procesos huerfanos cinco minutos tras cada ejecucion, y
+    /// ademas el interprete tendria un hijo que `matar` no alcanza.
     fn lanzar(&self, nombre: &str) -> Child {
         let destino = self.0.join(nombre);
-        std::fs::copy(fuente_sleep(), &destino).unwrap();
+        std::fs::copy(fuente_del_laboratorio(), &destino).unwrap();
         let mut permisos = std::fs::metadata(&destino).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut permisos, 0o755);
         std::fs::set_permissions(&destino, permisos).unwrap();
@@ -53,8 +73,28 @@ impl Lab {
         // hereda y el `exec` falla. No es un defecto del codigo bajo prueba, y
         // se resuelve solo en milisegundos.
         for intento in 0..50 {
-            match Command::new(&destino).arg("300").spawn() {
-                Ok(c) => return c,
+            match Command::new(&destino)
+                .args(["-c", "read x"])
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(mut c) => {
+                    // Que haya arrancado no basta: un binario multi-llamada acepta
+                    // el `spawn` y se muere al mirarse el `argv[0]`. Si eso pasa,
+                    // el fallo tiene que salir AQUI y con su causa, no cincuenta
+                    // lineas mas abajo como una cadena de ataque que no se ve.
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    match c.try_wait() {
+                        Ok(None) => return c,
+                        Ok(Some(estado)) => panic!(
+                            "la copia de {} llamada «{nombre}» murio al instante ({estado}).\n\
+                             Suele significar que la fuente es un binario MULTI-LLAMADA \
+                             (mira su argv[0]) y no admite otro nombre.",
+                            fuente_del_laboratorio().display()
+                        ),
+                        Err(e) => panic!("no se pudo comprobar el hijo «{nombre}»: {e}"),
+                    }
+                }
                 Err(e) if e.raw_os_error() == Some(libc_etxtbsy()) && intento < 49 => {
                     std::thread::sleep(std::time::Duration::from_millis(20));
                 }
@@ -80,13 +120,77 @@ fn libc_etxtbsy() -> i32 {
     26
 }
 
-fn fuente_sleep() -> &'static Path {
-    for c in ["/bin/sleep", "/usr/bin/sleep"] {
-        if Path::new(c).exists() {
-            return Path::new(c);
+/// El binario que se copia bajo otros nombres para poblar el laboratorio.
+///
+/// Se elige COMPROBANDO la propiedad que hace falta —que arranque y siga vivo
+/// bajo un nombre que no es el suyo— en vez de darla por hecha. Es la suposicion
+/// que se rompio con el coreutils multi-llamada de Ubuntu 26.04, y comprobarla
+/// cuesta un `spawn` una sola vez por ejecucion.
+fn fuente_del_laboratorio() -> &'static Path {
+    static ELEGIDO: std::sync::OnceLock<&'static Path> = std::sync::OnceLock::new();
+    *ELEGIDO.get_or_init(|| {
+        let candidatos = ["/bin/dash", "/bin/bash", "/bin/sh", "/usr/bin/bash"];
+        let mut descartados = Vec::new();
+        for c in candidatos {
+            let ruta = Path::new(c);
+            if !ruta.exists() {
+                continue;
+            }
+            match sirve_con_otro_nombre(ruta) {
+                Ok(()) => return ruta,
+                Err(motivo) => descartados.push(format!("{c}: {motivo}")),
+            }
         }
-    }
-    panic!("no hay un binario `sleep` con el que montar el laboratorio");
+        panic!(
+            "ningun interprete sirve para montar el laboratorio.\n\
+             Se necesita un binario que arranque bajo un nombre que no es el suyo \
+             y que acepte `-c`.\nDescartados:\n  {}",
+            descartados.join("\n  ")
+        )
+    })
+}
+
+/// Comprueba que `fuente` copiada con otro nombre arranca y sigue viva.
+///
+/// Devuelve el motivo del descarte si no sirve, para que el panico de arriba
+/// pueda decir por que se descarto cada candidato en vez de solo que no hubo
+/// ninguno.
+fn sirve_con_otro_nombre(fuente: &Path) -> Result<(), String> {
+    let dir = std::env::temp_dir().join(format!(
+        "aegis-beh-sonda-{}-{}",
+        std::process::id(),
+        fuente.file_name().and_then(|n| n.to_str()).unwrap_or("x")
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // Un nombre que ninguna orden del sistema tiene, que es justo el caso que
+    // rompe a un binario multi-llamada.
+    let destino = dir.join("aegis-sonda-de-nombre-ajeno");
+    let resultado = (|| -> Result<(), String> {
+        std::fs::copy(fuente, &destino).map_err(|e| e.to_string())?;
+        let mut permisos = std::fs::metadata(&destino)
+            .map_err(|e| e.to_string())?
+            .permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut permisos, 0o755);
+        std::fs::set_permissions(&destino, permisos).map_err(|e| e.to_string())?;
+
+        let mut hijo = Command::new(&destino)
+            .args(["-c", "read x"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("no arranco: {e}"))?;
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let vivo = matches!(hijo.try_wait(), Ok(None));
+        let _ = hijo.kill();
+        let _ = hijo.wait();
+        if vivo {
+            Ok(())
+        } else {
+            Err("murio al instante bajo otro nombre (¿binario multi-llamada?)".to_owned())
+        }
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    resultado
 }
 
 fn matar(mut c: Child) {
