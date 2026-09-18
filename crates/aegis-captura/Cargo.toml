@@ -1,0 +1,31 @@
+[package]
+name = "aegis-captura"
+description = "Captura de trafico indexada por entidad con retencion selectiva por veredicto y reproduccion determinista"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# CERO DEPENDENCIAS EXTERNAS. Un capturador escribe a disco los bytes que le manda
+# un desconocido: es superficie de ataque y es tambien el sitio donde se acumulan
+# los datos que no pueden salir. Traer aqui una biblioteca de serializacion o de
+# indexado seria meter codigo no auditado entre el cable y el almacen.
+#
+# El formato PCAP se escribe a mano —son veinticuatro bytes de cabecera y
+# dieciseis por paquete— porque es lo que hace que la captura la pueda leer
+# Wireshark dentro de tres anos, cuando este producto puede no existir.
+[dependencies]
+# El identificador de entidad y el arbitro: el indice se construye sobre ellos, y
+# la autorizacion para guardar contenido entero SALE de un veredicto. Compartirlos
+# —en vez de duplicar el concepto— es lo que hace que buscar el trafico de una
+# entidad sea mirar en su sitio y no correlacionar por texto.
+aegis-entidad = { path = "../aegis-entidad" }
+# Los hechos que salen de reproducir un flujo.
+aegis-wire = { path = "../aegis-wire" }
+# Y los disectores con los que se reproduce: los MISMOS que ven el trafico en
+# vivo. Reproducir con un motor distinto no probaria nada.
+aegis-disectores = { path = "../aegis-disectores" }

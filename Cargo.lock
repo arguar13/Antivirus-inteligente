@@ -75,6 +75,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-captura"
+version = "0.1.0"
+dependencies = [
+ "aegis-disectores",
+ "aegis-entidad",
+ "aegis-wire",
+]
+
+[[package]]
 name = "aegis-cloudnative"
 version = "0.1.0"
 

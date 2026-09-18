@@ -1,0 +1,24 @@
+[package]
+name = "aegis-almacen-pcap"
+description = "Almacen de captura de red: una particion es un fichero PCAP, se busca por entidad y se purga con un unlink"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# CERO DEPENDENCIAS EXTERNAS. Un almacen de capturas guarda lo que el cliente no
+# puede perder y lo que no puede salir: es el peor sitio del producto para meter
+# codigo de un tercero. El formato es PCAP clasico —que escribe `aegis-captura`—
+# y las particiones son ficheros, asi que no hace falta ni motor de indices ni
+# capa de serializacion.
+[dependencies]
+# El indice, la politica y el formato: los MISMOS que usa el agente. Dos
+# definiciones del mismo indice acabarian divergiendo, y el dia que divergieran
+# una busqueda devolveria trafico de otra entidad.
+aegis-captura = { path = "../../../crates/aegis-captura" }
+# El identificador de entidad, que es la clave del indice.
+aegis-entidad = { path = "../../../crates/aegis-entidad" }

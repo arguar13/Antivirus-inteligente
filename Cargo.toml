@@ -61,6 +61,7 @@ members = [
     "crates/aegis-swarm",
     "crates/aegis-wire",
     "crates/aegis-disectores",
+    "crates/aegis-captura",
     "crates/aegis-ips",
     "crates/aegis-presupuesto",
     "crates/aegis-invitado",

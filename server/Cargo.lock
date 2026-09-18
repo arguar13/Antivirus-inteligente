@@ -13,6 +13,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-almacen-pcap"
+version = "0.1.0"
+dependencies = [
+ "aegis-captura",
+ "aegis-entidad",
+]
+
+[[package]]
 name = "aegis-attest"
 version = "0.1.0"
 dependencies = [
@@ -25,6 +33,15 @@ dependencies = [
  "sha2",
  "signature 2.2.0",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-captura"
+version = "0.1.0"
+dependencies = [
+ "aegis-disectores",
+ "aegis-entidad",
+ "aegis-wire",
 ]
 
 [[package]]
@@ -49,6 +66,14 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-disectores"
+version = "0.1.0"
+dependencies = [
+ "aegis-wire",
+ "sha2",
 ]
 
 [[package]]

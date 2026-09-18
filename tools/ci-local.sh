@@ -663,6 +663,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "disectores" ]; then
     fi
 fi
 
+# AegisCapture (FASE 90): captura indexada por entidad con retencion por veredicto.
+#
+# Un capturador es el sitio donde se acumula todo lo que paso por la red, y eso
+# lo convierte en dos armas contra su propio dueno: un sitio del que robar
+# credenciales y una forma de llenar el disco. Esta puerta comprueba que las dos
+# estan paradas por propiedades ESTRUCTURALES —el anillo solo acepta bytes
+# redactados, guardar entero exige un veredicto, y el anillo no crece— y no por
+# limites configurables que alguien pueda subir.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "captura" ]; then
+    printf '%s==>%s AegisCapture · captura por entidad con retencion por veredicto\n' "$GRIS" "$FIN"
+    if ./tools/verificar-captura.sh > /tmp/aegis-captura-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-captura-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-captura-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo
