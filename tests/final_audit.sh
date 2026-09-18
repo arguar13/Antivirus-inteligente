@@ -91,8 +91,8 @@ PERFIL=$(cargo run -q -p aegis-presupuesto --example reparto -- --campo perfil 2
 PRESUPUESTO_KB=$(( ${PRESUPUESTO:-0} / 1024 ))
 LINEA_BASE_KB=$(( ${LINEA_BASE:-0} / 1024 ))
 RSS_KB=""
-if cargo build --release -p aegis-agent -q 2>/dev/null && [ -x target/release/aegis-agent ]; then
-    ./target/release/aegis-agent --stats-interval 300 >/dev/null 2>"$TMP/agent.err" &
+if cargo build --release -p aegis-agent -q 2>/dev/null && [ -x "${CARGO_TARGET_DIR:-target}/release/aegis-agent" ]; then
+    "${CARGO_TARGET_DIR:-target}/release/aegis-agent" --stats-interval 300 >/dev/null 2>"$TMP/agent.err" &
     PID_AG=$!
     sleep 4
     RSS_KB=$(grep VmRSS "/proc/$PID_AG/status" 2>/dev/null | awk '{print $2}')

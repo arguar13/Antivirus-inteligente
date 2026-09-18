@@ -23,6 +23,21 @@ use aegis_detonate::{detonar, Frontera, Peticion};
 /// deja `cargo build -p aegis-invitado`, y si no esta se **omite** la prueba en
 /// vez de fingir que paso.
 fn agente_invitado() -> Option<PathBuf> {
+    // El binario de ESTE test vive en <target>/<perfil>/deps/; el del invitado,
+    // en <target>/<perfil>/. Derivarlo del ejecutable —en vez de asumir que
+    // `target/` cuelga del arbol— respeta `CARGO_TARGET_DIR` y una compilacion
+    // fuera del repositorio (p. ej. el target en disco nativo de Linux mientras
+    // el codigo vive en un montaje de Windows).
+    if let Ok(exe) = std::env::current_exe() {
+        // .../deps/detonacion_real-HASH -> .../deps -> .../<perfil>
+        if let Some(perfil_dir) = exe.parent().and_then(|p| p.parent()) {
+            let ruta = perfil_dir.join("aegis-invitado");
+            if ruta.exists() {
+                return Some(ruta);
+            }
+        }
+    }
+    // Respaldo: el arbol del repositorio, como se hacia antes.
     let manifiesto = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // server/crates/aegis-detonate -> server/crates -> server -> raiz
     let raiz = manifiesto.parent()?.parent()?.parent()?;

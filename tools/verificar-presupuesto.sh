@@ -93,8 +93,8 @@ PERFIL=$(cargo run -q -p aegis-presupuesto --example reparto -- --campo perfil 2
 if [ -z "$PRESUPUESTO" ] || [ -z "$LINEA_BASE" ]; then
     echo "    ${ROJO}FALLO${FIN}: no se pudo calcular el presupuesto"
     FALLOS=$((FALLOS + 1))
-elif cargo build --release -p aegis-agent -q 2>/dev/null && [ -x target/release/aegis-agent ]; then
-    ./target/release/aegis-agent --stats-interval 300 >/dev/null 2>/tmp/aegis-presupuesto.err &
+elif cargo build --release -p aegis-agent -q 2>/dev/null && [ -x "${CARGO_TARGET_DIR:-target}/release/aegis-agent" ]; then
+    "${CARGO_TARGET_DIR:-target}/release/aegis-agent" --stats-interval 300 >/dev/null 2>/tmp/aegis-presupuesto.err &
     PID=$!
     sleep 4
     RSS_KB=$(awk '/VmRSS/ {print $2}' "/proc/$PID/status" 2>/dev/null)
