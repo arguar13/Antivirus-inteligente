@@ -128,7 +128,7 @@ fn libc_etxtbsy() -> i32 {
 /// cuesta un `spawn` una sola vez por ejecucion.
 fn fuente_del_laboratorio() -> &'static Path {
     static ELEGIDO: std::sync::OnceLock<&'static Path> = std::sync::OnceLock::new();
-    *ELEGIDO.get_or_init(|| {
+    ELEGIDO.get_or_init(|| {
         let candidatos = ["/bin/dash", "/bin/bash", "/bin/sh", "/usr/bin/bash"];
         let mut descartados = Vec::new();
         for c in candidatos {
