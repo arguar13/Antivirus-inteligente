@@ -50,14 +50,21 @@
 #![deny(missing_docs)]
 
 pub mod decoy;
+pub mod dialogo;
+pub mod dialogos;
 pub mod engine;
 pub mod guard;
+pub mod limitador;
+pub mod plantado;
 pub mod sensor;
 
 #[cfg(feature = "xdp")]
 pub mod xdp;
 
 pub use decoy::{DecoyConfig, DecoyKind, DecoyNet, Interaction, SkipReason, Skipped, CATALOGO};
+pub use dialogo::{Conversacion, Dialogo, Final, Paso, Revelacion};
 pub use engine::{DeceptionConfig, DeceptionEngine, DeceptionStats, Round};
 pub use guard::Guard;
+pub use limitador::{Cuentas, Limitador, Recorte, Transporte};
+pub use plantado::{Plantacion, Sembrado};
 pub use sensor::{Alert, AlertKind, ReconSensor, SensorConfig};

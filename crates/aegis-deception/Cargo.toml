@@ -19,6 +19,10 @@ xdp = ["dep:aegis-net"]
 
 [dependencies]
 aegis-scal = { path = "../aegis-scal" }
+# Los tokens atribuibles que los senuelos entregan. Es lo que convierte «alguien
+# entro en el senuelo» en «alguien entro en el senuelo Y DESPUES uso esto en otro
+# sitio»: sin procedencia por destino, un senuelo cuenta visitas y nada mas.
+aegis-honeytoken = { path = "../aegis-honeytoken" }
 aegis-net = { path = "../aegis-net", features = ["xdp"], optional = true }
 thiserror = "2"
 libc = "0.2"

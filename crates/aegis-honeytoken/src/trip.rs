@@ -7,9 +7,9 @@
 //! Por eso el disparo exige que aparezca un marcador REGISTRADO: no "algo que
 //! parece una credencial", sino UNO DE NUESTROS senuelos, atribuible.
 
+use crate::destino::Destino;
 use crate::registry::Registro;
 use crate::token::{Atribucion, Marcador};
-use std::collections::HashMap;
 
 /// Un evento de kernel ya normalizado que podria haber tocado un token.
 #[derive(Debug, Clone)]
@@ -59,14 +59,21 @@ pub struct Disparo {
     pub como: ComoDisparo,
 }
 
-/// Clasifica un evento. `rutas_senuelo` mapea la ruta de cada honey-file a su
-/// atribucion. Devuelve todos los disparos (una lectura de memoria puede llevarse
-/// varios tokens de una vez).
-pub fn clasificar(
-    evento: &Evento,
-    registro: &Registro,
-    rutas_senuelo: &HashMap<String, Atribucion>,
-) -> Vec<Disparo> {
+/// Clasifica un evento contra el registro, que es la **unica** fuente.
+///
+/// Devuelve todos los disparos: una lectura de memoria puede llevarse varios
+/// tokens de una vez, y salen en el orden en que aparecen en los bytes.
+///
+/// # El marcador de un honey-file no se inventa
+///
+/// La version anterior rellenaba con `Marcador([0u8; 16])` el disparo de una
+/// apertura de fichero, porque la ruta venia de una tabla aparte que no sabia el
+/// marcador. Eso es un disparo que dice «se toco un senuelo» y no dice cual —y
+/// ademas, todos los rellenos de ceros son el mismo marcador, asi que dos
+/// senuelos distintos producian disparos indistinguibles—. Ahora la ruta ES el
+/// destino ([`Destino::Fichero`]) y el registro devuelve el marcador autentico.
+#[must_use]
+pub fn clasificar(evento: &Evento, registro: &Registro) -> Vec<Disparo> {
     match evento {
         Evento::LecturaMemoria { lector, contenido } => registro
             .buscar_en(contenido)
@@ -80,19 +87,16 @@ pub fn clasificar(
             })
             .collect(),
         Evento::AperturaFichero { lector, ruta } => {
-            match rutas_senuelo.get(ruta) {
-                Some(atrib) => {
-                    // El honey-file no tiene un marcador embebido por si mismo;
-                    // se acuna uno derivado de su atribucion para trazarlo igual.
-                    vec![Disparo {
-                        token: atrib.clone(),
-                        marcador: Marcador([0u8; 16]),
-                        como: ComoDisparo::FicheroAbierto {
-                            lector: lector.clone(),
-                            ruta: ruta.clone(),
-                        },
-                    }]
-                }
+            let destino = Destino::Fichero { ruta: ruta.clone() };
+            match registro.en_destino(&destino) {
+                Some((marcador, atrib)) => vec![Disparo {
+                    token: atrib.clone(),
+                    marcador,
+                    como: ComoDisparo::FicheroAbierto {
+                        lector: lector.clone(),
+                        ruta: ruta.clone(),
+                    },
+                }],
                 None => Vec::new(),
             }
         }

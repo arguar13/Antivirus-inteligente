@@ -89,6 +89,7 @@ fn config_local(servicios: &[DecoyKind]) -> DecoyConfig {
         speak_timeout: Duration::from_millis(80),
         max_evidence: 128,
         max_per_poll: 16,
+        cebo: String::new(),
     }
 }
 
@@ -100,6 +101,8 @@ fn interaccion(peer: &str, kind: DecoyKind, ts: u64) -> Interaction {
         port: kind.default_port(),
         ts_ns: ts,
         evidence: Vec::new(),
+        revelado: Vec::new(),
+        turnos: 0,
     }
 }
 

@@ -24,6 +24,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
+use crate::dialogo::{Conversacion, Dialogo, Revelacion};
+use crate::dialogos::{acceso, bases, industrial, web};
+use crate::limitador::{Cuentas, Limitador, Transporte};
+use std::cell::RefCell;
+
 /// Servicio que se finge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DecoyKind {
@@ -45,10 +50,30 @@ pub enum DecoyKind {
     Vnc,
     /// WinRM (5985).
     WinRm,
+    /// HTTP (80): el unico puerto que esta abierto en todas partes.
+    Http,
+    /// HTTPS (443): del saludo TLS salen el nombre buscado y la huella.
+    Https,
+    /// Microsoft SQL Server (1433).
+    MsSql,
+    /// Redis (6379): el que se expone sin contrasena.
+    Redis,
+    /// MongoDB (27017).
+    MongoDb,
+    /// Modbus/TCP (502): el automata mas extendido del mundo.
+    Modbus,
+    /// S7comm (102): con el que se para una linea Siemens.
+    S7Comm,
+    /// DNP3 (20000): distribucion electrica y agua.
+    Dnp3,
+    /// BACnet/IP (47808), **sobre UDP**: climatizacion y edificios.
+    Bacnet,
+    /// OPC-UA (4840): la pasarela entre la planta y la oficina.
+    OpcUa,
 }
 
 /// Todos los senuelos del catalogo.
-pub const CATALOGO: [DecoyKind; 9] = [
+pub const CATALOGO: [DecoyKind; 19] = [
     DecoyKind::Ssh,
     DecoyKind::Smb,
     DecoyKind::Rdp,
@@ -58,6 +83,25 @@ pub const CATALOGO: [DecoyKind; 9] = [
     DecoyKind::Postgres,
     DecoyKind::Vnc,
     DecoyKind::WinRm,
+    DecoyKind::Http,
+    DecoyKind::Https,
+    DecoyKind::MsSql,
+    DecoyKind::Redis,
+    DecoyKind::MongoDb,
+    DecoyKind::Modbus,
+    DecoyKind::S7Comm,
+    DecoyKind::Dnp3,
+    DecoyKind::Bacnet,
+    DecoyKind::OpcUa,
+];
+
+/// Los senuelos industriales, que son los que se ponen en una pasarela de planta.
+pub const INDUSTRIALES: [DecoyKind; 5] = [
+    DecoyKind::Modbus,
+    DecoyKind::S7Comm,
+    DecoyKind::Dnp3,
+    DecoyKind::Bacnet,
+    DecoyKind::OpcUa,
 ];
 
 impl DecoyKind {
@@ -73,6 +117,16 @@ impl DecoyKind {
             DecoyKind::Postgres => 5432,
             DecoyKind::Vnc => 5900,
             DecoyKind::WinRm => 5985,
+            DecoyKind::Http => 80,
+            DecoyKind::Https => 443,
+            DecoyKind::MsSql => 1433,
+            DecoyKind::Redis => 6379,
+            DecoyKind::MongoDb => 27017,
+            DecoyKind::Modbus => 502,
+            DecoyKind::S7Comm => 102,
+            DecoyKind::Dnp3 => 20000,
+            DecoyKind::Bacnet => 47808,
+            DecoyKind::OpcUa => 4840,
         }
     }
 
@@ -88,6 +142,65 @@ impl DecoyKind {
             DecoyKind::Postgres => "postgres",
             DecoyKind::Vnc => "vnc",
             DecoyKind::WinRm => "winrm",
+            DecoyKind::Http => "http",
+            DecoyKind::Https => "https",
+            DecoyKind::MsSql => "mssql",
+            DecoyKind::Redis => "redis",
+            DecoyKind::MongoDb => "mongodb",
+            DecoyKind::Modbus => "modbus",
+            DecoyKind::S7Comm => "s7comm",
+            DecoyKind::Dnp3 => "dnp3",
+            DecoyKind::Bacnet => "bacnet",
+            DecoyKind::OpcUa => "opcua",
+        }
+    }
+
+    /// Por donde habla este servicio.
+    ///
+    /// BACnet es el unico de UDP del catalogo, y por eso es el unico al que se le
+    /// aplica la cota de amplificacion. Ver [`crate::limitador`].
+    pub fn transporte(self) -> Transporte {
+        match self {
+            DecoyKind::Bacnet => Transporte::Udp,
+            _ => Transporte::Tcp,
+        }
+    }
+
+    /// El dialogo de este servicio, listo para conversar.
+    ///
+    /// # Por que hay uno para cada uno y no un dialogo generico
+    ///
+    /// Porque un senuelo que conteste lo mismo a todo se distingue de un servicio
+    /// real en el primer turno, y entonces el atacante se va y no se averigua
+    /// nada. Lo que hace util a un senuelo no es que el puerto responda: es que
+    /// responda **como respondería ese servicio**, lo bastante para que el
+    /// visitante siga hablando.
+    ///
+    /// `cebo` es el texto atribuible que el senuelo entrega a quien llegue lo
+    /// bastante lejos; los que no sirven contenido lo ignoran. Ver
+    /// [`crate::plantado`].
+    pub fn dialogo(self, cebo: String) -> Box<dyn Dialogo> {
+        match self {
+            DecoyKind::Ssh => Box::new(acceso::Ssh::nuevo()),
+            DecoyKind::Telnet => Box::new(acceso::Telnet::nuevo()),
+            DecoyKind::Ftp => Box::new(acceso::Ftp::nuevo()),
+            DecoyKind::Vnc => Box::new(acceso::Vnc::nuevo()),
+            DecoyKind::Rdp => Box::new(acceso::Rdp::nuevo()),
+            DecoyKind::Smb => Box::new(acceso::Smb::nuevo()),
+            // WinRM es HTTP con otro puerto y otra ruta: el dialogo es el mismo,
+            // y duplicarlo solo daria dos sitios donde arreglar el mismo fallo.
+            DecoyKind::Http | DecoyKind::WinRm => Box::new(web::Http::con_cebo(cebo)),
+            DecoyKind::Https => Box::new(web::Tls::nuevo()),
+            DecoyKind::MySql => Box::new(bases::Mysql::nuevo()),
+            DecoyKind::Postgres => Box::new(bases::Postgres::nuevo()),
+            DecoyKind::MsSql => Box::new(bases::Mssql::nuevo()),
+            DecoyKind::Redis => Box::new(bases::Redis::con_cebo(cebo)),
+            DecoyKind::MongoDb => Box::new(bases::Mongo::nuevo()),
+            DecoyKind::Modbus => Box::new(industrial::Modbus::nuevo()),
+            DecoyKind::S7Comm => Box::new(industrial::S7::nuevo()),
+            DecoyKind::Dnp3 => Box::new(industrial::Dnp3::nuevo()),
+            DecoyKind::Bacnet => Box::new(industrial::Bacnet::nuevo()),
+            DecoyKind::OpcUa => Box::new(industrial::OpcUa::nuevo()),
         }
     }
 
@@ -101,15 +214,12 @@ impl DecoyKind {
     ///
     /// Los protocolos binarios (SMB, RDP, VNC) no saludan con texto; para ellos
     /// se acepta y se escucha, que es lo que hace el servicio real.
-    pub fn banner(self) -> Option<&'static [u8]> {
-        match self {
-            DecoyKind::Ssh => Some(b"SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.4\r\n"),
-            DecoyKind::Ftp => Some(b"220 (vsFTPd 3.0.5)\r\n"),
-            DecoyKind::Telnet => Some(b"\r\nUbuntu 22.04.3 LTS\r\nlogin: "),
-            DecoyKind::MySql => Some(b"J\x00\x00\x00\x0a8.0.35\x00"),
-            DecoyKind::Postgres => None,
-            DecoyKind::Smb | DecoyKind::Rdp | DecoyKind::Vnc | DecoyKind::WinRm => None,
-        }
+    pub fn banner(self) -> Option<Vec<u8>> {
+        // Sale del DIALOGO y no de una tabla aparte. Con dos fuentes, el saludo
+        // que manda el senuelo y el que su propia maquina de estados espera
+        // haber mandado se separan en cuanto alguien toca uno de los dos — y un
+        // servicio que saluda de una forma y sigue de otra se nota al instante.
+        self.dialogo(String::new()).saludo()
     }
 }
 
@@ -131,12 +241,45 @@ pub struct Interaction {
     /// Es la evidencia: distingue un barrido de puertos —que conecta y cierra—
     /// de un intento de explotacion, que manda una peticion concreta.
     pub evidence: Vec<u8>,
+    /// Lo que el visitante revelo de si mismo durante la conversacion.
+    ///
+    /// **Es el producto del senuelo de alta interaccion.** Los bytes crudos de
+    /// `evidence` dicen que alguien hablo; esto dice QUE dijo: con que usuario,
+    /// con que clave, que ruta pidio y si mando escribir. Ver
+    /// [`crate::dialogo::Revelacion`].
+    pub revelado: Vec<Revelacion>,
+    /// Cuantos turnos duro la conversacion.
+    ///
+    /// Un turno es un escaner. Cinco es alguien que se ha sentado a probar, y esa
+    /// diferencia decide si merece la pena mirarlo hoy o el lunes.
+    pub turnos: u32,
 }
 
 impl Interaction {
     /// Indica si el cliente llego a enviar datos.
     pub fn spoke(&self) -> bool {
         !self.evidence.is_empty()
+    }
+
+    /// Si el visitante mando alguna orden que cambia el estado del dispositivo.
+    ///
+    /// En un senuelo industrial es la diferencia entre alguien inventariando y
+    /// alguien intentando actuar sobre un proceso fisico.
+    pub fn intento_escribir(&self) -> bool {
+        self.revelado
+            .iter()
+            .any(crate::dialogo::Revelacion::es_grave)
+    }
+
+    /// Las credenciales que probo.
+    pub fn credenciales(&self) -> Vec<(String, String)> {
+        self.revelado
+            .iter()
+            .filter_map(|r| match r {
+                Revelacion::Credencial { usuario, clave } => Some((usuario.clone(), clave.clone())),
+                _ => None,
+            })
+            .collect()
     }
 }
 
@@ -162,6 +305,13 @@ pub struct DecoyConfig {
     /// Acota el trabajo de un ciclo: sin este limite, una inundacion contra los
     /// senuelos convertiria el detector en el objetivo.
     pub max_per_poll: usize,
+    /// El texto atribuible que los senuelos que sirven contenido entregan.
+    ///
+    /// Sale de [`crate::plantado::Plantacion`] y es lo que hace que llevarse algo
+    /// del senuelo deje rastro: cuando ese texto reaparezca en otro sitio, se
+    /// sabra que salio de aqui y de que puerto. Vacio, los senuelos sirven un
+    /// `404` y siguen valiendo para contar, pero no para atribuir.
+    pub cebo: String,
 }
 
 impl Default for DecoyConfig {
@@ -175,6 +325,7 @@ impl Default for DecoyConfig {
             speak_timeout: Duration::from_millis(200),
             max_evidence: 512,
             max_per_poll: 64,
+            cebo: String::new(),
         }
     }
 }
@@ -209,6 +360,15 @@ pub struct DecoyNet {
     listeners: Vec<(DecoyKind, u16, TcpListener)>,
     skipped: Vec<Skipped>,
     config: DecoyConfig,
+    /// **Uno para toda la red.** El ritmo por origen y el cupo de bytes solo
+    /// significan algo si sobreviven a que el visitante cuelgue y vuelva a
+    /// llamar; con un limitador por conexion, abrir otra da el cubo lleno. Ver
+    /// [`crate::limitador::Limitador`].
+    ///
+    /// Va en una celda porque `poll` toma `&self` —es la forma del motor— y el
+    /// limitador tiene que anotar. No hay hilos de por medio: la red se atiende
+    /// desde el bucle del motor, en uno solo.
+    limitador: RefCell<Limitador>,
 }
 
 impl DecoyNet {
@@ -257,7 +417,17 @@ impl DecoyNet {
             listeners,
             skipped,
             config,
+            limitador: RefCell::new(Limitador::nuevo()),
         }
+    }
+
+    /// Lo que el limitador ha contado para toda la red.
+    ///
+    /// Es donde se ve si alguien esta intentando usar los senuelos como
+    /// amplificador: `recortadas` mayor que cero significa que lo intento.
+    #[must_use]
+    pub fn cuentas(&self) -> Cuentas {
+        self.limitador.borrow().cuentas()
     }
 
     /// Senuelos levantados, con el puerto real en el que escuchan.
@@ -322,7 +492,17 @@ impl DecoyNet {
         salida
     }
 
-    /// Saluda, escucha un momento y cierra.
+    /// Conversa con quien ha llamado, hasta que el dialogo cierre.
+    ///
+    /// # Por que se conversa y no se saluda y se corta
+    ///
+    /// Porque saludar y cortar solo cuenta escaneos. Lo que interesa —con que
+    /// credenciales viene, que ruta pide, si manda escribir— se dice en el tercer
+    /// o cuarto turno, no en el primero. Ver [`crate::dialogo`].
+    ///
+    /// La conversacion la lleva [`Conversacion`], que es lo unico que escribe al
+    /// cable: pasa por el limitador y por tanto **no hay forma de que un senuelo
+    /// amplifique**, lo escriba quien lo escriba.
     fn atender(
         &self,
         kind: DecoyKind,
@@ -331,19 +511,48 @@ impl DecoyNet {
         peer: SocketAddr,
         now_ns: u64,
     ) -> Interaction {
-        if let Some(b) = kind.banner() {
+        let mut charla = Conversacion::nueva(kind.dialogo(self.config.cebo.clone()));
+        let origen = match peer.ip() {
+            IpAddr::V4(v) => u128::from(u32::from(v)),
+            IpAddr::V6(v) => u128::from(v),
+        };
+
+        let saludo = charla.saludo();
+        if !saludo.is_empty() {
             // Un error escribiendo el saludo no invalida la deteccion: la
             // conexion ya ocurrio, que es lo que importa.
-            let _ = stream.write_all(b);
+            let _ = stream.write_all(&saludo);
         }
         let _ = stream.set_read_timeout(Some(self.config.speak_timeout));
 
-        let mut buf = vec![0u8; self.config.max_evidence];
-        let leidos = stream.read(&mut buf).unwrap_or(0);
-        buf.truncate(leidos);
+        let mut evidencia = Vec::new();
+        let mut buf = vec![0u8; 8192];
+        loop {
+            let leidos = match stream.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
+            };
+            let entrada = &buf[..leidos];
+            // La evidencia se acota: lo que manda el visitante lo decide el
+            // visitante, y guardarlo entero es dejarle elegir la memoria.
+            if evidencia.len() < self.config.max_evidence {
+                let cabe = self.config.max_evidence - evidencia.len();
+                evidencia.extend_from_slice(&entrada[..leidos.min(cabe)]);
+            }
+            let (salida, _) = {
+                let mut lim = self.limitador.borrow_mut();
+                charla.turno(&mut lim, origen, now_ns, entrada)
+            };
+            if !salida.is_empty() && stream.write_all(&salida).is_err() {
+                break;
+            }
+            if charla.como_acabo() != crate::dialogo::Final::Abierta {
+                break;
+            }
+        }
 
-        // Se cierra en cuanto se tiene la evidencia: mantener abierta la
-        // conexion de un atacante consume un descriptor por nada.
+        // Se cierra en cuanto acaba: mantener abierta la conexion de un atacante
+        // consume un descriptor por nada.
         let _ = stream.shutdown(std::net::Shutdown::Both);
 
         Interaction {
@@ -352,7 +561,9 @@ impl DecoyNet {
             kind,
             port,
             ts_ns: now_ns,
-            evidence: buf,
+            evidence: evidencia,
+            revelado: charla.revelado().to_vec(),
+            turnos: charla.turnos(),
         }
     }
 }

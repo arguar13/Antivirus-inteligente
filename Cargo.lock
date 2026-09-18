@@ -111,6 +111,7 @@ dependencies = [
 name = "aegis-deception"
 version = "0.1.0"
 dependencies = [
+ "aegis-honeytoken",
  "aegis-net",
  "aegis-scal",
  "libc",

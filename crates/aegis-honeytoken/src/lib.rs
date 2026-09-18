@@ -34,6 +34,7 @@
 #![deny(unsafe_code)]
 
 pub mod credformat;
+pub mod destino;
 pub mod honeyfile;
 pub mod memtoken;
 pub mod registry;
@@ -46,6 +47,7 @@ pub mod trip;
 pub mod inyeccion;
 
 pub use credformat::{render, Artefacto};
+pub use destino::Destino;
 pub use registry::Registro;
 pub use respuesta::{decidir_respuesta, Respuesta};
 pub use token::{Acunador, Atribucion, Marcador};

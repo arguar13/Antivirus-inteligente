@@ -11,14 +11,9 @@ use aegis_honeytoken::registry::Registro;
 use aegis_honeytoken::respuesta::decidir_respuesta;
 use aegis_honeytoken::token::{Acunador, Atribucion, Marcador};
 use aegis_honeytoken::trip::{clasificar, ComoDisparo, Evento};
-use std::collections::HashMap;
 
 fn atrib() -> Atribucion {
-    Atribucion {
-        host: "web-07".to_string(),
-        proceso: "sshd".to_string(),
-        token_id: 42,
-    }
+    Atribucion::en_memoria("web-07", "sshd", 42)
 }
 
 // --- Marcador atribuible ----------------------------------------------------
@@ -118,7 +113,6 @@ fn leer_el_token_de_la_memoria_dispara_con_atribucion() {
             contenido: volcado,
         },
         &reg,
-        &HashMap::new(),
     );
     assert_eq!(disparos.len(), 1, "el marcador aparece: un disparo");
     assert_eq!(disparos[0].token, atrib(), "atribuido al senuelo correcto");
@@ -145,7 +139,6 @@ fn memoria_sin_marcador_no_dispara() {
             contenido: vec![0x00; 4096],
         },
         &reg,
-        &HashMap::new(),
     );
     assert!(
         disparos.is_empty(),
@@ -167,18 +160,26 @@ fn abrir_un_honey_file_dispara_y_se_siembra_de_verdad() {
     let en_disco = std::fs::read_to_string(&hf.ruta).unwrap();
     assert!(en_disco.contains(&hf.marcador.hex()));
 
-    let mut rutas = HashMap::new();
-    rutas.insert(ruta.to_str().unwrap().to_string(), atrib());
+    // El registro es la UNICA fuente: se apunta el token con su destino, que es
+    // la ruta, y de ahi sale el marcador autentico del disparo.
+    let en_fichero = Atribucion::en_fichero("web-07", ruta.to_str().unwrap(), 42);
+    let m_fichero = a.acunar(&en_fichero);
+    let mut reg = Registro::new();
+    reg.registrar(&m_fichero, en_fichero.clone());
 
     let disparos = clasificar(
         &Evento::AperturaFichero {
             lector: "curioso".to_string(),
             ruta: ruta.to_str().unwrap().to_string(),
         },
-        &Registro::new(),
-        &rutas,
+        &reg,
     );
     assert_eq!(disparos.len(), 1);
+    assert_eq!(disparos[0].token, en_fichero);
+    assert_eq!(
+        disparos[0].marcador, m_fichero,
+        "el disparo de un fichero lleva su marcador de verdad, no un relleno de ceros"
+    );
     let r = decidir_respuesta(&disparos[0]);
     assert!(r.aislar && !r.volcar_memoria && r.severidad == 3);
 

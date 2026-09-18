@@ -683,6 +683,27 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "captura" ]; then
     fi
 fi
 
+# AegisLure (FASE 91): red de senuelos atribuible con procedencia por destino.
+#
+# Un senuelo es una capacidad nueva del producto y, por tanto, una capacidad nueva
+# para quien lo comprometa: puede usarse como amplificador contra un tercero, como
+# forma de agotar el agente y como via de entrada. Esta puerta comprueba que las
+# tres estan paradas por construccion —la cota de amplificacion la aplica el
+# envoltorio, el limitador es de la red entera, y los dialogos NO PUEDEN ejecutar
+# nada porque no hay nada que ejecutar— y que cada senuelo entrega un token
+# distinto atado a su sitio, que es lo que contesta «por donde entraron».
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "senuelos" ]; then
+    printf '%s==>%s AegisLure · senuelos que conversan, con procedencia por destino\n' "$GRIS" "$FIN"
+    if ./tools/verificar-senuelos.sh > /tmp/aegis-senuelos-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-senuelos-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-senuelos-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo

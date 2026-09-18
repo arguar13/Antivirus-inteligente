@@ -401,6 +401,8 @@ fn caos_la_inundacion_no_hace_crecer_la_memoria_sin_limite() {
             port: 22,
             ts_ns: i as u64,
             evidence: Vec::new(),
+            revelado: Vec::new(),
+            turnos: 0,
         });
     }
     assert!(sensor.tracked() <= 256, "seguidos: {}", sensor.tracked());
@@ -577,6 +579,7 @@ fn caos_ningun_sondeo_se_queda_esperando_para_siempre() {
         speak_timeout: Duration::from_millis(50),
         max_evidence: 64,
         max_per_poll: 8,
+        cebo: String::new(),
     });
     let inicio = Instant::now();
     assert!(net.poll(Duration::from_millis(100), 0).is_empty());

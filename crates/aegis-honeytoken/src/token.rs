@@ -15,27 +15,77 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use zeroize::Zeroize;
 
+use crate::destino::Destino;
+
 type HmacSha256 = Hmac<Sha256>;
 
-/// A quien y a que se ata un honey-token.
+/// A quien, a que y **a donde** se ata un honey-token.
+///
+/// # Por que el destino va dentro y no en una tabla al lado
+///
+/// Porque una tabla al lado se desincroniza, se pierde con la maquina y se la
+/// lleva por delante el atacante que borre registros. Metiendo el destino en el
+/// computo del marcador, la credencial sembrada en `/root/.pgpass` y la sembrada
+/// en la fila 7 de `clientes` son credenciales **distintas**: cuando una aparece,
+/// el sitio del que salio esta dentro de ella y no hace falta consultar nada.
+///
+/// Es lo que convierte «te han robado una credencial» —que no sirve de mucho— en
+/// «te han robado la que estaba en este sitio», que es por donde se empieza a
+/// tirar del hilo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Atribucion {
     /// El host donde se sembro.
     pub host: String,
-    /// El proceso (o fichero) donde se coloco.
-    pub proceso: String,
-    /// Identificador del token dentro de ese host/proceso.
+    /// **Donde** se coloco. Ver [`Destino`].
+    pub destino: Destino,
+    /// Identificador del token dentro de ese host y ese destino.
     pub token_id: u32,
 }
 
 impl Atribucion {
+    /// Un token sembrado en la memoria de un proceso.
+    #[must_use]
+    pub fn en_memoria(host: &str, proceso: &str, token_id: u32) -> Atribucion {
+        Atribucion {
+            host: host.to_owned(),
+            destino: Destino::Memoria {
+                proceso: proceso.to_owned(),
+            },
+            token_id,
+        }
+    }
+
+    /// Un token sembrado en un fichero.
+    #[must_use]
+    pub fn en_fichero(host: &str, ruta: &str, token_id: u32) -> Atribucion {
+        Atribucion {
+            host: host.to_owned(),
+            destino: Destino::Fichero {
+                ruta: ruta.to_owned(),
+            },
+            token_id,
+        }
+    }
+
+    /// Como se lee en una alerta: de que maquina y de que sitio salio.
+    #[must_use]
+    pub fn frase(&self) -> String {
+        format!(
+            "el senuelo {} de {}, sembrado en {}",
+            self.token_id,
+            self.host,
+            self.destino.frase()
+        )
+    }
+
     /// Los bytes canonicos sobre los que se computa el HMAC. Los campos van
-    /// separados por un byte nulo para que ("a","bc") y ("ab","c") no colisionen.
+    /// separados por un byte nulo para que ("a","bc") y ("ab","c") no colisionen,
+    /// y el destino aporta los suyos ya etiquetados por clase.
     fn bytes(&self) -> Vec<u8> {
         let mut v = Vec::new();
         v.extend_from_slice(self.host.as_bytes());
         v.push(0);
-        v.extend_from_slice(self.proceso.as_bytes());
+        v.extend_from_slice(&self.destino.bytes());
         v.push(0);
         v.extend_from_slice(&self.token_id.to_be_bytes());
         v

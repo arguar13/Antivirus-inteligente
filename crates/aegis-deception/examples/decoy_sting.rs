@@ -37,6 +37,7 @@ fn main() -> std::process::ExitCode {
                 speak_timeout: Duration::from_millis(100),
                 max_evidence: 256,
                 max_per_poll: 32,
+                cebo: String::new(),
             },
             sensor: SensorConfig::default(),
             allowlist: Vec::new(),

@@ -20,7 +20,7 @@
 #
 # LAS TRECE, Y DE DONDE SALEN
 # ---------------------------
-# Ocho estructurales, una de autoataque con sus ocho capacidades, y cuatro doctrinales
+# Ocho estructurales, una de autoataque con sus nueve capacidades, y cuatro doctrinales
 # que el producto ya sostiene y que aqui se comprueban mecanicamente en vez de
 # afirmarse.
 #
@@ -310,7 +310,7 @@ fi
 # es una comprobacion de robustez generica: cada una es el ataque concreto que
 # esa capacidad habilita, y tiene que fallar EN EL INTENTO.
 if toca 9; then
-    titulo 9 "AUTOATAQUE · ocho capacidades usadas contra el producto"
+    titulo 9 "AUTOATAQUE · nueve capacidades usadas contra el producto"
     # Cada fila: <nombre del ataque> ; <ejecuciones separadas por «+»>, donde cada
     # ejecucion es <raiz|servidor>|<paquete>|<destino>|<filtro>.
     declare -a ATAQUES=(
@@ -326,6 +326,12 @@ if toca 9; then
         # una forma de llenar la maquina: el contenido en el anillo y el SOBRE en
         # el indice, que se anota tambien del trafico que no se guarda.
         "el capturador como sitio del que robar;raiz|aegis-captura|--test autoataque|+raiz|aegis-captura|--test techo_indice|"
+        # El senuelo es una trampa, y una trampa se puede volver: como amplificador
+        # contra un tercero —el origen de UDP se falsifica—, como forma de agotar
+        # al agente que la puso, y como via de entrada. La tercera es la que hunde
+        # a los tarros de miel clasicos, y aqui se para no teniendo nada que
+        # encarcelar.
+        "el senuelo como trampa vuelta del reves;raiz|aegis-deception|--test autoataque_senuelos|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
@@ -352,7 +358,7 @@ if toca 9; then
         fi
     done
     if [ ${#ROTOS[@]} -eq 0 ]; then
-        veredicto 9 "autoataque" si "las ocho capacidades resisten su propio ataque ($TOTAL_PRUEBAS pruebas)"
+        veredicto 9 "autoataque" si "las nueve capacidades resisten su propio ataque ($TOTAL_PRUEBAS pruebas)"
         porque "Cada capacidad que se añade a un producto de seguridad es una capacidad"
         porque "nueva para quien lo comprometa. El disector que lee todo el trafico es un"
         porque "amplificador; el IPS que corta flujos es un boton de denegacion de"
