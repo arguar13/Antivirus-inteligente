@@ -176,6 +176,17 @@ corregidos de raíz.
 | El limitador vivía en la conversación, así que colgar y volver a llamar daba cubo nuevo | limitador compartido por la red, pasado por parámetro |
 | El barrido de amplificación medía la **media** y todo salía x0.00 | se mide el **peor mensaje**, y el corpus incluye mensajes válidos de cada protocolo — sin ellos sólo se medía el camino de rechazo |
 
+Y uno más, encontrado repasando los desplazamientos de cada protocolo contra su
+norma, que **ninguna prueba podía atrapar**:
+
+| Defecto | Corrección |
+|---|---|
+| El señuelo de MSSQL leía el usuario del `LOGIN7` en el byte 48 y la contraseña en el 52, que son `ibAppName` e `ibServerName`: habría dado el nombre de la aplicación como usuario y el del servidor des-ofuscado como contraseña — basura, justo donde esta fase afirma entregar la credencial en claro. **Y la prueba pasaba porque construía el paquete con los mismos desplazamientos equivocados**: comprobaba que el código coincide consigo mismo | los cinco campos con nombre (`IB_HOST_NAME` 36, `IB_USER_NAME` 40, `IB_PASSWORD` 44, `IB_APP_NAME` 48, `IB_SERVER_NAME` 52) y la prueba reconstruida desde la norma, con **texto distinto en cada uno**: leer el que no es devuelve otro texto y se cae. Comprobado volviendo a poner el 48: la prueba falla |
+
+De paso, los otros tres campos se aprovechan: el nombre de aplicación identifica
+la herramienta (`sqlmap`, `SSMS`, `.Net SqlClient`) y el de servidor dice a qué
+creían conectarse, que a veces es un nombre interno que no deberían conocer.
+
 Y en el registro de tokens, dos más, encontrados leyendo el código heredado de la
 FASE 52:
 

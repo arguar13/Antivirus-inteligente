@@ -300,6 +300,35 @@ pub struct Mssql {
     dicho: Vec<Revelacion>,
 }
 
+// Los desplazamientos de los campos variables del `LOGIN7`, contados desde el
+// principio del registro —es decir, tras los 8 bytes de cabecera TDS—.
+//
+// # Por que van con nombre y no como numeros dentro de la funcion
+//
+// Porque la primera version los puso a ojo y se equivoco en ocho bytes: leia el
+// usuario en 48 y la clave en 52, que son `ibAppName` e `ibServerName`. El senuelo
+// habria dado el nombre de la aplicacion como usuario y el del servidor
+// des-ofuscado como contrasena — basura, justo donde esta fase afirma entregar la
+// credencial en claro.
+//
+// Y no lo atrapo ninguna prueba, porque la prueba construia el paquete con los
+// mismos desplazamientos equivocados: comprobaba que el codigo coincide consigo
+// mismo, que es no comprobar nada. Con los cinco campos nombrados y colocados en su
+// sitio, leer el que no es devuelve otro texto y la prueba se cae.
+//
+// La parte fija va de `Length` a `ClientLCID` y mide 36 bytes; de ahi en adelante
+// cada campo son dos `u16`: desplazamiento y longitud EN CARACTERES.
+/// `ibHostName` — la maquina desde la que se conecta.
+const IB_HOST_NAME: usize = 36;
+/// `ibUserName` — el usuario que prueba.
+const IB_USER_NAME: usize = 40;
+/// `ibPassword` — la contrasena, ofuscada.
+const IB_PASSWORD: usize = 44;
+/// `ibAppName` — la aplicacion cliente.
+const IB_APP_NAME: usize = 48;
+/// `ibServerName` — el servidor al que creia conectarse.
+const IB_SERVER_NAME: usize = 52;
+
 impl Mssql {
     /// Un senuelo de MSSQL nuevo.
     #[must_use]
@@ -359,13 +388,43 @@ impl Mssql {
             }
             c[off..off + largo].to_vec()
         };
-        // 48: nombre de usuario, 52: contrasena (offsets del LOGIN7).
-        let usuario = leer(48);
-        let clave = Mssql::clave_en_claro(&crudo(52));
+        let usuario = leer(IB_USER_NAME);
+        let clave = Mssql::clave_en_claro(&crudo(IB_PASSWORD));
         if usuario.is_empty() && clave.is_empty() {
             return None;
         }
         Some((usuario, clave))
+    }
+
+    /// Los otros tres campos en claro del `LOGIN7`: maquina, aplicacion y el
+    /// servidor al que creia conectarse.
+    ///
+    /// La aplicacion es la mas util de las tres: la pone la biblioteca cliente
+    /// —`SQL Server Management Studio`, `sqlmap`, `.Net SqlClient Data Provider`—
+    /// y dice con que estan mirando. El nombre de servidor dice a que creian
+    /// llegar, que a veces es un nombre interno que no deberian conocer.
+    #[must_use]
+    pub fn maquina_app_y_servidor(datos: &[u8]) -> Option<(String, String, String)> {
+        if datos.len() < 8 + 94 || datos[0] != 0x10 {
+            return None;
+        }
+        let c = &datos[8..];
+        let leer = |desp: usize| -> String {
+            if desp + 4 > c.len() {
+                return String::new();
+            }
+            let off = u16::from_le_bytes([c[desp], c[desp + 1]]) as usize;
+            let largo = u16::from_le_bytes([c[desp + 2], c[desp + 3]]) as usize * 2;
+            if largo == 0 || largo > MAX_CAMPO * 2 || off + largo > c.len() {
+                return String::new();
+            }
+            let u: Vec<u16> = c[off..off + largo]
+                .chunks_exact(2)
+                .map(|p| u16::from_le_bytes([p[0], p[1]]))
+                .collect();
+            String::from_utf16_lossy(&u)
+        };
+        Some((leer(IB_HOST_NAME), leer(IB_APP_NAME), leer(IB_SERVER_NAME)))
     }
 }
 
@@ -402,6 +461,20 @@ impl Dialogo for Mssql {
             Some(0x10) => {
                 if let Some((usuario, clave)) = Mssql::usuario_y_clave(entrada) {
                     self.dicho.push(Revelacion::Credencial { usuario, clave });
+                }
+                if let Some((maquina, app, servidor)) = Mssql::maquina_app_y_servidor(entrada) {
+                    if !app.is_empty() {
+                        self.dicho.push(Revelacion::Herramienta {
+                            texto: format!(
+                                "aplicacion cliente «{app}» desde la maquina «{maquina}»"
+                            ),
+                        });
+                    }
+                    if !servidor.is_empty() {
+                        self.dicho.push(Revelacion::Peticion {
+                            que: format!("creia conectarse a «{servidor}»"),
+                        });
+                    }
                 }
                 // Un token de error de TDS con «Login failed».
                 let texto = "Login failed for user.";
@@ -789,41 +862,144 @@ mod pruebas {
         assert_eq!(Mssql::clave_en_claro(&ofuscada), claro);
     }
 
-    #[test]
-    fn mssql_saca_usuario_y_clave_del_login7() {
-        let usuario = "sa";
-        let clave = "Admin!2024";
+    /// Construye un `LOGIN7` con los CINCO campos variables en su sitio, cada uno
+    /// con un texto distinto.
+    ///
+    /// Que los cinco lleven texto distinto es lo que hace que la prueba sirva: la
+    /// version anterior solo colocaba usuario y clave, y los colocaba en los
+    /// mismos desplazamientos equivocados que leia el codigo, asi que pasaba
+    /// comprobando que el codigo coincide consigo mismo. Con los cinco puestos
+    /// segun la norma, leer el que no es devuelve otro texto y la prueba se cae.
+    fn login7(maquina: &str, usuario: &str, clave: &str, app: &str, servidor: &str) -> Vec<u8> {
         let u16le = |s: &str| -> Vec<u8> { s.encode_utf16().flat_map(u16::to_le_bytes).collect() };
         let ofuscar =
             |s: &str| -> Vec<u8> { u16le(s).iter().map(|b| b.rotate_left(4) ^ 0xA5).collect() };
-        let (cu, cc) = (u16le(usuario), ofuscar(clave));
 
+        // La parte fija del LOGIN7 llega hasta el byte 94; los campos variables van
+        // detras, y cada par (desplazamiento, longitud en CARACTERES) apunta ahi.
         let mut cuerpo = vec![0u8; 94];
-        let mut off = 94u16;
-        cuerpo[48..50].copy_from_slice(&off.to_le_bytes());
-        cuerpo[50..52].copy_from_slice(&(usuario.len() as u16).to_le_bytes());
-        off += cu.len() as u16;
-        cuerpo[52..54].copy_from_slice(&off.to_le_bytes());
-        cuerpo[54..56].copy_from_slice(&(clave.len() as u16).to_le_bytes());
-        cuerpo.extend_from_slice(&cu);
-        cuerpo.extend_from_slice(&cc);
+        let mut datos = Vec::new();
+        let poner =
+            |cuerpo: &mut Vec<u8>, datos: &mut Vec<u8>, desp: usize, bytes: &[u8], chars: usize| {
+                let off = (94 + datos.len()) as u16;
+                cuerpo[desp..desp + 2].copy_from_slice(&off.to_le_bytes());
+                cuerpo[desp + 2..desp + 4].copy_from_slice(&(chars as u16).to_le_bytes());
+                datos.extend_from_slice(bytes);
+            };
+        poner(
+            &mut cuerpo,
+            &mut datos,
+            IB_HOST_NAME,
+            &u16le(maquina),
+            maquina.chars().count(),
+        );
+        poner(
+            &mut cuerpo,
+            &mut datos,
+            IB_USER_NAME,
+            &u16le(usuario),
+            usuario.chars().count(),
+        );
+        poner(
+            &mut cuerpo,
+            &mut datos,
+            IB_PASSWORD,
+            &ofuscar(clave),
+            clave.chars().count(),
+        );
+        poner(
+            &mut cuerpo,
+            &mut datos,
+            IB_APP_NAME,
+            &u16le(app),
+            app.chars().count(),
+        );
+        poner(
+            &mut cuerpo,
+            &mut datos,
+            IB_SERVER_NAME,
+            &u16le(servidor),
+            servidor.chars().count(),
+        );
+        cuerpo.extend_from_slice(&datos);
 
         let mut paquete = vec![0x10, 0x01];
         paquete.extend_from_slice(&((cuerpo.len() + 8) as u16).to_be_bytes());
         paquete.extend_from_slice(&[0, 0, 1, 0]);
         paquete.extend_from_slice(&cuerpo);
+        paquete
+    }
+
+    #[test]
+    fn mssql_saca_usuario_y_clave_del_login7() {
+        // Los cinco campos, cada uno distinto. Si el parser leyera `ibAppName`
+        // creyendo que es el usuario —que es lo que hacia—, aqui saldria
+        // «sqlmap» en vez de «sa» y esto se caeria.
+        let paquete = login7(
+            "PORTATIL-07",
+            "sa",
+            "Admin!2024",
+            "sqlmap",
+            "SQL-CONTABILIDAD",
+        );
 
         assert_eq!(
             Mssql::usuario_y_clave(&paquete),
-            Some((usuario.to_owned(), clave.to_owned()))
+            Some(("sa".to_owned(), "Admin!2024".to_owned())),
+            "los desplazamientos del LOGIN7 no son los de la norma"
         );
+        assert_eq!(
+            Mssql::maquina_app_y_servidor(&paquete),
+            Some((
+                "PORTATIL-07".to_owned(),
+                "sqlmap".to_owned(),
+                "SQL-CONTABILIDAD".to_owned()
+            ))
+        );
+
         let mut m = Mssql::nuevo();
         let p = m.turno(&paquete);
         assert!(p.cierra());
-        assert!(m
-            .revelado()
-            .iter()
-            .any(|r| r.frase().contains("Admin!2024")));
+        let frases: Vec<String> = m.revelado().iter().map(Revelacion::frase).collect();
+        assert!(
+            frases
+                .iter()
+                .any(|f| f.contains("sa") && f.contains("Admin!2024")),
+            "{frases:?}"
+        );
+        assert!(frases.iter().any(|f| f.contains("sqlmap")), "{frases:?}");
+        assert!(
+            frases.iter().any(|f| f.contains("SQL-CONTABILIDAD")),
+            "{frases:?}"
+        );
+    }
+
+    #[test]
+    fn los_cinco_campos_del_login7_no_se_confunden_entre_si() {
+        // La comprobacion que la version anterior no podia hacer: se mueve UN campo
+        // y solo cambia lo que ese campo aporta. Si dos lecturas compartieran
+        // desplazamiento, cambiar uno movería el otro.
+        let base = login7(
+            "M",
+            "usuario-real",
+            "clave-real",
+            "app-real",
+            "servidor-real",
+        );
+        let (u, c) = Mssql::usuario_y_clave(&base).unwrap();
+        let (_, a, sv) = Mssql::maquina_app_y_servidor(&base).unwrap();
+        assert_eq!(u, "usuario-real");
+        assert_eq!(c, "clave-real");
+        assert_eq!(a, "app-real");
+        assert_eq!(sv, "servidor-real");
+
+        let cambiado = login7("M", "OTRO", "clave-real", "app-real", "servidor-real");
+        let (u2, c2) = Mssql::usuario_y_clave(&cambiado).unwrap();
+        let (_, a2, sv2) = Mssql::maquina_app_y_servidor(&cambiado).unwrap();
+        assert_eq!(u2, "OTRO", "el usuario no salio del campo del usuario");
+        assert_eq!(c2, "clave-real", "cambiar el usuario movio la clave");
+        assert_eq!(a2, "app-real", "cambiar el usuario movio la aplicacion");
+        assert_eq!(sv2, "servidor-real");
     }
 
     #[test]
