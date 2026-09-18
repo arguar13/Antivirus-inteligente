@@ -157,7 +157,36 @@ $(CORECHECK): tools/aegis_core_check.c | $(BUILD)
 verify: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(IPS_OBJ) $(VERIFIER)
 	@./$(VERIFIER) $(BPF_OBJ)
 	@./$(VERIFIER) $(XDP_OBJ)
-	@./$(VERIFIER) $(KI_OBJ)
+	@# aegis_kintegrity recorre la lista de tareas con los iteradores abiertos
+	@# (`bpf_iter_task_*`, kernel 6.4+). En un kernel que no expone esas kfunc, el
+	@# verificador rechaza el objeto al cargarlo:
+	@#
+	@#     kfunc 'bpf_iter_task_new' is referenced but wasn't resolved
+	@#
+	@# Eso no dice nada del bytecode: dice que ESTE kernel no tiene esa capacidad.
+	@# El de WSL2 es uno. Se comprueba y se declara, en vez de dar por roto lo que
+	@# esta bien —un CI que falla por algo que no es un defecto ensena a ignorar
+	@# el CI— y en vez de callarlo, que seria peor.
+	@#
+	@# Se pregunta al BTF del kernel EN EJECUCION y no a $(BTF_ORIGEN): ese es el
+	@# de compilacion —puede ser el de otra maquina, y de hecho suele serlo— y
+	@# responderia que la kfunc existe justo cuando aqui no esta.
+	@#
+	@# La omision solo ocurre habiendo COMPROBADO que la kfunc falta. Sin bpftool
+	@# para averiguarlo se verifica igual: ante la duda, la comprobacion estricta.
+	@if ! command -v bpftool >/dev/null 2>&1 \
+	   || bpftool btf dump file /sys/kernel/btf/vmlinux format raw 2>/dev/null \
+	      | grep -q "FUNC 'bpf_iter_task_new'"; then \
+	    ./$(VERIFIER) $(KI_OBJ); \
+	else \
+	    echo "OMITIDO: $(KI_OBJ) usa los iteradores abiertos de tareas"; \
+	    echo "         (bpf_iter_task_*) y el kernel de esta maquina no los expone"; \
+	    echo "         en su BTF: $$(uname -r)."; \
+	    echo "         El objeto SI se compilo y sus reubicaciones CO-RE se"; \
+	    echo "         comprueban en 'core-check'. Lo que no se puede ejercer aqui"; \
+	    echo "         es su CARGA, porque hace falta un kernel que traiga esas"; \
+	    echo "         kfunc (6.4+ con los iteradores compilados)."; \
+	fi
 	@./$(VERIFIER) $(SSL_OBJ)
 	@./$(VERIFIER) $(IPS_OBJ)
 

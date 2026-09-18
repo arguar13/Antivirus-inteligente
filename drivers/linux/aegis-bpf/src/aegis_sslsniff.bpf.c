@@ -216,12 +216,38 @@ static __always_inline void emitir(__u64 buffer, __u64 total, __u32 direccion, _
     ev->inicio_tarea_ns = tarea ? aegis_inicio_de_tarea(tarea) : 0;
     bpf_get_current_comm(&ev->comm, sizeof(ev->comm));
 
-    /* El recorte: el minimo entre lo que hay y lo que cabe. Se calcula con una
-     * comparacion contra la constante para que el verificador pueda acotar el
-     * argumento de la copia. */
+    /* El recorte: el minimo entre lo que hay y lo que cabe.
+     *
+     * La comparacion sola NO basta. Con ella, el verificador de unos kernels
+     * acota el argumento y el de otros no, segun como el compilador ordene las
+     * ramas; con clang 21 sobre un kernel 6.6 el rechazo es:
+     *
+     *     R2 unbounded memory access, use 'var &= const' or 'if (var < const)'
+     *
+     * Un programa que carga en unos kernels y no en otros es un defecto de
+     * portabilidad, no una peculiaridad de la maquina: este objeto se compila
+     * una vez y se despliega en el parque entero.
+     *
+     * La mascara acota el valor EN EL BYTECODE, asi que no depende de lo que el
+     * verificador sepa deducir. Exige que la cota sea potencia de dos —lo es,
+     * 1024— y deja el maximo efectivo en MAX-1 bytes: uno menos de 1024, a
+     * cambio de que el programa cargue en cualquier kernel. `carga_len` sigue
+     * diciendo cuantos bytes son utiles, asi que ni la ABI ni el consumidor
+     * cambian.
+     *
+     * Y la mascara sola TAMPOCO basta. Sin las barreras, clang mantiene dos
+     * copias del valor —una enmascarada para la comparacion y otra sin
+     * enmascarar— y pasa la segunda como argumento; el verificador la ve
+     * `umax=2147483647` y rechaza igual. `barrier_var` impide esa duplicacion:
+     * es el patron que libbpf ofrece para exactamente esto. */
+    _Static_assert((AEGIS_L7_CARGA_MAX & (AEGIS_L7_CARGA_MAX - 1)) == 0,
+                   "la cota tiene que ser potencia de dos para poder enmascarar");
     __u32 cuanto = AEGIS_L7_CARGA_MAX;
     if (total < (__u64)AEGIS_L7_CARGA_MAX)
         cuanto = (__u32)total;
+    barrier_var(cuanto);
+    cuanto &= AEGIS_L7_CARGA_MAX - 1;
+    barrier_var(cuanto);
 
     if (cuanto > 0) {
         if (bpf_probe_read_user(&ev->carga, cuanto, (void *)buffer) == 0) {
