@@ -4,7 +4,7 @@
 # GitHub Actions siga bloqueado (docs/07-estado-ci.md), es la puerta de calidad
 # real del proyecto.
 
-.PHONY: ci audit test lint fmt abi bpf bpf-verify devsecops fuzz sanitize vulns clean help
+.PHONY: ci ci-reanudar ci-grupos audit test lint fmt abi bpf bpf-verify devsecops fuzz sanitize vulns clean help
 
 help:
 	@echo "make ci          - todas las comprobaciones (equivalente al CI remoto)"
@@ -23,6 +23,20 @@ help:
 
 ci:
 	@./tools/ci-local.sh
+
+# La misma tanda, pero grupo a grupo y retomable. Para maquinas o contenedores
+# que no aguantan la tanda entera de un tiron: un corte cuesta como mucho el
+# grupo en curso, y al volver a lanzarlo sigue por donde iba.
+#
+# El apunte va atado a la HUELLA del arbol. Si se toca el codigo entre medias, se
+# tira y se empieza de cero: un verde armado con medidas de arboles distintos es
+# un veredicto que no existio nunca.
+ci-reanudar:
+	@./tools/ci-local.sh --reanudar
+
+# Los grupos de la tanda, en el orden en que se ejecutan.
+ci-grupos:
+	@./tools/ci-local.sh --grupos
 
 audit:
 	@./tests/final_audit.sh

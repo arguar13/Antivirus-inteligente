@@ -8,8 +8,10 @@
 # eso: se ejecutan aqui, y este script es la referencia normativa mientras el
 # CI remoto no arranque.
 #
-# Uso:  ./tools/ci-local.sh          (todo)
-#       ./tools/ci-local.sh rust     (solo un grupo)
+# Uso:  ./tools/ci-local.sh            (todo, de una tacada)
+#       ./tools/ci-local.sh rust       (solo un grupo)
+#       ./tools/ci-local.sh --grupos   (lista los grupos, en su orden)
+#       ./tools/ci-local.sh --reanudar (todo, grupo a grupo y retomable)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -25,6 +27,138 @@ export CARGO_INCREMENTAL=0
 VERDE=$'\033[32m'; ROJO=$'\033[31m'; GRIS=$'\033[90m'; FIN=$'\033[0m'
 FALLOS=0
 SOLO="${1:-}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reanudacion
+#
+# POR QUE EXISTE
+#
+# La tanda completa dura mas de lo que aguanta de un tiron un contenedor efimero
+# de los que se usan para trabajar en este repo: se reinicia a media puerta y se
+# pierde TODO, incluido lo que ya habia pasado. El efecto practico es peor que la
+# molestia de repetir: como no se llega nunca al final, se acaba dando por bueno
+# el codigo sin el veredicto completo, que es justo lo que esta puerta existe para
+# impedir.
+#
+# Con `--reanudar`, la tanda se ejecuta grupo a grupo y va apuntando los que pasan.
+# Un reinicio cuesta, como mucho, el grupo en curso.
+#
+# LA PARTE QUE HAY QUE HACER BIEN
+#
+# Una reanudacion ingenua es PEOR que no tener ninguna. Si se retoma despues de
+# tocar el codigo, el «todo verde» final se arma con medidas tomadas sobre
+# arboles distintos: un veredicto que no existio nunca para ningun estado del
+# repositorio, presentado como si existiera. Por eso el apunte lleva en su primera
+# linea la HUELLA del arbol —commit, cambios sin comitear y ficheros sin seguir— y
+# si al retomar no coincide, el apunte se tira entero y se empieza de cero,
+# diciendolo en voz alta.
+#
+# Y por eso tambien la reanudacion es OPCIONAL y nunca la forma por defecto: lo
+# normal tiene que seguir siendo una tanda entera y honrada.
+APUNTE=target/.ci-reanudar
+
+# La huella del arbol: lo comiteado, lo modificado y lo que no esta en el indice.
+huella_del_arbol() {
+    {
+        git rev-parse HEAD 2>/dev/null || echo "sin-git"
+        git diff HEAD --binary 2>/dev/null
+        git ls-files --others --exclude-standard 2>/dev/null | sort | while read -r f; do
+            printf '%s ' "$f"
+            sha256sum "$f" 2>/dev/null || echo "?"
+        done
+    } | sha256sum | cut -d' ' -f1
+}
+
+# Los grupos, EN SU ORDEN, sacados de este mismo fichero.
+#
+# Se derivan del codigo y no de una lista escrita a mano porque una lista a mano
+# se queda corta el dia que alguien anade una fase —y entonces `--reanudar` se
+# saltaria la puerta nueva en silencio, que es la peor forma de fallar: pasando—.
+# El orden de aparicion se respeta, y eso importa: las invariantes van las ultimas
+# a proposito, porque comprueban lo que se rompe al sumar.
+grupos() {
+    # Las dos formas en que este fichero nombra un grupo: la comparacion contra
+    # `$SOLO` de las puertas de fase, y el primer argumento de `paso`.
+    #
+    # Las dos expresiones son estrechas a proposito, porque las anchas recogian
+    # cosas que no son grupos y el error no se ve hasta que `--reanudar` intenta
+    # ejecutar una:
+    #
+    #   - `paso` tiene que ir al principio de la linea (indentado o no: los de
+    #     Windows y eBPF van dentro de un `if`) y llevar DETRAS el titulo
+    #     entrecomillado. Sin exigir las comillas, la prosa de los comentarios
+    #     —«no paso», «paso por», «porque»— entraba como grupo.
+    #   - El nombre empieza por letra o digito, lo que deja fuera las opciones
+    #     `--grupos` y `--reanudar` de aqui arriba, que no son grupos.
+    # El orden de aparicion se conserva numerando las lineas y ordenando: con una
+    # pasada por patron y concatenando, el orden se perdia. Y aqui el orden es del
+    # oficio: las invariantes van las ultimas porque comprueban lo que se rompe AL
+    # SUMAR, y con `--reanudar` la ultima es ademas la que da el veredicto.
+    {
+        grep -nE '\$SOLO" (=|!=) "[a-z0-9][a-z0-9-]*"' "$0" \
+            | sed -E 's/^([0-9]+):.*\$SOLO" (=|!=) "([a-z0-9][a-z0-9-]*)".*/\1 \3/'
+        grep -nE '^[[:space:]]*paso[[:space:]]+[a-z0-9][a-z0-9-]*[[:space:]]+"' "$0" \
+            | sed -E 's/^([0-9]+):[[:space:]]*paso[[:space:]]+([a-z0-9][a-z0-9-]*).*/\1 \2/'
+    } | sort -n -k1,1 | awk '!visto[$2]++ { print $2 }'
+}
+
+if [ "$SOLO" = "--grupos" ]; then
+    grupos
+    exit 0
+fi
+
+if [ "$SOLO" = "--reanudar" ]; then
+    # Antes de nada: que la derivacion no se haya quedado corta. Si una puerta
+    # existe y su grupo no sale en la lista, `--reanudar` NO la ejecutaria y
+    # acabaria diciendo «todo verde» sin haberla mirado — un falso verde, que es
+    # peor que un fallo. Se comprueba aqui y se para en seco.
+    LISTA=$(grupos)
+    SIN_GRUPO=""
+    for g in $(grep -oE '\$SOLO" (=|!=) "[a-z0-9][a-z0-9-]*"' "$0" \
+                   | grep -oE '"[a-z0-9][a-z0-9-]*"$' | tr -d '"' | sort -u); do
+        echo "$LISTA" | grep -qxF "$g" || SIN_GRUPO="$SIN_GRUPO $g"
+    done
+    if [ -n "$SIN_GRUPO" ]; then
+        printf '%s==> La lista de grupos no cubre:%s%s\n' "$ROJO" "$SIN_GRUPO" "$FIN"
+        printf '    Arregla `grupos()` antes de reanudar: si no, se saltaria esas\n'
+        printf '    puertas y daria un verde que no ha comprobado.\n'
+        exit 1
+    fi
+
+    HUELLA=$(huella_del_arbol)
+    if [ -f "$APUNTE" ] && [ "$(head -1 "$APUNTE")" != "$HUELLA" ]; then
+        printf '%s==>%s El arbol ha cambiado desde el apunte anterior: se empieza de cero.\n' \
+            "$GRIS" "$FIN"
+        printf '    %sUn verde armado con medidas de arboles distintos no es un verde.%s\n' \
+            "$GRIS" "$FIN"
+        rm -f "$APUNTE"
+    fi
+    mkdir -p "$(dirname "$APUNTE")"
+    [ -f "$APUNTE" ] || echo "$HUELLA" > "$APUNTE"
+
+    PENDIENTES=0
+    for g in $(grupos); do
+        if grep -qxF "verde $g" "$APUNTE"; then
+            printf '%s==>%s %s %sya verde en esta misma tanda%s\n' "$GRIS" "$FIN" "$g" "$GRIS" "$FIN"
+            continue
+        fi
+        PENDIENTES=$((PENDIENTES + 1))
+        if "$0" "$g"; then
+            echo "verde $g" >> "$APUNTE"
+        else
+            printf '%s==> %s fallo. El apunte se conserva: al arreglarlo, `--reanudar` sigue por aqui.%s\n' \
+                "$ROJO" "$g" "$FIN"
+            exit 1
+        fi
+    done
+
+    # Una tanda entera en verde borra el apunte: la siguiente vuelve a ser
+    # completa y honrada por defecto.
+    rm -f "$APUNTE"
+    printf '%s==> Todos los grupos en verde sobre el mismo arbol (%d ejecutados en esta vuelta)%s\n' \
+        "$VERDE" "$PENDIENTES" "$FIN"
+    exit 0
+fi
 
 paso() {
     local grupo="$1"; shift
@@ -704,33 +838,6 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "senuelos" ]; then
     fi
 fi
 
-# LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
-#
-# Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo
-# demas tiene que haber corrido ya. Cada verificar-<fase>.sh comprueba lo suyo y lo
-# comprueba mejor que esta; lo que ninguna puede comprobar es que el agente siga
-# cabiendo en su presupuesto con TODAS las capacidades encendidas a la vez, que
-# ningun crate de analisis haya ganado un `unsafe` por el camino, que el arbol de
-# dependencias del endpoint no haya engordado sin justificacion escrita, y que el
-# producto entero —no solo el enjambre— siga protegiendo con el plano de control
-# caido.
-#
-# Y tiene DERECHO DE VETO: si demuestra que una invariante se rompio, se arregla de
-# raiz antes de dar el trabajo por terminado, aunque obligue a volver sobre una
-# fase anterior. Una invariante que se relaja «solo esta vez» deja de ser una
-# invariante y pasa a ser una aspiracion.
-if [ -z "${SOLO:-}" ] || [ "$SOLO" = "invariantes" ]; then
-    printf '%s==>%s AegisProof · las trece invariantes sobre el producto completo\n' "$GRIS" "$FIN"
-    if ./tools/verificar-invariantes.sh > /tmp/aegis-invariantes-ci.log 2>&1; then
-        sed 's/^/    | /' /tmp/aegis-invariantes-ci.log
-        printf '    %sOK%s\n' "$VERDE" "$FIN"
-    else
-        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
-        sed 's/^/    | /' /tmp/aegis-invariantes-ci.log
-        FALLOS=$((FALLOS + 1))
-    fi
-fi
-
 # El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
 # un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
 # que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la
@@ -913,6 +1020,33 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
         fi
     else
         printf '%s==>%s Red Team · %somitido (sin python3 o sin cc)%s\n' "$GRIS" "$FIN" "$GRIS" "$FIN"
+    fi
+fi
+
+# LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
+#
+# Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo
+# demas tiene que haber corrido ya. Cada verificar-<fase>.sh comprueba lo suyo y lo
+# comprueba mejor que esta; lo que ninguna puede comprobar es que el agente siga
+# cabiendo en su presupuesto con TODAS las capacidades encendidas a la vez, que
+# ningun crate de analisis haya ganado un `unsafe` por el camino, que el arbol de
+# dependencias del endpoint no haya engordado sin justificacion escrita, y que el
+# producto entero —no solo el enjambre— siga protegiendo con el plano de control
+# caido.
+#
+# Y tiene DERECHO DE VETO: si demuestra que una invariante se rompio, se arregla de
+# raiz antes de dar el trabajo por terminado, aunque obligue a volver sobre una
+# fase anterior. Una invariante que se relaja «solo esta vez» deja de ser una
+# invariante y pasa a ser una aspiracion.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "invariantes" ]; then
+    printf '%s==>%s AegisProof · las trece invariantes sobre el producto completo\n' "$GRIS" "$FIN"
+    if ./tools/verificar-invariantes.sh > /tmp/aegis-invariantes-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-invariantes-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-invariantes-ci.log
+        FALLOS=$((FALLOS + 1))
     fi
 fi
 
