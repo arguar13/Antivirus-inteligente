@@ -36,6 +36,7 @@ members = [
     "crates/aegis-pe",
     "crates/aegis-macho",
     "crates/aegis-enforce",
+    "crates/aegis-disasm",
     "crates/aegis-sync",
     "crates/aegis-fim",
     "crates/aegis-watchdog",

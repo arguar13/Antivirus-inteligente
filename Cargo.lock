@@ -109,6 +109,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-disasm"
+version = "0.1.0"
+dependencies = [
+ "aegis-entidad",
+ "goblin",
+ "iced-x86",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-e2e"
 version = "0.1.0"
 dependencies = [

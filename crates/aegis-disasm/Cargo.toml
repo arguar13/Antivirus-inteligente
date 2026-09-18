@@ -1,0 +1,21 @@
+[package]
+name = "aegis-disasm"
+description = "Desensamblado multiarquitectura, grafo de flujo de control y deduccion de capacidades con evidencia"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# Ya en la linea base del agente (justificado para Intel PT en aegis-ptguard).
+# Se reutiliza: un crate con CERO dependencias transitivas, Rust puro.
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "instr_info", "intel"] }
+# Ya en la linea base. Lee la tabla de importaciones de PE y ELF, que es la parte
+# del contenedor; lo que este crate anade es lo que se deduce del CODIGO.
+goblin = "0.9"
+aegis-entidad = { path = "../aegis-entidad" }
