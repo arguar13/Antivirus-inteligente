@@ -63,13 +63,25 @@ VMLINUX_H  := $(BUILD)/vmlinux.h
 # libbpf-dev. Las cabeceras de kernel del sistema ya NO hacen falta: todas las
 # definiciones de kernel salen de vmlinux.h, que es lo que hace que el bytecode
 # sea reubicable. Por eso tampoco entra el directorio multiarch.
+# $(BUILD) entra con -isystem y no con -I a proposito: ahi vive vmlinux.h, que
+# NO es codigo de este proyecto sino un artefacto que genera bpftool a partir del
+# BTF del kernel. Con -I, sus diagnosticos entran bajo el -Werror de aqui y la
+# compilacion se rompe por como escribe el generador, no por un defecto nuestro:
+# con el BTF de un kernel 7.0 salen cinco `declaration does not declare anything`
+# de declaraciones adelantadas vacias dentro de estructuras anonimas.
+#
+# Someter un encabezado generado a los avisos del proyecto ata la compilacion a
+# la version de bpftool y del kernel de quien compile, y contradice lo que este
+# mismo Makefile promete del BTF: "da igual cual sea mientras tenga BTF". Con
+# -isystem, los avisos del codigo propio siguen siendo errores y los del
+# generado no.
 BPF_CFLAGS := -target bpf -O2 -g \
               -Wall -Wextra -Werror \
               -Wno-unused-parameter \
               -ffreestanding -nostdinc \
               -isystem $(CLANG_INC) \
               -isystem /usr/include \
-              -I$(BUILD) -Iinclude -I$(ABI_INC) \
+              -isystem $(BUILD) -Iinclude -I$(ABI_INC) \
               -D__TARGET_ARCH_$(ARCH)
 
 VERIFY_CFLAGS := -O2 -Wall -Wextra -Werror -Iinclude -I$(ABI_INC)
