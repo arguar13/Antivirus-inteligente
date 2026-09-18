@@ -531,6 +531,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "estado" ]; then
     fi
 fi
 
+# AegisArtifact (FASE 82): la custodia de la evidencia.
+#
+# Esta puerta existe porque el resto del arbol comprueba que el producto DETECTA
+# y RESPONDE, y ninguna comprueba que lo que recoge se pueda sostener cuando
+# alguien lo discuta. Son dos cosas distintas: un volcado autentico del que no se
+# puede probar de donde salio, que nadie lo cambio y por cuantas manos paso no es
+# evidencia, es un fichero. Y la unica forma de enterarse de que no lo es, sin
+# esta puerta, seria el dia que hiciera falta.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "custodia" ]; then
+    printf '%s==>%s AegisArtifact · la evidencia, con su procedencia y su cadena\n' "$GRIS" "$FIN"
+    if ./tools/verificar-custodia.sh > /tmp/aegis-custodia-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-custodia-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-custodia-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo

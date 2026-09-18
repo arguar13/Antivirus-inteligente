@@ -1,0 +1,17 @@
+[package]
+name = "aegis-custodia"
+description = "Cadena de custodia verificable para la evidencia forense de una flota"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+sha2 = "0.10"
+aegis-pqc = { path = "../aegis-pqc" }
+aegis-scal = { path = "../aegis-scal" }

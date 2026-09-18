@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**55 crates · 2042 pruebas**
+**56 crates · 2113 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -279,6 +279,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-behavior` | Motor conductual de AegisCore: grafo dirigido de procesos, tecnicas MITRE ATT&CK y puntuacion de riesgo | 22 | — | sí |
 | `aegis-cloudnative` | Deteccion de escape de contenedor (Deepce/Traitor) a partir de setns/unshare/capset/bpf/mount, con el decisor en Rust puro y el enganche eBPF declarado gated | 13 | `verificar-cloudnative.sh` | sí |
 | `aegis-ctl` | Protocolo de control por socket Unix y CLI de administracion aegisctl | 10 | — | sí |
+| `aegis-custodia` | Cadena de custodia verificable para la evidencia forense de una flota: sello de procedencia, encadenado por resumen y veredicto que enumera lo que NO prueba | 67 | `verificar-custodia.sh` | sí |
 | `aegis-deception` | Servicios senuelo de red y deteccion de reconocimiento sin falsos positivos | 18 | — | — |
 | `aegis-e2e` | Pruebas de integracion de extremo a extremo de AegisCore | 15 | — | sí |
 | `aegis-edgeml` | Inferencia TinyML en el borde: deteccion de zero-day por comportamiento, sin nube (FASE 53) | 6 | — | sí |
@@ -316,7 +317,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-resp` | Motor de respuesta activa de AegisCore: terminacion, cuarentena y aislamiento | 22 | — | — |
 | `aegis-rollback` | Reversion de ransomware: copia-sombra cifrada y restauracion en milisegundos (FASE 50) | 6 | — | — |
 | `aegis-sandbox` | Aislamiento preventivo de procesos con Landlock y seccomp-bpf | 17 | — | — |
-| `aegis-scal` | Capa de abstraccion del nucleo del sistema (SCAL): telemetria y control independientes del sistema operativo | 48 | — | — |
+| `aegis-scal` | Capa de abstraccion del nucleo del sistema (SCAL): telemetria y control independientes del sistema operativo | 52 | — | — |
 | `aegis-scan` | Motor de deteccion profunda de AegisCore: YARA sobre ficheros y memoria de procesos | 27 | `verificar-memscanner.sh` | sí |
 | `aegis-selfdefense` | Autodefensa legitima: OTP firmado del Control Plane, decision de tamper, clasificacion ELAM y requisitos PPL | 42 | — | sí |
 | `aegis-swarm` | Enjambre autonomo: nucleo sans-io del protocolo de reparto de inteligencia y ordenes de contencion entre agentes aislados del plano de control | 75 | `verificar-swarm.sh` | sí |

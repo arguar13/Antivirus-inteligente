@@ -89,6 +89,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-custodia"
+version = "0.1.0"
+dependencies = [
+ "aegis-pqc",
+ "aegis-scal",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-deception"
 version = "0.1.0"
 dependencies = [
