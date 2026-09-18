@@ -108,6 +108,99 @@ pub enum ProtocoloApp {
     Ftp,
     /// QUIC.
     Quic,
+
+    // ── Identidad y directorio (FASE 89) ────────────────────────────────────
+    /// NTLM, dentro de SMB, HTTP o DCERPC.
+    Ntlm,
+    /// RADIUS.
+    Radius,
+    /// Diameter.
+    Diameter,
+    /// SAML, dentro de HTTP.
+    Saml,
+    /// OAuth 2.0 / OpenID Connect, dentro de HTTP.
+    Oauth,
+
+    // ── Ficheros y ejecucion remota (FASE 89) ───────────────────────────────
+    /// DCERPC / MSRPC.
+    Dcerpc,
+    /// NFS y su ONC RPC.
+    Nfs,
+    /// WebDAV, sobre HTTP.
+    Webdav,
+    /// RDP.
+    Rdp,
+    /// VNC / RFB.
+    Vnc,
+    /// WinRM, sobre HTTP.
+    Winrm,
+
+    // ── Bases de datos (FASE 89) ────────────────────────────────────────────
+    /// MySQL y MariaDB.
+    Mysql,
+    /// PostgreSQL.
+    Postgresql,
+    /// TDS (Microsoft SQL Server).
+    Tds,
+    /// MongoDB.
+    Mongodb,
+    /// Redis.
+    Redis,
+    /// Elasticsearch, sobre HTTP.
+    Elasticsearch,
+
+    // ── Mensajeria (FASE 89) ────────────────────────────────────────────────
+    /// AMQP.
+    Amqp,
+    /// MQTT.
+    Mqtt,
+    /// Kafka.
+    Kafka,
+    /// gRPC, sobre HTTP/2.
+    Grpc,
+
+    // ── Correo (FASE 89) ────────────────────────────────────────────────────
+    /// IMAP.
+    Imap,
+    /// POP3.
+    Pop3,
+
+    // ── Web moderna (FASE 89) ───────────────────────────────────────────────
+    /// HTTP/2.
+    Http2,
+    /// HTTP/3, sobre QUIC.
+    Http3,
+    /// WebSocket.
+    Websocket,
+
+    // ── Industrial y OT (FASE 89) ───────────────────────────────────────────
+    /// Modbus/TCP.
+    Modbus,
+    /// DNP3.
+    Dnp3,
+    /// S7comm (Siemens), sobre COTP/TPKT.
+    S7comm,
+    /// BACnet/IP.
+    Bacnet,
+    /// OPC-UA binario.
+    OpcUa,
+
+    // ── Tuneles y evasion (FASE 89) ─────────────────────────────────────────
+    /// DNS sobre HTTPS.
+    Doh,
+    /// DNS sobre TLS.
+    Dot,
+    /// WireGuard.
+    Wireguard,
+    /// IKEv2 (IPsec).
+    Ikev2,
+    /// SOCKS 4 o 5.
+    Socks,
+
+    // ── Nube (FASE 89) ──────────────────────────────────────────────────────
+    /// Servicio de metadatos de instancia de un proveedor de nube.
+    MetadatosDeNube,
+
     /// Se vio trafico pero no se reconocio el protocolo.
     Desconocido,
 }
@@ -130,8 +223,117 @@ impl ProtocoloApp {
             ProtocoloApp::Smtp => "smtp",
             ProtocoloApp::Ftp => "ftp",
             ProtocoloApp::Quic => "quic",
+            ProtocoloApp::Ntlm => "ntlm",
+            ProtocoloApp::Radius => "radius",
+            ProtocoloApp::Diameter => "diameter",
+            ProtocoloApp::Saml => "saml",
+            ProtocoloApp::Oauth => "oauth",
+            ProtocoloApp::Dcerpc => "dcerpc",
+            ProtocoloApp::Nfs => "nfs",
+            ProtocoloApp::Webdav => "webdav",
+            ProtocoloApp::Rdp => "rdp",
+            ProtocoloApp::Vnc => "vnc",
+            ProtocoloApp::Winrm => "winrm",
+            ProtocoloApp::Mysql => "mysql",
+            ProtocoloApp::Postgresql => "postgresql",
+            ProtocoloApp::Tds => "tds",
+            ProtocoloApp::Mongodb => "mongodb",
+            ProtocoloApp::Redis => "redis",
+            ProtocoloApp::Elasticsearch => "elasticsearch",
+            ProtocoloApp::Amqp => "amqp",
+            ProtocoloApp::Mqtt => "mqtt",
+            ProtocoloApp::Kafka => "kafka",
+            ProtocoloApp::Grpc => "grpc",
+            ProtocoloApp::Imap => "imap",
+            ProtocoloApp::Pop3 => "pop3",
+            ProtocoloApp::Http2 => "http2",
+            ProtocoloApp::Http3 => "http3",
+            ProtocoloApp::Websocket => "websocket",
+            ProtocoloApp::Modbus => "modbus",
+            ProtocoloApp::Dnp3 => "dnp3",
+            ProtocoloApp::S7comm => "s7comm",
+            ProtocoloApp::Bacnet => "bacnet",
+            ProtocoloApp::OpcUa => "opcua",
+            ProtocoloApp::Doh => "doh",
+            ProtocoloApp::Dot => "dot",
+            ProtocoloApp::Wireguard => "wireguard",
+            ProtocoloApp::Ikev2 => "ikev2",
+            ProtocoloApp::Socks => "socks",
+            ProtocoloApp::MetadatosDeNube => "metadatos-de-nube",
             ProtocoloApp::Desconocido => "desconocido",
         }
+    }
+
+    /// Todos los protocolos que el producto sabe nombrar.
+    ///
+    /// Esta aqui —y no en una lista escrita a mano en cada prueba— porque el
+    /// numero de protocolos es la medida con la que se compara el sensor contra
+    /// otros, y una medida que se cuenta a mano se cuenta mal. Anadir una
+    /// variante sin anadirla aqui hace fallar
+    /// `todos_los_protocolos_estan_en_la_lista`.
+    pub const TODOS: &'static [ProtocoloApp] = &[
+        ProtocoloApp::Dns,
+        ProtocoloApp::Http,
+        ProtocoloApp::Tls,
+        ProtocoloApp::Ssh,
+        ProtocoloApp::Smb,
+        ProtocoloApp::Kerberos,
+        ProtocoloApp::Ldap,
+        ProtocoloApp::Dhcp,
+        ProtocoloApp::Ntp,
+        ProtocoloApp::Smtp,
+        ProtocoloApp::Ftp,
+        ProtocoloApp::Quic,
+        ProtocoloApp::Ntlm,
+        ProtocoloApp::Radius,
+        ProtocoloApp::Diameter,
+        ProtocoloApp::Saml,
+        ProtocoloApp::Oauth,
+        ProtocoloApp::Dcerpc,
+        ProtocoloApp::Nfs,
+        ProtocoloApp::Webdav,
+        ProtocoloApp::Rdp,
+        ProtocoloApp::Vnc,
+        ProtocoloApp::Winrm,
+        ProtocoloApp::Mysql,
+        ProtocoloApp::Postgresql,
+        ProtocoloApp::Tds,
+        ProtocoloApp::Mongodb,
+        ProtocoloApp::Redis,
+        ProtocoloApp::Elasticsearch,
+        ProtocoloApp::Amqp,
+        ProtocoloApp::Mqtt,
+        ProtocoloApp::Kafka,
+        ProtocoloApp::Grpc,
+        ProtocoloApp::Imap,
+        ProtocoloApp::Pop3,
+        ProtocoloApp::Http2,
+        ProtocoloApp::Http3,
+        ProtocoloApp::Websocket,
+        ProtocoloApp::Modbus,
+        ProtocoloApp::Dnp3,
+        ProtocoloApp::S7comm,
+        ProtocoloApp::Bacnet,
+        ProtocoloApp::OpcUa,
+        ProtocoloApp::Doh,
+        ProtocoloApp::Dot,
+        ProtocoloApp::Wireguard,
+        ProtocoloApp::Ikev2,
+        ProtocoloApp::Socks,
+        ProtocoloApp::MetadatosDeNube,
+        ProtocoloApp::Desconocido,
+    ];
+
+    /// Busca un protocolo por su nombre estable.
+    ///
+    /// Sin esto, el nombre viajaria solo de ida —del enumerado al registro— y
+    /// una consulta guardada del SIEM no se podria volver a atar al tipo.
+    #[must_use]
+    pub fn de_nombre(n: &str) -> Option<ProtocoloApp> {
+        ProtocoloApp::TODOS
+            .iter()
+            .copied()
+            .find(|p| p.nombre() == n)
     }
 }
 
@@ -391,6 +593,107 @@ pub enum Hecho {
         sha256: String,
     },
 
+    /// **Una orden a un dispositivo industrial** (FASE 89).
+    ///
+    /// La distincion que lleva dentro y que no tiene ningun otro hecho:
+    /// `escribe`. Leer un registro de un PLC es telemetria y ocurre miles de
+    /// veces por minuto; escribirlo mueve algo en el mundo fisico. Un sensor que
+    /// los cuente juntos entierra el segundo bajo el primero.
+    OrdenIndustrial {
+        /// Protocolo por el que viajo.
+        protocolo: ProtocoloApp,
+        /// Funcion, con su nombre estable ("leer-registros-retentivos",
+        /// "escribir-bobina", "parar-cpu").
+        funcion: String,
+        /// A que dispositivo, esclavo, rack o nodo.
+        unidad: String,
+        /// **Si la orden cambia el estado del dispositivo.**
+        escribe: bool,
+        /// Detalle legible (rango de direcciones, objeto, cantidad).
+        detalle: String,
+    },
+
+    /// Una operacion contra una base de datos (FASE 89).
+    OperacionDeBaseDeDatos {
+        /// Motor.
+        motor: ProtocoloApp,
+        /// Operacion ("login", "consulta", "borrado-masivo", "volcado").
+        operacion: String,
+        /// Objeto: tabla, indice, clave o base.
+        objeto: String,
+        /// Usuario, si viajaba.
+        usuario: String,
+    },
+
+    /// Un intento de autenticacion visto en la red (FASE 89).
+    ///
+    /// Lo emiten NTLM, RADIUS, Diameter, SASL y los portadores web de SAML y
+    /// OAuth. Que sea **uno** y no cinco es lo que permite contar intentos
+    /// fallidos por usuario sin importar por donde entro.
+    AutenticacionVista {
+        /// Mecanismo ("ntlmssp-negociacion", "radius-access-request",
+        /// "sasl-plain", "saml-response", "oauth-bearer").
+        mecanismo: String,
+        /// Usuario o principal.
+        usuario: String,
+        /// Dominio, reino o emisor.
+        dominio: String,
+        /// Lo que se vio ("peticion", "reto", "respuesta", "acepta", "rechaza").
+        resultado: String,
+    },
+
+    /// Una operacion de mensajeria o de cola (FASE 89).
+    OperacionDeMensajeria {
+        /// Sistema.
+        sistema: ProtocoloApp,
+        /// Operacion ("conectar", "publicar", "suscribir", "producir").
+        operacion: String,
+        /// Tema, cola o intercambio.
+        tema: String,
+    },
+
+    /// Ejecucion remota vista por la red (FASE 89).
+    ///
+    /// Es el hecho que ata WinRM, DCERPC, SSH y RDP: el movimiento lateral no se
+    /// reconoce por el protocolo sino por que alguien ejecuto algo en otra
+    /// maquina, y tenerlo en un solo hecho es lo que hace que se pueda contar.
+    EjecucionRemota {
+        /// Por donde.
+        via: ProtocoloApp,
+        /// Que se pidio ejecutar o abrir.
+        orden: String,
+        /// Sobre que maquina, servicio o punto final.
+        objetivo: String,
+    },
+
+    /// Trafico que transporta otro trafico (FASE 89).
+    ///
+    /// Como [`Hecho::IndicioTunelDns`], **no es un veredicto**: es la
+    /// observacion con su tecnica, para que el arbitro decida.
+    IndicioDeTunel {
+        /// Protocolo que hace de portador.
+        portador: ProtocoloApp,
+        /// Tecnica ("dns-sobre-https", "socks5-conectar", "wireguard-inicio").
+        tecnica: String,
+        /// Detalle legible.
+        detalle: String,
+    },
+
+    /// Acceso al servicio de metadatos de instancia de una nube (FASE 89).
+    ///
+    /// Un acceso legitimo lo hace el agente de la nube al arrancar. Uno desde
+    /// una peticion reenviada por un servidor web es una toma de credenciales
+    /// —el patron de SSRF que vacio mas de una cuenta—, y la diferencia esta en
+    /// `con_credencial` y en el recurso pedido.
+    AccesoAMetadatosDeNube {
+        /// Proveedor ("aws", "azure", "gcp", "oracle", "alibaba").
+        proveedor: String,
+        /// Recurso pedido.
+        recurso: String,
+        /// Si la respuesta o la peticion llevaba una credencial.
+        con_credencial: bool,
+    },
+
     /// El reensamblado vio algo que hay que contar.
     AnomaliaDeFlujo {
         /// Codigo estable.
@@ -444,6 +747,13 @@ impl Hecho {
             Hecho::OrdenFtp { .. } => "ftp-orden",
             Hecho::InicioQuic { .. } => "quic-inicio",
             Hecho::FicheroTransferido { .. } => "fichero",
+            Hecho::OrdenIndustrial { .. } => "orden-industrial",
+            Hecho::OperacionDeBaseDeDatos { .. } => "base-de-datos",
+            Hecho::AutenticacionVista { .. } => "autenticacion",
+            Hecho::OperacionDeMensajeria { .. } => "mensajeria",
+            Hecho::EjecucionRemota { .. } => "ejecucion-remota",
+            Hecho::IndicioDeTunel { .. } => "tunel",
+            Hecho::AccesoAMetadatosDeNube { .. } => "metadatos-de-nube",
             Hecho::AnomaliaDeFlujo { .. } => "anomalia",
             Hecho::NoAnalizable { .. } => "no-analizable",
         }
@@ -519,29 +829,120 @@ mod pruebas {
     /// consultas guardadas. Esta prueba existe para que cambiarlos duela.
     #[test]
     fn los_nombres_de_protocolo_son_estables_y_no_se_solapan() {
-        let todos = [
-            ProtocoloApp::Dns,
-            ProtocoloApp::Http,
-            ProtocoloApp::Tls,
-            ProtocoloApp::Ssh,
-            ProtocoloApp::Smb,
-            ProtocoloApp::Kerberos,
-            ProtocoloApp::Ldap,
-            ProtocoloApp::Dhcp,
-            ProtocoloApp::Ntp,
-            ProtocoloApp::Smtp,
-            ProtocoloApp::Ftp,
-            ProtocoloApp::Quic,
-            ProtocoloApp::Desconocido,
-        ];
         let mut vistos = Vec::new();
-        for p in todos {
+        for p in ProtocoloApp::TODOS.iter().copied() {
             assert!(!p.nombre().is_empty());
             assert!(!vistos.contains(&p.nombre()), "repetido: {}", p.nombre());
             vistos.push(p.nombre());
         }
         assert_eq!(ProtocoloApp::Dns.nombre(), "dns");
         assert_eq!(ProtocoloApp::Kerberos.nombre(), "kerberos");
+        assert_eq!(ProtocoloApp::Modbus.nombre(), "modbus");
+    }
+
+    /// El nombre tiene que viajar de vuelta: una consulta guardada del SIEM
+    /// lleva el nombre, y sin la vuelta no se puede atar al tipo otra vez.
+    #[test]
+    fn el_nombre_de_un_protocolo_lleva_de_vuelta_al_protocolo() {
+        for p in ProtocoloApp::TODOS.iter().copied() {
+            assert_eq!(ProtocoloApp::de_nombre(p.nombre()), Some(p));
+        }
+        assert_eq!(ProtocoloApp::de_nombre("no-existe"), None);
+    }
+
+    /// Anadir una variante al enumerado sin anadirla a `TODOS` dejaria la lista
+    /// corta, y el numero de protocolos es la medida con la que se compara este
+    /// sensor contra otros. Aqui se cuenta contra el `match` exhaustivo de
+    /// `nombre()`, que el compilador si obliga a completar.
+    #[test]
+    fn todos_los_protocolos_estan_en_la_lista() {
+        // Cada variante conocida por nombre tiene que estar en TODOS. Si alguien
+        // anade una variante, `nombre()` no compila hasta darle nombre, y en ese
+        // momento esta prueba exige la fila en TODOS.
+        let nombres: Vec<&str> = ProtocoloApp::TODOS.iter().map(|p| p.nombre()).collect();
+        for n in [
+            "dns",
+            "http",
+            "tls",
+            "ssh",
+            "smb",
+            "kerberos",
+            "ldap",
+            "dhcp",
+            "ntp",
+            "smtp",
+            "ftp",
+            "quic",
+            "ntlm",
+            "radius",
+            "diameter",
+            "saml",
+            "oauth",
+            "dcerpc",
+            "nfs",
+            "webdav",
+            "rdp",
+            "vnc",
+            "winrm",
+            "mysql",
+            "postgresql",
+            "tds",
+            "mongodb",
+            "redis",
+            "elasticsearch",
+            "amqp",
+            "mqtt",
+            "kafka",
+            "grpc",
+            "imap",
+            "pop3",
+            "http2",
+            "http3",
+            "websocket",
+            "modbus",
+            "dnp3",
+            "s7comm",
+            "bacnet",
+            "opcua",
+            "doh",
+            "dot",
+            "wireguard",
+            "ikev2",
+            "socks",
+            "metadatos-de-nube",
+            "desconocido",
+        ] {
+            assert!(nombres.contains(&n), "{n} no esta en ProtocoloApp::TODOS");
+        }
+        assert_eq!(ProtocoloApp::TODOS.len(), 50);
+    }
+
+    /// LA distincion de los protocolos industriales: leer un registro de un PLC
+    /// es telemetria y pasa miles de veces por minuto; escribirlo mueve algo en
+    /// el mundo fisico. Si el hecho no los separase, el segundo quedaria
+    /// enterrado bajo el primero.
+    #[test]
+    fn una_orden_industrial_dice_si_escribe() {
+        let leer = Hecho::OrdenIndustrial {
+            protocolo: ProtocoloApp::Modbus,
+            funcion: "leer-registros-retentivos".to_owned(),
+            unidad: "1".to_owned(),
+            escribe: false,
+            detalle: "0..10".to_owned(),
+        };
+        let escribir = Hecho::OrdenIndustrial {
+            protocolo: ProtocoloApp::Modbus,
+            funcion: "escribir-bobina".to_owned(),
+            unidad: "1".to_owned(),
+            escribe: true,
+            detalle: "bobina 4 a ON".to_owned(),
+        };
+        assert_eq!(leer.codigo(), escribir.codigo());
+        assert_ne!(leer, escribir);
+        match escribir {
+            Hecho::OrdenIndustrial { escribe, .. } => assert!(escribe),
+            otro => panic!("{otro:?}"),
+        }
     }
 
     #[test]

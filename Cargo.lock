@@ -119,6 +119,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-disectores"
+version = "0.1.0"
+dependencies = [
+ "aegis-wire",
+ "sha2",
+]
+
+[[package]]
 name = "aegis-e2e"
 version = "0.1.0"
 dependencies = [

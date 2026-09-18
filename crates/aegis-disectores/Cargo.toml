@@ -1,0 +1,23 @@
+[package]
+name = "aegis-disectores"
+description = "Disectores de protocolo del sensor de red: empresariales, industriales y de nube, con cobertura declarada"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# CERO DEPENDENCIAS EXTERNAS, por la misma razon que `aegis-wire`: los bytes que
+# llegan aqui los escribe el atacante, sin autenticacion previa y a velocidad de
+# linea. Un disector es la superficie de ataque mas expuesta del producto, y es
+# donde el resto del sector acumula su historial de CVE de desbordamiento.
+#
+# `sha2` entra solo porque el extractor de ficheros de `aegis-wire` —que este
+# crate reutiliza para los adjuntos del correo— nombra cada fichero por su
+# SHA-256, que es el nombre de una entidad en todo el producto desde la FASE 79.
+[dependencies]
+aegis-wire = { path = "../aegis-wire" }
+sha2 = "0.10"

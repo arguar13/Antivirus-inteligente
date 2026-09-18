@@ -641,6 +641,28 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "instrumentar" ]; then
     fi
 fi
 
+# AegisDissect (FASE 89): diseccion de protocolos empresariales, industriales y
+# de nube, con COBERTURA DECLARADA.
+#
+# Disecar muchos protocolos no es la propiedad interesante. Lo que ningun sensor
+# del sector contesta es la pregunta que importa cuando falta una alerta: «¿esto
+# no paso, o no lo supimos leer?». Esta puerta comprueba que cada disector
+# declara sus dos mitades, que ninguno hace entrada/salida, que ninguno puede
+# responder, y que los dos techos de memoria son LOS MISMOS que los del motor y
+# no dos parecidos al lado — que es la unica forma de que la invariante de la
+# cota global signifique algo con un crate nuevo.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "disectores" ]; then
+    printf '%s==>%s AegisDissect · diseccion ampliada con cobertura declarada\n' "$GRIS" "$FIN"
+    if ./tools/verificar-disectores.sh > /tmp/aegis-disectores-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-disectores-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-disectores-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo
