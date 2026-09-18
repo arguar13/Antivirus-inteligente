@@ -292,7 +292,7 @@ impl GrafoDeLlamadas {
         let salidas = propaga(cfg);
 
         for entrada in entradas.iter().take(MAX_FUNCIONES).copied() {
-            let bloques = cuerpo(cfg, entrada);
+            let bloques = cuerpo(cfg, entrada, &entradas);
             let mut llama_a = BTreeSet::new();
             for b in &bloques {
                 let Some(bloque) = cfg.bloque(*b) else {
@@ -611,11 +611,25 @@ fn propaga(cfg: &Cfg) -> BTreeMap<u64, (Estado, Estado)> {
 
 /// Los bloques que pertenecen a la funcion que empieza en `entrada`.
 ///
-/// Se sigue el flujo **sin cruzar aristas de llamada**: una llamada va a otra
-/// funcion y su cuerpo no es parte de esta. Un bloque puede pertenecer a mas de
-/// una funcion —el codigo compartido existe, y los compiladores lo generan—, y
-/// eso no es un error que haya que resolver eligiendo una.
-fn cuerpo(cfg: &Cfg, entrada: u64) -> Vec<u64> {
+/// Se sigue el flujo **sin cruzar aristas de llamada** —una llamada va a otra
+/// funcion y su cuerpo no es parte de esta— y **sin entrar en otra funcion por
+/// un salto**, que es la llamada de cola: un `jmp` a la entrada de otra funcion
+/// transfiere el control y no vuelve, asi que lo que hay al otro lado tampoco es
+/// parte de esta.
+///
+/// # Lo que costaba no parar ahi
+///
+/// Estaba escrito en el comentario y no en el codigo, y la diferencia se midio:
+/// sin parar en las entradas ajenas, una funcion de `/bin/bash` acababa
+/// conteniendo bloques a medio megabyte de distancia, porque cada salto de cola
+/// encadenaba con la funcion siguiente y esa con la otra. Con «funciones» asi,
+/// el ambito de [`crate::capacidad::Ambito::MismaFuncion`] no acota nada y las
+/// reglas vuelven a juntar hechos que no tienen relacion.
+///
+/// Un bloque si puede pertenecer a mas de una funcion —el codigo compartido
+/// existe, y los compiladores lo generan—, y eso no es un error que haya que
+/// resolver eligiendo una.
+fn cuerpo(cfg: &Cfg, entrada: u64, entradas: &BTreeSet<u64>) -> Vec<u64> {
     let mut vistos = BTreeSet::new();
     let mut cola = VecDeque::new();
     if cfg.bloque(entrada).is_some() {
@@ -624,9 +638,12 @@ fn cuerpo(cfg: &Cfg, entrada: u64) -> Vec<u64> {
     }
     while let Some(d) = cola.pop_front() {
         let Some(b) = cfg.bloque(d) else { continue };
-        // Un bloque que termina en llamada de cola no continua en esta funcion:
-        // el control se va y no vuelve.
         for s in &b.sucesores {
+            // La entrada de otra funcion no se cruza. La propia si —una funcion
+            // recursiva o con un bucle que vuelve al principio es normal.
+            if *s != entrada && entradas.contains(s) {
+                continue;
+            }
             if vistos.insert(*s) {
                 cola.push_back(*s);
             }

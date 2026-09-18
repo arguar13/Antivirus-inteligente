@@ -229,6 +229,18 @@ pub struct Instruccion {
     /// que resuelve llamadas indirectas. Confundirlas obligaria al analisis a
     /// adivinar cual de los inmediatos es el valor, y a acertar por convenio.
     pub valor_definido: Option<u64>,
+    /// El segmento por el que la instruccion accede a memoria, si es uno de los
+    /// que significan algo.
+    ///
+    /// Es el dato mas barato y mas limpio que hay para reconocer codigo que se
+    /// busca la vida sin tabla de importaciones: en Windows, `gs:[0x60]` en 64
+    /// bits y `fs:[0x30]` en 32 son el bloque de entorno del proceso, y de ahi
+    /// se llega a la lista de modulos cargados y a sus tablas de exportacion.
+    /// Un programa normal no lee eso; lo lee quien esta resolviendo APIs a mano.
+    ///
+    /// En A64 no existe el concepto y siempre es `None`: alli el equivalente se
+    /// lee de un registro de sistema, y eso sale por otro camino.
+    pub segmento: Option<Segmento>,
     /// El registro cuyo valor pasa TAL CUAL al registro que la instruccion
     /// define.
     ///
@@ -265,6 +277,21 @@ pub struct Instruccion {
     /// declara como indirecto no resuelto, que es la verdad: el destino esta en
     /// una posicion de memoria cuyo contenido el analisis estatico no conoce.
     pub destino_reg: Option<u8>,
+}
+
+/// Un prefijo de segmento que significa algo para el analisis.
+///
+/// Solo estan `FS` y `GS` porque son los unicos que llevan informacion: los
+/// demas, en 64 bits, tienen base cero y no dicen nada de lo que el programa
+/// esta haciendo. Anadir los que no significan nada solo haria que las reglas
+/// tuvieran que filtrarlos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Segmento {
+    /// `FS`. En Windows de 32 bits apunta al bloque de entorno del hilo.
+    Fs,
+    /// `GS`. En Windows de 64 bits apunta al bloque de entorno del hilo; en
+    /// Linux de 64 bits, al area de datos locales del hilo.
+    Gs,
 }
 
 /// Los registros generales que una instruccion lee y escribe.
@@ -482,6 +509,7 @@ mod pruebas {
             lee_memoria: false,
             escribe_memoria: false,
             regs: Registros::nada(),
+            segmento: None,
             valor_definido: None,
             copia_de: None,
             delta: None,
@@ -501,6 +529,7 @@ mod pruebas {
             lee_memoria: false,
             escribe_memoria: false,
             regs: Registros::nada(),
+            segmento: None,
             valor_definido: None,
             copia_de: None,
             delta: None,
@@ -522,6 +551,7 @@ mod pruebas {
             lee_memoria: false,
             escribe_memoria: false,
             regs: Registros::nada(),
+            segmento: None,
             valor_definido: None,
             copia_de: None,
             delta: None,

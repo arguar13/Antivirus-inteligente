@@ -36,7 +36,9 @@ use iced_x86::{
 };
 
 use crate::error::DisasmError;
-use crate::instruccion::{Arquitectura, Clase, Flujo, Instruccion, Registros, MAX_INMEDIATOS};
+use crate::instruccion::{
+    Arquitectura, Clase, Flujo, Instruccion, Registros, Segmento, MAX_INMEDIATOS,
+};
 use crate::plazo::Plazo;
 
 thread_local! {
@@ -222,6 +224,7 @@ fn traducir(i: &iced_x86::Instruction, bitness: u32) -> Instruccion {
         // dispara se nota, y una que dispara de mas enteria el informe.
         escribe_memoria: i.op_count() > 0 && i.op0_kind() == OpKind::Memory,
         regs,
+        segmento: segmento_de(i),
         valor_definido,
         copia_de,
         delta,
@@ -364,6 +367,23 @@ fn valor_definido_de(i: &iced_x86::Instruction) -> Option<u64> {
         {
             Some(0)
         }
+        _ => None,
+    }
+}
+
+/// El prefijo de segmento de la instruccion, si es uno de los que significan
+/// algo.
+///
+/// Se mira el segmento **efectivo** y no solo el prefijo escrito, porque un
+/// acceso con prefijo redundante y uno sin el son la misma lectura, y una regla
+/// que solo viera el prefijo se saltaria la mitad de los casos.
+fn segmento_de(i: &iced_x86::Instruction) -> Option<Segmento> {
+    if !toca_memoria(i) {
+        return None;
+    }
+    match i.memory_segment() {
+        Register::FS => Some(Segmento::Fs),
+        Register::GS => Some(Segmento::Gs),
         _ => None,
     }
 }

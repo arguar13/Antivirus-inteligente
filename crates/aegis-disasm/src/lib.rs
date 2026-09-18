@@ -95,14 +95,21 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod analisis;
 pub mod arm64;
+pub mod capacidad;
 pub mod cfg;
 pub mod error;
+pub mod importaciones;
 pub mod instruccion;
 pub mod llamadas;
 pub mod plazo;
+pub mod reglas;
+pub mod senal;
 pub mod x86;
 
+pub use analisis::{analizar, Analisis, Entrada};
+pub use capacidad::{Capacidad, Evidencia, Familia, Informe};
 pub use cfg::{Bloque, Cfg};
 pub use error::DisasmError;
 pub use instruccion::{Arquitectura, Flujo, Instruccion};

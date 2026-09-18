@@ -460,3 +460,58 @@ fn sobre_un_tramo_vacio_no_se_afirma_nada() {
     assert!(g.sin_resolver.is_empty());
     assert_eq!(cfg.cobertura.fraccion_cubierta(), None);
 }
+
+#[test]
+fn las_reglas_no_disparan_a_lo_loco_sobre_binarios_del_sistema() {
+    // La medida que de verdad dice si el catalogo sirve. Un motor de capacidades
+    // se juzga por lo que dice de los ficheros que NO son malware, porque son el
+    // 99,99 % de los que va a ver. Uno que encuentre cinco capacidades en `ls`
+    // llena la bandeja del analista de ruido, y una bandeja llena de ruido es
+    // una bandeja que nadie mira.
+    //
+    // No se exige cero: `bash` habla por red, lee el registro de nadie pero si
+    // consulta el entorno, y la libc trae dentro implementaciones de cifrado de
+    // verdad. Lo que se exige es que lo que salga sea POCO y que salga **con su
+    // evidencia dentro del codigo**, que es lo que permite descartarlo de un
+    // vistazo en vez de tener que reanalizar el fichero.
+    let mut probados = 0;
+    for nombre in BINARIOS {
+        let Some(c) = texto_de(Path::new(nombre)) else {
+            continue;
+        };
+        let e = aegis_disasm::Entrada::minima(&c.bytes, c.base, Arquitectura::X86_64, &c.entradas);
+        let mut plazo = Plazo::nuevo(std::time::Duration::from_secs(60), u64::MAX);
+        let a = aegis_disasm::analizar(&e, &mut plazo);
+        let nombres: Vec<&str> = a.informe.capacidades().iter().map(|c| c.nombre).collect();
+        eprintln!("{nombre}: {} capacidades {nombres:?}", nombres.len());
+
+        for cap in a.informe.capacidades() {
+            for ev in cap.evidencias() {
+                assert!(
+                    ev.donde >= c.base && ev.donde < c.base + c.bytes.len() as u64,
+                    "{nombre}: «{}» apunta a {:#x}, fuera del codigo",
+                    cap.nombre,
+                    ev.donde
+                );
+            }
+        }
+        // Sin tabla de importaciones —aqui no se le da ninguna— las reglas que
+        // miran nombres no pueden disparar, asi que lo que salga viene de
+        // constantes y de instrucciones.
+        //
+        // La medida a dia de hoy es CERO en los tres binarios, y llegar ahi
+        // costo tres correcciones: el ambito de funcion, la ventana de
+        // proximidad y el segmento del bloque de entorno por anchura. El umbral
+        // se deja en uno y no en cero para que la prueba no se rompa en una
+        // maquina con otra libc, pero cualquier cosa por encima significa que se
+        // ha reintroducido una regla que dispara sola.
+        assert!(
+            nombres.len() <= 1,
+            "{nombre}: {} capacidades es demasiado ruido para un binario del \
+             sistema: {nombres:?}",
+            nombres.len()
+        );
+        probados += 1;
+    }
+    assert!(probados > 0, "esta prueba no ha comprobado nada");
+}

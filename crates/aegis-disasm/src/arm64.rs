@@ -172,6 +172,8 @@ pub fn decodificar(w: u32, pc: u64) -> Instruccion {
         lee_memoria: es_carga(w),
         escribe_memoria: es_almacenamiento(w),
         regs: a.regs,
+        // A64 no tiene segmentos.
+        segmento: None,
         valor_definido: a.valor_definido,
         copia_de: a.copia_de,
         delta: a.delta,
