@@ -565,3 +565,41 @@ fn un_fichero_de_solo_lectura_sigue_siendo_de_solo_lectura() {
     );
     let _ = std::fs::remove_file(&fichero);
 }
+
+#[test]
+fn una_politica_de_solo_red_compila_aunque_la_abi_no_gobierne_la_red() {
+    // `agent_helper` prohibe la red y no dice nada de rutas. En un kernel con
+    // Landlock ABI 3 —el de WSL2, y el de cualquier kernel anterior a 6.7— la red
+    // no se puede gobernar con Landlock, y sin rutas tampoco hay nada de fichero
+    // que gobernar.
+    //
+    // Antes se creaba el conjunto de reglas igualmente, con los dos campos a
+    // cero, y el kernel lo rechazaba con ENOMSG: la compilacion entera fallaba
+    // por una politica que seccomp aplica perfectamente. Ahora no se crea un
+    // conjunto que no gobierna nada.
+    let p = SandboxPolicy::agent_helper();
+    assert!(
+        p.fs.is_empty(),
+        "la premisa de esta prueba es que no hay rutas"
+    );
+    assert!(p.deny_network, "y que se pide prohibir la red");
+
+    let c = CompiledSandbox::compile(&p)
+        .expect("una politica de solo red tiene que compilar en cualquier ABI");
+
+    // Y lo que importa de verdad: la red sigue prohibida por seccomp, que es
+    // quien la cubre cuando Landlock no llega.
+    let resumen = c.summary();
+    assert!(
+        resumen.blocked_syscalls > 0,
+        "sin Landlock de red, seccomp tiene que seguir bloqueando llamadas"
+    );
+
+    // El proceso confinado sigue vivo: un conjunto de reglas vacio habria hecho
+    // fallar la aplicacion entera.
+    assert_eq!(
+        en_hijo(&p, Accion::Vivir).code(),
+        Some(PERMITIDA),
+        "el proceso tiene que nacer confinado y seguir funcionando"
+    );
+}

@@ -76,12 +76,27 @@ impl CompiledSandbox {
 
         let mut rutas = 0usize;
         let mut rutas_sin_regla = 0usize;
-        let mut net_omitida = false;
-        let ruleset = match landlock::Abi::detect() {
-            Some(abi) if !p.fs.is_empty() || p.handled_net() != 0 => {
-                if p.handled_net() != 0 && !abi.supports_net() {
-                    net_omitida = true;
-                }
+
+        let abi = landlock::Abi::detect();
+        // La red solo se puede gobernar con Landlock desde ABI 4. Por debajo, la
+        // sigue cubriendo seccomp, que deniega `socket`, `connect`, `bind`,
+        // `listen` y `accept`: la restriccion se aplica igual, lo que se pierde es
+        // la segunda capa. Se declara en `Applied` en vez de callarlo.
+        let net_gobernable = p.handled_net() != 0 && abi.is_some_and(landlock::Abi::supports_net);
+        let net_omitida = p.handled_net() != 0 && !net_gobernable;
+
+        // Solo se crea el conjunto de reglas si hay algo que gobernar CON ESTA
+        // ABI. Antes bastaba con que la politica pidiera red, aunque la ABI no
+        // pudiera darla: entonces `handled_access_fs` y `handled_access_net`
+        // quedaban los dos a cero y el kernel rechazaba el conjunto vacio con
+        // ENOMSG ("No message of desired type"), haciendo fallar la compilacion
+        // entera de una politica que seccomp podia aplicar perfectamente.
+        //
+        // Le pasaba a cualquier politica sin rutas que prohibiera la red —como
+        // `agent_helper`— en un kernel con Landlock ABI 3, que es lo que trae WSL2
+        // y cualquier kernel anterior a 6.7.
+        let ruleset = match abi {
+            Some(abi) if !p.fs.is_empty() || net_gobernable => {
                 let rs = Ruleset::new(abi, p.handled_fs(abi), p.handled_net())?;
                 let mut anotar = |aplicada: bool| {
                     if aplicada {
