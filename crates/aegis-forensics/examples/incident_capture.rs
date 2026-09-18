@@ -15,8 +15,20 @@ use aegis_forensics::collect::{CollectConfig, Collector};
 use aegis_forensics::stix;
 use aegis_scal::linux::process::ProcFsProcesses;
 
-fn fuente_sleep() -> Option<&'static Path> {
-    for c in ["/bin/sleep", "/usr/bin/sleep"] {
+/// El binario del que se hace la copia que hara de implante.
+///
+/// Un INTERPRETE DE ORDENES y no `sleep`: la copia se ejecuta bajo otro nombre
+/// (`.implante`), y no todo binario lo admite. Ubuntu 26.04 trae uutils coreutils
+/// (paquete `rust-coreutils`), que es un unico binario MULTI-LLAMADA y decide que
+/// orden ejecutar mirando su `argv[0]`: una copia llamada `.implante` responde
+/// "unknown program" y muere al instante, con lo que no habria proceso vivo al
+/// que borrarle el binario y el escenario no se montaria.
+///
+/// Un interprete arranca con el nombre que se le ponga —distinguirse por
+/// `argv[0]` es lo que hace (`sh` frente a `bash`)—, que es justo la propiedad
+/// que hace falta aqui.
+fn fuente_del_implante() -> Option<&'static Path> {
+    for c in ["/bin/dash", "/bin/bash", "/bin/sh", "/usr/bin/bash"] {
         let p = Path::new(c);
         if p.exists() {
             return Some(p);
@@ -26,8 +38,8 @@ fn fuente_sleep() -> Option<&'static Path> {
 }
 
 fn main() -> std::process::ExitCode {
-    let Some(sleep) = fuente_sleep() else {
-        eprintln!("no hay un binario `sleep` con el que montar el escenario");
+    let Some(fuente) = fuente_del_implante() else {
+        eprintln!("no hay un interprete con el que montar el escenario");
         return std::process::ExitCode::FAILURE;
     };
 
@@ -38,7 +50,7 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::FAILURE;
     }
     let carga = lab.join(".implante");
-    if std::fs::copy(sleep, &carga).is_err() {
+    if std::fs::copy(fuente, &carga).is_err() {
         eprintln!("no se pudo preparar la carga");
         return std::process::ExitCode::FAILURE;
     }
@@ -49,7 +61,14 @@ fn main() -> std::process::ExitCode {
         let _ = std::fs::set_permissions(&carga, p);
     }
 
-    let mut hijo = match std::process::Command::new(&carga).arg("30").spawn() {
+    // Bloqueado en `read` sobre una tuberia que este proceso conserva abierta: se
+    // queda vivo el tiempo que haga falta y muere solo al acabar, sin dejar un
+    // huerfano durmiendo ni un hijo aparte al que habria que perseguir.
+    let mut hijo = match std::process::Command::new(&carga)
+        .args(["-c", "read x"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+    {
         Ok(c) => c,
         Err(e) => {
             eprintln!("no se pudo lanzar la carga: {e}");
@@ -57,6 +76,19 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
+    // Que haya arrancado no basta: un binario multi-llamada acepta el `spawn` y
+    // se muere al mirarse el `argv[0]`. Se comprueba aqui, con su causa, en vez
+    // de dejar que el escenario falle luego por un motivo que no lo parece.
+    std::thread::sleep(Duration::from_millis(50));
+    if !matches!(hijo.try_wait(), Ok(None)) {
+        eprintln!(
+            "la copia de {} llamada «.implante» murio al instante; \
+             ¿es un binario multi-llamada?",
+            fuente.display()
+        );
+        let _ = std::fs::remove_dir_all(&lab);
+        return std::process::ExitCode::FAILURE;
+    }
     // La tecnica: el proceso sigue vivo, su binario ya no esta.
     std::thread::sleep(Duration::from_millis(150));
     let _ = std::fs::remove_file(&carga);
