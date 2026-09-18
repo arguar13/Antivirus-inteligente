@@ -93,11 +93,31 @@ APUNTE=target/.ci-reanudar
 PLAZO_POR_GRUPO="${PLAZO_POR_GRUPO:-45m}"
 
 # La huella del arbol: lo comiteado, lo modificado y lo que no esta en el indice.
+#
+# FALLA EN VEZ DE INVENTARSE UN VALOR, Y ESA ES LA PARTE IMPORTANTE
+#
+# La primera version caia a la cadena "sin-git" cuando `git` no respondia. Parecia
+# defensivo y era lo contrario: con git fallando, los tres mandatos devolvian vacio
+# y la huella salia SIEMPRE la misma, asi que el apunte no se invalidaba nunca.
+#
+# Ocurrio de verdad, y en silencio: al correr la tanda como root sobre un
+# repositorio de otro usuario, git se niega con "detected dubious ownership". Se
+# midieron 48 grupos sobre un arbol y 2 sobre otro, y la tanda lo presento como
+# "todos los grupos en verde sobre el mismo arbol". La garantia entera de
+# `--reanudar` descansa en esta funcion.
+#
+# Una funcion que devuelve un valor por defecto cuando NO PUEDE calcular convierte
+# una garantia en una suposicion. Si no se puede saber si el arbol cambio, lo
+# correcto es decirlo y parar, no seguir con un numero que no significa nada.
 huella_del_arbol() {
+    # Se comprueba primero que git responde de verdad sobre este arbol.
+    if ! git rev-parse HEAD >/dev/null 2>&1; then
+        return 1
+    fi
     {
-        git rev-parse HEAD 2>/dev/null || echo "sin-git"
-        git diff HEAD --binary 2>/dev/null
-        git ls-files --others --exclude-standard 2>/dev/null | sort | while read -r f; do
+        git rev-parse HEAD
+        git diff HEAD --binary
+        git ls-files --others --exclude-standard | sort | while read -r f; do
             printf '%s ' "$f"
             sha256sum "$f" 2>/dev/null || echo "?"
         done
@@ -160,7 +180,24 @@ if [ "$SOLO" = "--reanudar" ]; then
         exit 1
     fi
 
-    HUELLA=$(huella_del_arbol)
+    # Sin huella no hay reanudacion posible. Toda la garantia de `--reanudar`
+    # —que los grupos verdes se midieron sobre el MISMO arbol— descansa en poder
+    # calcularla; sin ella, apuntar un verde seria apuntar cualquier cosa.
+    #
+    # El caso real que obliga a esto: correr la tanda como root sobre un
+    # repositorio de otro usuario. Git se niega con "detected dubious ownership",
+    # y antes eso pasaba en silencio.
+    if ! HUELLA=$(huella_del_arbol); then
+        printf '%s==> No se puede calcular la huella del arbol.%s\n' "$ROJO" "$FIN"
+        printf '    `git rev-parse HEAD` no responde en %s.\n' "$(pwd)"
+        printf '    Suele ser que git rechaza el repositorio por pertenecer a otro\n'
+        printf '    usuario; se arregla con:\n\n'
+        printf '        git config --global --add safe.directory %s\n\n' "'$(pwd)'"
+        printf '    Sin huella, `--reanudar` armaria un verde con medidas de arboles\n'
+        printf '    distintos, que es justo lo que existe para impedir. Usa `make ci`\n'
+        printf '    entero mientras tanto: ese no necesita apunte.\n'
+        exit 1
+    fi
     if [ -f "$APUNTE" ] && [ "$(head -1 "$APUNTE")" != "$HUELLA" ]; then
         printf '%s==>%s El arbol ha cambiado desde el apunte anterior: se empieza de cero.\n' \
             "$GRIS" "$FIN"
