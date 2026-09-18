@@ -57,6 +57,16 @@ SOLO="${1:-}"
 # normal tiene que seguir siendo una tanda entera y honrada.
 APUNTE=target/.ci-reanudar
 
+# Cuanto se le deja a un grupo antes de darlo por colgado.
+#
+# No sale de medir el mas lento y anadirle un margen: sale de que ningun grupo de
+# esta tanda tarda ni de lejos tanto —el mas pesado, la detonacion, ronda los diez
+# minutos— asi que cuarenta y cinco no interrumpe a nadie que este trabajando. Es
+# un detector de CUELGUES, no un limite de rendimiento, y por eso va holgado: un
+# plazo justo convertiria una maquina lenta en un fallo inventado, que es peor que
+# no tener plazo.
+PLAZO_POR_GRUPO="${PLAZO_POR_GRUPO:-45m}"
+
 # La huella del arbol: lo comiteado, lo modificado y lo que no esta en el indice.
 huella_del_arbol() {
     {
@@ -143,8 +153,22 @@ if [ "$SOLO" = "--reanudar" ]; then
             continue
         fi
         PENDIENTES=$((PENDIENTES + 1))
-        if "$0" "$g"; then
+        # Con plazo. Un grupo que se cuelga —esperando un socket que no contesta,
+        # un proceso hijo que no acaba— dejaria la tanda callada para siempre, y
+        # desde fuera eso es indistinguible de estar trabajando: se mira el log, no
+        # se mueve, y no se sabe si va lento o si esta muerto. Aqui un cuelgue se
+        # convierte en un FALLO con nombre, que es lo unico que se puede arreglar.
+        timeout "$PLAZO_POR_GRUPO" "$0" "$g"
+        SALIDA=$?
+        if [ "$SALIDA" -eq 0 ]; then
             echo "verde $g" >> "$APUNTE"
+        elif [ "$SALIDA" -eq 124 ]; then
+            printf '%s==> %s se ha COLGADO: mas de %s sin terminar.%s\n' \
+                "$ROJO" "$g" "$PLAZO_POR_GRUPO" "$FIN"
+            printf '    No es lentitud: el plazo es varias veces lo que tarda el grupo\n'
+            printf '    mas lento. Mira que espera (`ps`, el log del grupo) y arreglalo;\n'
+            printf '    el apunte se conserva y `--reanudar` vuelve por aqui.\n'
+            exit 1
         else
             printf '%s==> %s fallo. El apunte se conserva: al arreglarlo, `--reanudar` sigue por aqui.%s\n' \
                 "$ROJO" "$g" "$FIN"
