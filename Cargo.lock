@@ -323,6 +323,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-instrumentar"
+version = "0.1.0"
+dependencies = [
+ "aegis-disasm",
+ "aegis-entidad",
+ "goblin",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-intel"
 version = "0.1.0"
 dependencies = [

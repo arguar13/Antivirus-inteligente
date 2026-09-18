@@ -121,7 +121,7 @@ echo "==> AegisDisasm: el analisis no ejecuta nada (invariante 8)"
 # Se verifica por lo que FALTA. Un desensamblador que ejecutara lo que
 # desensambla es un ejecutor de malware con otro nombre, y la unica forma de
 # comprobar que no lo hace es que no exista el camino.
-PROHIBIDO=$(grep -rnE "std::process|Command::new|libloading|mmap|PROT_EXEC|transmute|asm!|\.set_permissions|OpenOptions" \
+PROHIBIDO=$(grep -rnE "std::process::Command|Command::new|libloading|mmap|PROT_EXEC|transmute|asm!|\.set_permissions|OpenOptions" \
     crates/aegis-disasm/src/ || true)
 if [ -z "$PROHIBIDO" ] && grep -q "#!\[forbid(unsafe_code)\]" crates/aegis-disasm/src/lib.rs; then
     echo "    ${VERDE}OK${FIN}"

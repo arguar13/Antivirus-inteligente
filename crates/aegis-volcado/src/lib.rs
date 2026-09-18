@@ -54,10 +54,13 @@
 pub mod adquirir;
 pub mod error;
 pub mod hallazgos;
+pub mod procesos;
 pub mod regiones;
 pub mod senal;
+pub mod vivo;
 
 pub use adquirir::{EnMemoria, Lectura, Volcado};
 pub use error::VolcadoError;
 pub use hallazgos::{analizar_memoria, Hallazgo, Informe};
+pub use procesos::{Camino, Cruce, Perfil, Proceso, Vistas};
 pub use regiones::{leer_mapa, Permisos, Region, Respaldo};

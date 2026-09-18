@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**61 crates · 2394 pruebas**
+**61 crates · 2410 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -330,7 +330,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-unpacker` | Desempaquetado dinamico en memoria: detecta el OEP de un binario empaquetado y extrae el codigo real | 7 | — | — |
 | `aegis-update` | Actualizacion firmada (hibrida Ed25519+ML-DSA-65) con rollback atomico | 18 | `verificar-resiliencia.sh` | sí |
 | `aegis-vmi` | Introspeccion de maquina virtual (VMI) DEFENSIVA: EPT y lectura de estructuras del kernel desde memoria fisica para detectar rootkits por debajo del SO | 10 | `verificar-vmi.sh` | — |
-| `aegis-volcado` | Analisis forense de memoria inerte: mapa de regiones, codigo sin respaldo de fichero y capacidades del codigo que solo existe en memoria. Sin ninguna operacion de escritura | 38 | `verificar-volcado.sh` | sí |
+| `aegis-volcado` | Forense de memoria: mapa de regiones, codigo sin respaldo de fichero, capacidades del codigo que solo existe en memoria, y vista cruzada de tres caminos para procesos ocultos. Sin ninguna operacion de escritura | 54 | `verificar-volcado.sh` | sí |
 | `aegis-vuln` | Escaner de postura y vulnerabilidades del host para AegisCore | 45 | — | sí |
 | `aegis-watchdog` | Watchdog de alta disponibilidad del agente y el driver | 8 | — | — |
 | `aegis-wire` | Diseccion semantica de protocolos: convierte trafico crudo en hechos, con reensamblado TCP resistente a evasion | 191 | `verificar-wire.sh` | sí |

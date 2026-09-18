@@ -1,0 +1,13 @@
+[package]
+name = "aegis-instrumentar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = "2"
+aegis-entidad = { path = "../aegis-entidad" }
+aegis-disasm = { path = "../aegis-disasm" }
+
+[dev-dependencies]
+goblin = "0.9"

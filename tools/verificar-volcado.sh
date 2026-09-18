@@ -54,7 +54,13 @@ echo "==> AegisMemForensics: no hay camino de escritura ni de ejecucion"
 # `ptrace` y `process_vm_writev` precisamente para decir que no estan, y un
 # filtro que no distinguiera las dos cosas haria imposible explicar la
 # invariante sin romperla.
-ESCRITURA=$(grep -rnE "process_vm_writev|ptrace|POKEDATA|OpenOptions|\.write\(|write_all|create\(true\)|std::process|Command::new|mmap|PROT_EXEC|transmute|asm!" \
+#
+# Y se prohibe `std::process::Command`, no `std::process`: lo que no puede haber
+# es LANZAR un proceso, y `std::process::id()` solo devuelve el identificador del
+# propio. Un filtro que no distinguiera los dos prohibiria saber en que proceso
+# se esta, que es justo lo que hace falta para poder decir de quien es la memoria
+# que se analiza.
+ESCRITURA=$(grep -rnE "process_vm_writev|ptrace|POKEDATA|OpenOptions|\.write\(|write_all|create\(true\)|std::process::Command|Command::new|mmap|PROT_EXEC|transmute|asm!" \
     crates/aegis-volcado/src/ | grep -vE "^[^:]+:[0-9]+: *//" || true)
 if [ -z "$ESCRITURA" ] && grep -q "#!\[forbid(unsafe_code)\]" crates/aegis-volcado/src/lib.rs; then
     echo "    ${VERDE}OK${FIN}"
@@ -103,6 +109,24 @@ else
     FALLOS=$((FALLOS + 1))
 fi
 
+echo "==> AegisMemForensics: la vista cruzada de tres caminos"
+if grep -q "pub fn parece_oculto" crates/aegis-volcado/src/procesos.rs \
+   && grep -q "BarridoDeMemoria" crates/aegis-volcado/src/procesos.rs; then
+    echo "    ${VERDE}OK${FIN}"
+    grep -oE "/proc: [0-9]+ caminos recorridos, [0-9]+ procesos en los que coinciden, [0-9]+ discrepancias" \
+        /tmp/aegis-volcado-lib.log | sed "s/^/    ${GRIS}/;s/$/${FIN}/"
+    echo "    ${GRIS}Un rootkit no borra el proceso: lo desengancha de la lista que las${FIN}"
+    echo "    ${GRIS}herramientas recorren, y el proceso sigue corriendo porque el${FIN}"
+    echo "    ${GRIS}planificador no usa esa lista para planificar. Lo que lo delata no es${FIN}"
+    echo "    ${GRIS}ninguna de las listas: es el DESACUERDO entre ellas.${FIN}"
+    echo "    ${GRIS}Y la direccion importa: faltar en la lista y aparecer en el barrido es${FIN}"
+    echo "    ${GRIS}una ocultacion; al reves es un limite del barrido, y confundirlas${FIN}"
+    echo "    ${GRIS}convertiria cada fallo del barrido en una acusacion de rootkit.${FIN}"
+else
+    echo "    ${ROJO}FALLO${FIN}: la vista cruzada desaparecio o cambio de forma"
+    FALLOS=$((FALLOS + 1))
+fi
+
 echo "==> AegisMemForensics: la ausencia solo significa algo si se miro todo"
 if grep -q "pub fn la_ausencia_significa_algo" crates/aegis-volcado/src/hallazgos.rs \
    && grep -q "regiones_miradas == self.regiones_candidatas" crates/aegis-volcado/src/hallazgos.rs; then
@@ -121,9 +145,17 @@ echo "==> AegisMemForensics: lo que esta fase NO cierra"
 echo "    ${GRIS}AUSENTE${FIN}: la adquisicion de memoria de un proceso vivo. Exige"
 echo "    ${GRIS}privilegios y mecanismos que dependen del sistema, y la hace${FIN}"
 echo "    ${GRIS}aegis-memhunter con otras garantias. Aqui entra memoria ya volcada.${FIN}"
-echo "    ${GRIS}AUSENTE${FIN}: la reconstruccion de las estructuras del nucleo. Listar"
-echo "    ${GRIS}procesos a partir de memoria fisica depende de la version exacta del${FIN}"
-echo "    ${GRIS}nucleo, y hacerlo a medias produce listas de procesos inventadas.${FIN}"
+echo "    ${GRIS}AUSENTE${FIN}: el barrido de memoria FISICA. Los desplazamientos de"
+echo "    ${GRIS}task_struct cambian entre versiones del nucleo y entre configuraciones${FIN}"
+echo "    ${GRIS}del mismo nucleo; una tabla fija produce listas de procesos inventadas${FIN}"
+echo "    ${GRIS}en cualquier maquina que no sea la del autor, y nadie las pone en duda.${FIN}"
+echo "    ${GRIS}El PERFIL es explicito y declara si vino de BTF o de firma, y con un${FIN}"
+echo "    ${GRIS}perfil incompleto los caminos que siguen enlaces NO se recorren.${FIN}"
+echo "    ${GRIS}Los tres caminos SI se ejercen de verdad, sobre /proc de esta maquina:${FIN}"
+echo "    ${GRIS}listar el directorio, preguntar por cada identificador uno a uno, y los${FIN}"
+echo "    ${GRIS}hilos de los procesos visibles. Los tres los sirve el mismo nucleo, asi${FIN}"
+echo "    ${GRIS}que atrapan al rootkit que miente en uno y no al que miente en los tres:${FIN}"
+echo "    ${GRIS}eso ultimo necesita el volcado, y se dice.${FIN}"
 echo "    ${GRIS}AUSENTE${FIN}: un volcado de memoria de verdad en las pruebas. No hay uno"
 echo "    ${GRIS}en esta maquina, asi que lo que se ejercita contra lo real es el MAPA de${FIN}"
 echo "    ${GRIS}este mismo proceso, que si lo es. El camino del fichero se prueba con${FIN}"
