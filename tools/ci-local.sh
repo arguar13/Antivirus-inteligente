@@ -13,6 +13,15 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# La compilacion incremental se apaga a proposito, y no por gusto: en una tanda
+# de CI no acelera nada —cada ejecucion parte de un arbol que nadie acaba de
+# tocar— y en cambio deja en `target/debug/incremental` mas bytes que los propios
+# binarios. Medido en esta maquina: 5,6 GiB entre los dos espacios de trabajo,
+# que se regeneran en cada tanda y acabaron llenando el disco a media puerta.
+# Una puerta que falla por falta de sitio no dice nada del codigo, y es peor que
+# una que no se ejecuta: parece un veredicto.
+export CARGO_INCREMENTAL=0
+
 VERDE=$'\033[32m'; ROJO=$'\033[31m'; GRIS=$'\033[90m'; FIN=$'\033[0m'
 FALLOS=0
 SOLO="${1:-}"
