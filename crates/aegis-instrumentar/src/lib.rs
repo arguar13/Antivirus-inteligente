@@ -44,11 +44,15 @@
 #![deny(missing_docs)]
 
 pub mod donde;
+pub mod jaula;
 pub mod plan;
 pub mod punto;
+pub mod simbolos;
 pub mod traza;
 
 pub use donde::plan_desde;
+pub use jaula::{Interventor, Jaula, Observador, PruebaDeJaula};
 pub use plan::Plan;
 pub use punto::{Punto, Que};
+pub use simbolos::{resolver, Firma, Simbolo, Via};
 pub use traza::{Final, Suceso, Traza};

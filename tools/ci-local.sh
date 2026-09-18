@@ -623,6 +623,24 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "volcado" ]; then
     fi
 fi
 
+# AegisInstrument (FASE 87): instrumentacion confinada por el TIPO.
+#
+# Un instrumentador que pueda escribir en un proceso es una primitiva de
+# inyeccion. Aqui esa capacidad necesita una prueba de estar dentro de la jaula
+# de detonacion, y esa prueba solo se obtiene midiendo: fuera, el programa NO
+# COMPILA. La puerta lo comprueba con dos ejemplos atados a su codigo de error.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "instrumentar" ]; then
+    printf '%s==>%s AegisInstrument · instrumentacion confinada por el tipo\n' "$GRIS" "$FIN"
+    if ./tools/verificar-instrumentar.sh > /tmp/aegis-instr-ci.log 2>&1; then
+        sed 's/^/    | /' /tmp/aegis-instr-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' /tmp/aegis-instr-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo

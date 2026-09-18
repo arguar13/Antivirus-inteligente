@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**61 crates · 2410 pruebas**
+**62 crates · 2454 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -300,6 +300,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-honeytoken` | Honey-tokens dinamicos y decepcion activa: credenciales senuelo atribuibles (FASE 52) | 10 | `verificar-honeytoken.sh` | — |
 | `aegis-hunt` | Ejecucion de consultas AegisQL contra el estado real del endpoint | 44 | — | sí |
 | `aegis-ingest` | Ingesta y normalizacion de registros de cualquier origen, con contrapresion y punto de control durable | 201 | `verificar-ingest.sh` | sí |
+| `aegis-instrumentar` | Instrumentacion dirigida por lo que el analisis estatico no resolvio. El tipo que escribe en un proceso no se puede construir sin una prueba medida de estar en la jaula: fuera, no compila | 44 | `verificar-instrumentar.sh` | sí |
 | `aegis-intel` | Cliente de reputacion con k-anonimato y cache local | 22 | — | sí |
 | `aegis-invitado` | Agente invitado de detonacion: traza el comportamiento de una muestra y lo sube por vsock | 38 | `verificar-detonate.sh` | — |
 | `aegis-ipc` | Contrato ABI y consumidor del ring buffer compartido Ring 0 <-> Ring 3 de AegisCore | 17 | `verificar-resiliencia.sh` | — |
