@@ -93,6 +93,35 @@ else
     fi
 fi
 
+# --- 2b. El BTF del kernel, ¿alcanza para los eBPF de este proyecto? ---------
+#
+# No basta con que HAYA BTF: tiene que traer los tipos que usan los programas.
+# `aegis_kintegrity.bpf.c` recorre la lista de tareas con los iteradores abiertos
+# (`bpf_iter_task_*`, kernel 6.4+), y hay kernels con BTF que NO los exponen
+# porque se compilaron sin esa parte. El de WSL2 es uno: tiene BTF de 6 MB y seis
+# mil tipos, pero ni `struct bpf_iter_task` ni las kfunc.
+#
+# Sin esta comprobacion, el sintoma es un error de clang a mitad de `cargo build`
+# —"variable has incomplete type 'struct bpf_iter_task'"— que no dice nada de la
+# causa real ni de como arreglarlo. Se detecta aqui y se dice que hacer.
+info "BTF del kernel: ¿trae los tipos de los iteradores abiertos?"
+BTF_K="${AEGIS_BTF:-/sys/kernel/btf/vmlinux}"
+if [ ! -r "$BTF_K" ]; then
+    aviso "no hay BTF legible en $BTF_K; el kernel necesita CONFIG_DEBUG_INFO_BTF"
+elif ! command -v bpftool >/dev/null 2>&1; then
+    aviso "sin bpftool no se puede comprobar el BTF"
+elif bpftool btf dump file "$BTF_K" format raw 2>/dev/null \
+        | grep -q "STRUCT 'bpf_iter_task'"; then
+    ok "el BTF de $BTF_K trae struct bpf_iter_task"
+else
+    aviso "el BTF de $BTF_K NO trae struct bpf_iter_task."
+    aviso "  aegis_kintegrity.bpf.c no compilara contra el. Pasa comun en WSL2 y"
+    aviso "  en kernels recortados. Apunta AEGIS_BTF al vmlinux de un kernel que"
+    aviso "  si los tenga (>= 6.4 con los iteradores compilados); el Makefile lo"
+    aviso "  admite: CO-RE reubica en el destino, no en la compilacion. Por"
+    aviso "  ejemplo, extraido del paquete linux-image-*-generic de la distro."
+fi
+
 # --- 3. Dependencias de Python para generar los modelos ---------------------
 info "numpy + onnx (para generar los modelos)"
 if python3 -c "import numpy, onnx" >/dev/null 2>&1; then
