@@ -43,20 +43,54 @@ fn los_hilos_de_kernel_se_reconocen_por_su_bandera_no_por_su_enlace_exe() {
     let f = parse_stat(con_bandera).expect("analiza");
     assert_ne!(f.flags & aegis_resp::kill::PF_KTHREAD, 0);
 
-    // En el sistema real, kthreadd (PID 2) es hilo de kernel y el proceso de
-    // esta prueba no lo es, aunque este ultimo podria estar en cualquier estado.
+    // Y ahora sobre el sistema real.
+    //
+    // Los hilos de kernel se buscan POR LO QUE SON, no por su numero. La version
+    // anterior daba por hecho que el PID 2 es `kthreadd`, que es cierto en un
+    // Linux nativo y falso en cuanto hay un espacio de nombres de PID de por
+    // medio: en WSL2 con systemd el PID 1 es `systemd`, el 2 es el `init` de
+    // Microsoft —un proceso de usuario corriente— y no existen ni el 3 ni el 4.
+    // Exigirle al PID 2 que fuera hilo de kernel hacia fallar la prueba
+    // acusando al codigo de un defecto que no tenia.
+    //
+    // Identificar un hilo de kernel por su PID es, ademas, la misma clase de
+    // error que esta prueba existe para impedir: fijarse en algo que no lo
+    // define.
     let ps = snapshot_processes(Path::new("/proc")).unwrap();
-    if let Some(k) = ps.iter().find(|p| p.pid == 2) {
-        assert!(
-            k.is_kernel_thread,
-            "PID 2 debe reconocerse como hilo de kernel"
-        );
-    }
+
     let yo = ps
         .iter()
         .find(|p| p.pid == std::process::id() as i32)
         .unwrap();
     assert!(!yo.is_kernel_thread);
+
+    let kernel: Vec<_> = ps.iter().filter(|p| p.is_kernel_thread).collect();
+    if kernel.is_empty() {
+        // No es un aprobado disimulado: es que esta maquina no tiene hilos de
+        // kernel QUE VER. Pasa en WSL2 y en contenedores con espacio de nombres
+        // de PID, donde /proc solo muestra los procesos del espacio. Lo que la
+        // prueba afirma sobre la bandera ya quedo comprobado arriba con una
+        // linea de `stat` autentica de kthreadd.
+        eprintln!(
+            "PARCIAL: esta maquina no expone hilos de kernel en /proc \
+             ({} procesos, ninguno con PF_KTHREAD). La deteccion por bandera se \
+             comprobo igual sobre la linea de stat de kthreadd.",
+            ps.len()
+        );
+        return;
+    }
+
+    // Donde SI los hay, tienen que cumplir lo que los define: sin imagen
+    // ejecutable. Es la comprobacion que de verdad separa mirar la bandera de
+    // mirar el enlace `exe`.
+    for k in &kernel {
+        assert!(
+            std::fs::read_link(format!("/proc/{}/exe", k.pid)).is_err(),
+            "PID {} ({}) esta marcado como hilo de kernel pero tiene exe resoluble",
+            k.pid,
+            k.comm
+        );
+    }
 }
 
 #[test]
