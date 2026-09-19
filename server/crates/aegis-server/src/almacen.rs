@@ -1922,18 +1922,62 @@ impl Almacen {
 
     /// Abre la correlacion, o actualiza la que ya estaba abierta.
     ///
-    /// Devuelve `(id, es_nueva)`. La idempotencia NO es una comodidad: el motor
-    /// evalua cada minuto, y sin ella una campana que dura tres dias produciria
-    /// cuatro mil correlaciones identicas. El analista no veria una campana:
-    /// veria una tormenta, que es el ruido por el que se dejan de mirar las
-    /// alertas.
+    /// Devuelve `Some((id, es_nueva))`, o `None` si la clave estaba excluida
+    /// como falso positivo y por tanto no se abre nada. La idempotencia NO es
+    /// una comodidad: el motor evalua cada minuto, y sin ella una campana que
+    /// dura tres dias produciria cuatro mil correlaciones identicas. El
+    /// analista no veria una campana: veria una tormenta, que es el ruido por
+    /// el que se dejan de mirar las alertas.
+    ///
+    /// POR QUE LA EXCLUSION SE COMPRUEBA AQUI Y NO SOLO AL AGRUPAR
+    /// ----------------------------------------------------------
+    /// El filtro de claves excluidas vive en el SQL de agrupacion, que lo
+    /// aplica con la lista que `heuristicas_activas` leyo al EMPEZAR la vuelta.
+    /// Esa lista es una instantanea: si el analista cierra un falso positivo
+    /// mientras la vuelta esta en curso, la evaluacion en vuelo no ve la
+    /// exclusion y reabre exactamente lo que el analista acaba de descartar.
+    /// Y el plano de control corre con varias instancias, asi que siempre hay
+    /// alguna vuelta en curso.
+    ///
+    /// Por eso la exclusion se vuelve a comprobar en la MISMA transaccion que
+    /// abre, tomando antes un cerrojo compartido sobre la regla. Si un cierre
+    /// esta en marcha, esta transaccion espera a que termine y entonces lee la
+    /// exclusion ya aplicada.
+    ///
+    /// EL ORDEN DE LOS CERROJOS IMPORTA: primero la REGLA, despues la
+    /// CORRELACION. `cerrar_correlacion` toma los mismos dos en el mismo orden.
+    /// Dos transacciones que piden los mismos cerrojos en el mismo orden no
+    /// pueden abrazarse; invertirlo aqui seria un interbloqueo bajo carga, que
+    /// es cuando menos se puede permitir.
     pub async fn abrir_o_actualizar_correlacion(
         &self,
         id_regla: Uuid,
         g: &GrupoCorrelacion,
         aportes: &[AporteEndpoint],
-    ) -> Resultado<(Uuid, bool)> {
+    ) -> Resultado<Option<(Uuid, bool)>> {
         let mut tx = self.pool.begin().await?;
+
+        let regla = sqlx::query(
+            r#"SELECT claves_excluidas FROM heuristicas_globales
+                WHERE id = $1
+                  FOR SHARE"#,
+        )
+        .bind(id_regla)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        // Una regla que ya no existe no abre nada: la evaluacion que la trajo
+        // arranco antes de que la borraran.
+        let Some(regla) = regla else {
+            tx.rollback().await?;
+            return Ok(None);
+        };
+        let excluidas: Vec<String> = regla.get("claves_excluidas");
+        if excluidas.iter().any(|c| c == &g.clave) {
+            tx.rollback().await?;
+            return Ok(None);
+        }
+
         let nuevo = Uuid::new_v4();
         let fila = sqlx::query(
             r#"INSERT INTO correlaciones
@@ -1994,7 +2038,7 @@ impl Almacen {
         }
 
         tx.commit().await?;
-        Ok((id, es_nueva))
+        Ok(Some((id, es_nueva)))
     }
 
     /// Correlaciones abiertas, de la que mas recientemente crecio a la que
@@ -2050,6 +2094,12 @@ impl Almacen {
     ///
     /// Y va en la MISMA transaccion que el cierre: si se cerrara y fallara la
     /// exclusion, quedaria cerrada y reabriendose en bucle.
+    ///
+    /// EL ORDEN DE LOS CERROJOS: primero la REGLA, despues la CORRELACION, que
+    /// es el mismo que toma `abrir_o_actualizar_correlacion`. Si aqui se
+    /// cerrara primero la correlacion y despues se tocara la regla, una vuelta
+    /// de evaluacion que fuera al reves se quedaria abrazada con este cierre y
+    /// PostgreSQL tendria que abortar una de las dos.
     pub async fn cerrar_correlacion(
         &self,
         id: Uuid,
@@ -2062,6 +2112,28 @@ impl Almacen {
             )));
         }
         let mut tx = self.pool.begin().await?;
+
+        // Se averigua de que regla es ANTES de tocar nada, para poder tomar su
+        // cerrojo primero. Es una lectura sin cerrojo: `id_regla` de una
+        // correlacion no cambia nunca, y el UPDATE de abajo vuelve a exigir que
+        // siga abierta.
+        let previa = sqlx::query(
+            r#"SELECT id_regla FROM correlaciones
+                WHERE id = $1 AND cerrada_en IS NULL"#,
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(previa) = previa else {
+            tx.rollback().await?;
+            return Ok(false);
+        };
+        let regla_de_la_correlacion: Uuid = previa.get("id_regla");
+        sqlx::query(r#"SELECT 1 FROM heuristicas_globales WHERE id = $1 FOR UPDATE"#)
+            .bind(regla_de_la_correlacion)
+            .execute(&mut *tx)
+            .await?;
+
         let fila = sqlx::query(
             r#"UPDATE correlaciones
                   SET cerrada_en = now(), cerrada_por = $3, veredicto = $2

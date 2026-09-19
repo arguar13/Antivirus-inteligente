@@ -51,6 +51,14 @@ pub struct Vuelta {
     pub grupos: usize,
     /// Correlaciones abiertas por primera vez en esta vuelta.
     pub nuevas: usize,
+    /// Grupos que cumplian la regla pero NO se abrieron porque la clave estaba
+    /// excluida como falso positivo.
+    ///
+    /// Se cuenta, en vez de descartarse en silencio, porque distingue dos
+    /// situaciones que se ven igual desde fuera: una regla que ya no encuentra
+    /// nada, y una regla que encuentra lo mismo de siempre y se descarta entero
+    /// por exclusiones. La segunda es una regla que hay que reescribir.
+    pub descartadas: usize,
 }
 
 impl Correlador {
@@ -104,7 +112,7 @@ impl Correlador {
                     .abrir_o_actualizar_correlacion(regla.id, grupo, aportes)
                     .await
                 {
-                    Ok((id, true)) => {
+                    Ok(Some((id, true))) => {
                         v.nuevas += 1;
                         // El nombre de la campana no es decorativo: a las tres
                         // de la manana, "Movimiento Lateral Distribuido" y la
@@ -130,7 +138,17 @@ impl Correlador {
                                 tecnica_mitre: regla.tecnica_mitre.clone(),
                             });
                     }
-                    Ok((_, false)) => {}
+                    Ok(Some((_, false))) => {}
+                    // La clave se cerro como falso positivo mientras esta
+                    // vuelta estaba en curso: no se reabre lo que el analista
+                    // acaba de descartar.
+                    Ok(None) => {
+                        v.descartadas += 1;
+                        tracing::debug!(
+                            regla = %regla.nombre,
+                            "grupo descartado: la clave esta excluida como falso positivo"
+                        );
+                    }
                     Err(e) => tracing::error!(
                         error = %e, regla = %regla.nombre,
                         "no se pudo registrar la correlacion"

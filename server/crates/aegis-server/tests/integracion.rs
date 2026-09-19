@@ -1843,6 +1843,111 @@ async fn un_falso_positivo_cerrado_no_se_reabre_en_la_evaluacion_siguiente() {
     apagar_regla(&almacen, &categoria).await;
 }
 
+/// Una vuelta de evaluacion YA EN CURSO tampoco puede reabrir un falso positivo.
+///
+/// POR QUE HACE FALTA ESTA PRUEBA APARTE
+/// ------------------------------------
+/// La de arriba cierra y despues evalua, asi que la evaluacion lee la exclusion
+/// ya escrita. Eso deja sin cubrir el caso real: el motor lee las reglas —con
+/// sus claves excluidas— al EMPEZAR la vuelta, y entre esa lectura y la
+/// apertura pasa el tiempo de evaluar toda la ventana. Si el analista cierra
+/// justo ahi, la vuelta en vuelo lleva una instantanea SIN la exclusion y
+/// reabre exactamente lo que se acaba de descartar. Y no es raro: el plano de
+/// control corre con varias instancias, asi que casi siempre hay alguna vuelta
+/// en curso.
+///
+/// Se reproduce sin hilos ni esperas, que es lo que la hace fiable: se guarda
+/// la instantanea de la regla ANTES de cerrar y se usa DESPUES, que es
+/// exactamente lo que tiene en la mano una vuelta en vuelo.
+#[tokio::test]
+async fn una_vuelta_en_vuelo_con_instantanea_vieja_no_reabre_un_falso_positivo() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        eprintln!("OMITIDA: no hay PostgreSQL");
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let categoria = cn_unico("envuelo");
+    let cuenta = format!("CORP\\vuelo-{}", uuid::Uuid::new_v4().simple());
+
+    let regla = regla_reconocimiento(&categoria, 3).validar().unwrap();
+    almacen.crear_heuristica(&regla, "analista").await.unwrap();
+    sembrar(&servicio, &almacen, &categoria, &cuenta, 4).await;
+
+    let correlador = aegis_server::correlador::Correlador::nuevo(servicio.clone());
+    correlador.evaluar_una_vez().await.unwrap();
+    let abierta = abierta_para(&almacen, &cuenta)
+        .await
+        .expect("tiene que abrir antes de poder cerrarse");
+
+    // LA INSTANTANEA: esto es lo que una vuelta se lleva al empezar. Todavia no
+    // hay ninguna clave excluida.
+    let instantanea = almacen
+        .heuristicas_activas()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.nombre == categoria)
+        .expect("la regla recien creada tiene que estar activa");
+    assert!(
+        instantanea.claves_excluidas.is_empty(),
+        "la instantanea se toma antes de cerrar: aun no puede haber exclusiones"
+    );
+
+    // El analista cierra MIENTRAS esa vuelta sigue en curso.
+    assert!(almacen
+        .cerrar_correlacion(abierta.id, "falso_positivo", "analista")
+        .await
+        .unwrap());
+
+    // Y ahora la vuelta en vuelo termina su trabajo con la instantanea vieja.
+    // Agrupa igual —su filtro de exclusiones es el de antes del cierre—, que es
+    // justo lo que hace peligroso el momento.
+    let grupos = almacen.evaluar_heuristica(&instantanea).await.unwrap();
+    let nuestro = grupos.iter().find(|(g, _)| g.clave == cuenta);
+    assert!(
+        nuestro.is_some(),
+        "la instantanea vieja SIGUE viendo el grupo: por eso la defensa tiene \
+         que estar al abrir, y no solo en el filtro de agrupacion"
+    );
+    let (grupo, aportes) = nuestro.unwrap();
+
+    // La defensa: abrir vuelve a comprobar la exclusion en su propia
+    // transaccion, asi que no reabre.
+    let abierto = almacen
+        .abrir_o_actualizar_correlacion(instantanea.id, grupo, aportes)
+        .await
+        .unwrap();
+    assert!(
+        abierto.is_none(),
+        "una vuelta en vuelo no puede reabrir lo que el analista acaba de \
+         descartar: a la tercera vez, nadie mira las correlaciones"
+    );
+    assert!(
+        abierta_para(&almacen, &cuenta).await.is_none(),
+        "no puede quedar ninguna correlacion abierta para la clave excluida"
+    );
+
+    // Y la misma vuelta en vuelo SIGUE abriendo lo que no esta excluido: la
+    // defensa no puede dejar ciega a la regla entera.
+    let otra = format!("CORP-vuelo-otra-{}", uuid::Uuid::new_v4().simple());
+    sembrar(&servicio, &almacen, &categoria, &otra, 4).await;
+    let grupos = almacen.evaluar_heuristica(&instantanea).await.unwrap();
+    let (grupo_otra, aportes_otra) = grupos
+        .iter()
+        .find(|(g, _)| g.clave == otra)
+        .expect("la otra cuenta forma grupo");
+    assert!(
+        almacen
+            .abrir_o_actualizar_correlacion(instantanea.id, grupo_otra, aportes_otra)
+            .await
+            .unwrap()
+            .is_some(),
+        "excluir una clave no puede impedir abrir las demas"
+    );
+
+    apagar_regla(&almacen, &categoria).await;
+}
+
 /// Las alertas sin el atributo de agrupacion no participan.
 #[tokio::test]
 async fn lo_que_no_se_pudo_ver_no_forma_un_grupo_que_dispare_siempre() {
