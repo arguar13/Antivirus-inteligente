@@ -801,6 +801,34 @@ mod pruebas {
     /// microsegundos por paquete contra treinta y siete. Un sensor al que se le
     /// puede multiplicar el coste por veinte eligiendo el relleno es un sensor
     /// que el atacante apaga generando trafico.
+    /// Cuanto cuesta redactar `cuantos` veces un paquete, **sin el ruido de la
+    /// maquina**.
+    ///
+    /// Se repite la medida y se toma la MENOR. El ruido externo —otro proceso
+    /// compilando, el planificador, una migracion de nucleo— solo puede anadir
+    /// tiempo, nunca quitarlo, asi que el minimo es la muestra menos
+    /// contaminada. Es lo que hace comparable una medicion con otra tomada un
+    /// instante despues.
+    ///
+    /// Sin esto, la prueba comparaba una referencia medida UNA vez contra
+    /// dieciocho mediciones posteriores: bastaba con que la maquina se
+    /// ralentizara en cualquiera de esas dieciocho ventanas para que fallara sin
+    /// que nada del codigo hubiera cambiado. Fallo asi en una tanda de CI y no se
+    /// reprodujo en diez intentos, que es exactamente como se comporta una prueba
+    /// que mide ruido en vez de medir el producto.
+    fn coste_de(r: &Redactor, paquete: &[u8], cuantos: u32) -> std::time::Duration {
+        const REPETICIONES: u32 = 5;
+        let mut menor = std::time::Duration::MAX;
+        for _ in 0..REPETICIONES {
+            let t = std::time::Instant::now();
+            for _ in 0..cuantos {
+                let _ = r.limpiar(paquete, Donde::default());
+            }
+            menor = menor.min(t.elapsed());
+        }
+        menor
+    }
+
     #[test]
     fn el_relleno_del_paquete_no_multiplica_el_coste_de_mirarlo() {
         let r = Redactor::nuevo();
@@ -808,29 +836,23 @@ mod pruebas {
 
         // Un paquete corriente, de relleno neutro.
         let neutro = vec![b'.'; 1500];
-        let t = std::time::Instant::now();
-        for _ in 0..CUANTOS {
-            let _ = r.limpiar(&neutro, Donde::default());
-        }
-        let coste_neutro = t.elapsed();
+        let coste_neutro = coste_de(&r, &neutro, CUANTOS);
 
         // Y el peor relleno posible: el primer byte de cada patron, repetido.
         let mut peor = std::time::Duration::ZERO;
         let mut cual = b'?';
         for b in PATRONES.iter().map(|p| p.texto.as_bytes()[0]) {
             let hostil = vec![b; 1500];
-            let t = std::time::Instant::now();
-            for _ in 0..CUANTOS {
-                let _ = r.limpiar(&hostil, Donde::default());
-            }
-            if t.elapsed() > peor {
-                peor = t.elapsed();
+            let coste = coste_de(&r, &hostil, CUANTOS);
+            if coste > peor {
+                peor = coste;
                 cual = b;
             }
         }
 
-        // Cuatro veces es margen de sobra para el ruido de una maquina cargada;
-        // lo que esta prueba impide es el factor veinte que habia.
+        // Cuatro veces sigue siendo margen de sobra —lo que esta prueba impide es
+        // el factor VEINTE que habia—, y ahora las dos medidas son comparables
+        // porque las dos son minimos de varias pasadas.
         assert!(
             peor <= coste_neutro * 4,
             "un paquete lleno de «{}» cuesta {peor:?} contra {coste_neutro:?} de uno \
@@ -843,13 +865,42 @@ mod pruebas {
     fn la_redaccion_no_cuesta_lo_que_diga_el_emisor() {
         // Las credenciales viajan en la cabecera, no en el megabyte cuarenta y
         // dos. Sin ventana, cada paquete costaria su tamano por cada patron.
+        //
+        // La propiedad es que el coste NO crece con el tamano del paquete, y eso
+        // es lo que se mide: un paquete de cuatro megabytes contra uno de mil
+        // quinientos bytes, en la misma maquina y en el mismo momento.
+        //
+        // Antes se exigia un tiempo absoluto —menos de dos segundos—, que no
+        // dice nada de la propiedad: en una maquina rapida pasa aunque la ventana
+        // no funcione, y en una cargada falla aunque funcione perfectamente. Un
+        // umbral en segundos mide la maquina; este mide el producto.
         let r = Redactor::nuevo();
-        let mut p = b"GET / HTTP/1.1\r\nHost: x\r\n\r\n".to_vec();
-        p.extend(std::iter::repeat_n(b'A', 4 * 1024 * 1024));
-        let empezo = std::time::Instant::now();
-        let l = r.limpiar(&p, Donde::default());
-        assert!(empezo.elapsed() < std::time::Duration::from_secs(2));
-        assert_eq!(l.bytes().len(), p.len());
+        let cabecera = b"GET / HTTP/1.1\r\nHost: x\r\n\r\n";
+
+        let mut pequeno = cabecera.to_vec();
+        pequeno.extend(std::iter::repeat_n(b'A', 1500 - cabecera.len()));
+
+        let mut grande = cabecera.to_vec();
+        grande.extend(std::iter::repeat_n(b'A', 4 * 1024 * 1024));
+
+        // El grande es ~2800 veces mayor. Si el coste creciera con el tamano, la
+        // diferencia seria de ese orden; con ventana, es de unidades.
+        let coste_pequeno = coste_de(&r, &pequeno, 200);
+        let coste_grande = coste_de(&r, &grande, 200);
+        let veces = coste_grande.as_nanos() / coste_pequeno.as_nanos().max(1);
+
+        assert!(
+            veces <= 20,
+            "redactar {} bytes cuesta {veces} veces mas que redactar {} ({coste_grande:?} \
+             contra {coste_pequeno:?}): el coste esta creciendo con el tamano del paquete, \
+             asi que la ventana no esta acotando nada",
+            grande.len(),
+            pequeno.len()
+        );
+
+        // Y lo que sale tiene el tamano que entro, tapado o no.
+        let l = r.limpiar(&grande, Donde::default());
+        assert_eq!(l.bytes().len(), grande.len());
     }
 
     /// El orden de [`PATRONES`] no es cosmetico: [`INDICE`] da por hecho que el
