@@ -54,3 +54,11 @@ dist-hermetico/
 
 # Artefactos de compilacion del transporte del enjambre (workspace aparte).
 /swarm-net/target/
+
+# Ajustes del asistente propios de CADA maquina: contienen rutas locales y
+# permisos concedidos por su usuario. La configuracion compartida del proyecto
+# (.claude/settings.json y los hooks) si esta versionada; esta no.
+# Ademas, tools/ci-local.sh incluye los ficheros sin seguir en la huella del
+# arbol, asi que un fichero que cambia solo invalidaria la reanudacion a mitad
+# de una tanda.
+.claude/settings.local.json
