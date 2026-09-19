@@ -46,12 +46,32 @@ SOLO="${1:-}"
 # Cuesta mas descubrir el engaño que arreglar el fallo que se estaba buscando.
 #
 # Con un directorio propio por ejecucion no hay colision posible: ni entre
-# usuarios, ni entre dos tandas simultaneas, y se borra al salir.
+# usuarios, ni entre dos tandas simultaneas.
 LOGS="$(mktemp -d -t aegis-ci-XXXXXXXX)" || {
     printf '%sNo se pudo crear el directorio temporal de salidas.%s\n' "$ROJO" "$FIN"
     exit 1
 }
-trap 'rm -rf "$LOGS"' EXIT
+
+# El directorio se borra al salir SOLO si no hubo fallos.
+#
+# De lo que falla, en pantalla se ven las ultimas lineas y nada mas. Para un
+# fallo corriente basta; para uno INTERMITENTE es inutil: cuando se intenta
+# reproducir, el grupo pasa y la unica copia de lo que realmente ocurrio ya se
+# borro. Paso de verdad —una prueba de `captura` fallo en una tanda, no se
+# reprodujo en diez intentos, y no quedaba forma de saber cual era—.
+#
+# Conservar la salida completa cuando algo falla no cuesta nada y es la
+# diferencia entre diagnosticar y adivinar.
+trap '
+    if [ "$FALLOS" -eq 0 ]; then
+        rm -rf "$LOGS"
+    else
+        printf "\n%s==> La salida COMPLETA de cada grupo queda en:%s %s\n" \
+            "$GRIS" "$FIN" "$LOGS"
+        printf "    %sEn pantalla solo se ven las ultimas lineas. Si el fallo no se\n" "$GRIS"
+        printf "    reproduce, esto es lo unico que queda de el.%s\n" "$FIN"
+    fi
+' EXIT
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Reanudacion
