@@ -493,17 +493,18 @@ impl Redactor {
         self.ambitos.iter().find(|a| a.cubre_anfitrion(&anfitrion))
     }
 
-    /// Tapa lo que no se puede guardar y devuelve los bytes limpios.
+    /// Decide que hay que tapar, sin copiar nada.
     ///
-    /// **Este es el unico constructor de [`Limpio`].** Todo lo que se escribe
-    /// pasa por aqui, por construccion y no por disciplina.
-    #[must_use]
-    pub fn limpiar(&self, datos: &[u8], donde: Donde) -> Limpio {
-        let mut bytes = datos.to_vec();
+    /// Esta separado de [`Redactor::limpiar`] porque son dos costes distintos y
+    /// solo uno esta acotado: MIRAR el paquete cuesta lo mismo pasado el tamano
+    /// de la [`VENTANA`], y COPIARLO para entregar el resultado es lineal por
+    /// necesidad. Medirlos juntos hacia que la prueba de la ventana midiera el
+    /// asignador de memoria.
+    fn inspeccionar(&self, datos: &[u8], donde: Donde) -> Vec<Tapado> {
         let mut tapados: Vec<Tapado> = Vec::new();
 
         // 1. Las credenciales, siempre y sin que nadie las declare.
-        for t in credenciales(&bytes) {
+        for t in credenciales(datos) {
             tapados.push(t);
         }
 
@@ -511,26 +512,37 @@ impl Redactor {
         //    cabeceras: el analista sigue viendo quien hablo con quien y con que
         //    metodo, que es lo que hace falta para investigar, sin ver el
         //    contenido, que es lo que no puede salir.
-        if let Some(a) = self.ambito_que_cubre(&bytes, donde) {
-            if let Some(inicio) = fin_de_cabecera(&bytes) {
-                if inicio < bytes.len() {
-                    tapados.push(Tapado {
-                        desde: inicio,
-                        cuantos: bytes.len() - inicio,
-                        motivo: Motivo::AmbitoDeclarado,
-                    });
+        if self.ambito_que_cubre(datos, donde).is_some() {
+            match fin_de_cabecera(datos) {
+                Some(inicio) => {
+                    if inicio < datos.len() {
+                        tapados.push(Tapado {
+                            desde: inicio,
+                            cuantos: datos.len() - inicio,
+                            motivo: Motivo::AmbitoDeclarado,
+                        });
+                    }
                 }
-            } else {
                 // Sin cabecera reconocible no se puede separar el sobre del
                 // contenido: se tapa entero, que es el lado seguro del error.
-                let _ = a;
-                tapados.push(Tapado {
+                None => tapados.push(Tapado {
                     desde: 0,
-                    cuantos: bytes.len(),
+                    cuantos: datos.len(),
                     motivo: Motivo::AmbitoDeclarado,
-                });
+                }),
             }
         }
+        tapados
+    }
+
+    /// Tapa lo que no se puede guardar y devuelve los bytes limpios.
+    ///
+    /// **Este es el unico constructor de [`Limpio`].** Todo lo que se escribe
+    /// pasa por aqui, por construccion y no por disciplina.
+    #[must_use]
+    pub fn limpiar(&self, datos: &[u8], donde: Donde) -> Limpio {
+        let mut tapados = self.inspeccionar(datos, donde);
+        let mut bytes = datos.to_vec();
 
         // Se aplica al final y con el MISMO numero de bytes: acortar dejaria una
         // captura que ninguna herramienta puede leer, ni la nuestra.
@@ -793,6 +805,53 @@ mod pruebas {
         assert_eq!(l.bytes(), p);
     }
 
+    /// Cuantas veces cuesta MIRAR cada paquete de `otros` lo que cuesta mirar
+    /// `base`, **sin el ruido de la maquina**.
+    ///
+    /// # Como se mide, y por que asi
+    ///
+    /// Un cociente entre dos tiempos solo vale si los dos se tomaron en las
+    /// mismas condiciones, y en una maquina compartida las condiciones cambian de
+    /// un momento a otro. Por eso cada paquete se mide INMEDIATAMENTE despues de
+    /// un lote de `base`, y se calcula el cociente de ese par: dos lotes seguidos
+    /// sufren la misma carga. Se repite y se toma la MEDIANA de los cocientes, que
+    /// ignora las pasadas en las que otro proceso se cruzo.
+    ///
+    /// Las dos formas anteriores fallaron de verdad. Medir la base una vez al
+    /// principio y los demas despues comparaba momentos distintos: con otro
+    /// proceso compilando al lado, un relleno de «w» salia de 5 a 8 veces mas caro
+    /// que el neutro sin serlo. Y el cociente de dos MINIMOS, aun intercalados,
+    /// seguia comparando pasadas distintas: el coste real de ese relleno es 3,5
+    /// veces el neutro —medido estable, 3,47 a 3,56—, y bajo carga salia 4,4.
+    ///
+    /// Se mide [`Redactor::inspeccionar`] y no [`Redactor::limpiar`]: la copia que
+    /// hace `limpiar` es lineal por necesidad y no es lo que se quiere acotar.
+    fn cocientes(r: &Redactor, base: &[u8], otros: &[&[u8]], cuantos: u32) -> Vec<f64> {
+        const PASADAS: usize = 9;
+        let lote = |p: &[u8]| {
+            let t = std::time::Instant::now();
+            for _ in 0..cuantos {
+                std::hint::black_box(r.inspeccionar(p, Donde::default()));
+            }
+            t.elapsed().as_secs_f64()
+        };
+        let mut por_paquete: Vec<Vec<f64>> = vec![Vec::with_capacity(PASADAS); otros.len()];
+        for _ in 0..PASADAS {
+            for (v, p) in por_paquete.iter_mut().zip(otros) {
+                let b = lote(base);
+                let o = lote(p);
+                v.push(o / b.max(1e-12));
+            }
+        }
+        por_paquete
+            .into_iter()
+            .map(|mut v| {
+                v.sort_by(f64::total_cmp);
+                v[v.len() / 2]
+            })
+            .collect()
+    }
+
     /// El relleno del paquete no puede multiplicar el coste de mirarlo.
     ///
     /// Se midio: con el filtro de un solo byte, mil quinientas equis —la `x` de
@@ -801,62 +860,38 @@ mod pruebas {
     /// microsegundos por paquete contra treinta y siete. Un sensor al que se le
     /// puede multiplicar el coste por veinte eligiendo el relleno es un sensor
     /// que el atacante apaga generando trafico.
-    /// Cuanto cuesta redactar `cuantos` veces un paquete, **sin el ruido de la
-    /// maquina**.
-    ///
-    /// Se repite la medida y se toma la MENOR. El ruido externo —otro proceso
-    /// compilando, el planificador, una migracion de nucleo— solo puede anadir
-    /// tiempo, nunca quitarlo, asi que el minimo es la muestra menos
-    /// contaminada. Es lo que hace comparable una medicion con otra tomada un
-    /// instante despues.
-    ///
-    /// Sin esto, la prueba comparaba una referencia medida UNA vez contra
-    /// dieciocho mediciones posteriores: bastaba con que la maquina se
-    /// ralentizara en cualquiera de esas dieciocho ventanas para que fallara sin
-    /// que nada del codigo hubiera cambiado. Fallo asi en una tanda de CI y no se
-    /// reprodujo en diez intentos, que es exactamente como se comporta una prueba
-    /// que mide ruido en vez de medir el producto.
-    fn coste_de(r: &Redactor, paquete: &[u8], cuantos: u32) -> std::time::Duration {
-        const REPETICIONES: u32 = 5;
-        let mut menor = std::time::Duration::MAX;
-        for _ in 0..REPETICIONES {
-            let t = std::time::Instant::now();
-            for _ in 0..cuantos {
-                let _ = r.limpiar(paquete, Donde::default());
-            }
-            menor = menor.min(t.elapsed());
-        }
-        menor
-    }
-
     #[test]
     fn el_relleno_del_paquete_no_multiplica_el_coste_de_mirarlo() {
         let r = Redactor::nuevo();
-        const CUANTOS: u32 = 2000;
 
-        // Un paquete corriente, de relleno neutro.
+        // Un paquete corriente, de relleno neutro, y el peor relleno posible: el
+        // primer byte de cada patron, repetido.
         let neutro = vec![b'.'; 1500];
-        let coste_neutro = coste_de(&r, &neutro, CUANTOS);
+        let mut rellenos: Vec<u8> = PATRONES.iter().map(|p| p.texto.as_bytes()[0]).collect();
+        rellenos.sort_unstable();
+        rellenos.dedup();
+        let hostiles: Vec<Vec<u8>> = rellenos.iter().map(|b| vec![*b; 1500]).collect();
+        let refs: Vec<&[u8]> = hostiles.iter().map(Vec::as_slice).collect();
+        let c = cocientes(&r, &neutro, &refs, 400);
+        let (i_peor, peor) = c
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap_or((0, 0.0));
+        let cual = rellenos.get(i_peor).copied().unwrap_or(b'?');
+        eprintln!(
+            "relleno: el peor es «{}», a {peor:.2} veces el neutro",
+            cual as char
+        );
 
-        // Y el peor relleno posible: el primer byte de cada patron, repetido.
-        let mut peor = std::time::Duration::ZERO;
-        let mut cual = b'?';
-        for b in PATRONES.iter().map(|p| p.texto.as_bytes()[0]) {
-            let hostil = vec![b; 1500];
-            let coste = coste_de(&r, &hostil, CUANTOS);
-            if coste > peor {
-                peor = coste;
-                cual = b;
-            }
-        }
-
-        // Cuatro veces sigue siendo margen de sobra —lo que esta prueba impide es
-        // el factor VEINTE que habia—, y ahora las dos medidas son comparables
-        // porque las dos son minimos de varias pasadas.
+        // Cuatro veces sigue siendo margen —lo que esta prueba impide es el
+        // factor VEINTE que habia—; el peor relleno real, el de las uves dobles,
+        // esta en 3,5.
         assert!(
-            peor <= coste_neutro * 4,
-            "un paquete lleno de «{}» cuesta {peor:?} contra {coste_neutro:?} de uno \
-             neutro: el filtro de entrada no esta filtrando",
+            peor <= 4.0,
+            "un paquete lleno de «{}» cuesta {peor:.2} veces lo que uno neutro: el filtro \
+             de entrada no esta filtrando",
             cual as char
         );
     }
@@ -866,9 +901,9 @@ mod pruebas {
         // Las credenciales viajan en la cabecera, no en el megabyte cuarenta y
         // dos. Sin ventana, cada paquete costaria su tamano por cada patron.
         //
-        // La propiedad es que el coste NO crece con el tamano del paquete, y eso
-        // es lo que se mide: un paquete de cuatro megabytes contra uno de mil
-        // quinientos bytes, en la misma maquina y en el mismo momento.
+        // La propiedad es que el coste de MIRAR no crece con el tamano del
+        // paquete una vez pasada la ventana, y eso es lo que se mide, en la misma
+        // maquina y en el mismo momento.
         //
         // Antes se exigia un tiempo absoluto —menos de dos segundos—, que no
         // dice nada de la propiedad: en una maquina rapida pasa aunque la ventana
@@ -877,25 +912,37 @@ mod pruebas {
         let r = Redactor::nuevo();
         let cabecera = b"GET / HTTP/1.1\r\nHost: x\r\n\r\n";
 
-        let mut pequeno = cabecera.to_vec();
-        pequeno.extend(std::iter::repeat_n(b'A', 1500 - cabecera.len()));
-
         let mut grande = cabecera.to_vec();
         grande.extend(std::iter::repeat_n(b'A', 4 * 1024 * 1024));
 
-        // El grande es ~2800 veces mayor. Si el coste creciera con el tamano, la
-        // diferencia seria de ese orden; con ventana, es de unidades.
-        let coste_pequeno = coste_de(&r, &pequeno, 200);
-        let coste_grande = coste_de(&r, &grande, 200);
-        let veces = coste_grande.as_nanos() / coste_pequeno.as_nanos().max(1);
-
-        assert!(
-            veces <= 20,
-            "redactar {} bytes cuesta {veces} veces mas que redactar {} ({coste_grande:?} \
-             contra {coste_pequeno:?}): el coste esta creciendo con el tamano del paquete, \
-             asi que la ventana no esta acotando nada",
+        // LO QUE SE EXIGE, Y POR QUE NO ES UN COCIENTE SOBRE `limpiar`. Devuelve una
+        // COPIA del paquete: no se puede entregar un paquete limpio de cuatro
+        // megabytes sin escribir cuatro megabytes, y esa copia es lineal por
+        // necesidad. Exigir un cociente sobre `limpiar` media sobre todo al
+        // asignador de memoria —fallos de pagina frente a memoria reutilizada— y
+        // al ancho de banda de la maquina: pasaba de ~20 a 28 en cuanto otro
+        // proceso compilaba a la vez, y fallo asi en una tanda de CI. Restar una
+        // copia medida aparte tampoco sirve: son dos cifras de cientos de
+        // milisegundos con ruido propio, y el resto sale dominado por ese ruido.
+        //
+        // La propiedad de la ventana es otra y mas estricta: pasado su tamano,
+        // MIRAR cuesta lo mismo. Se compara la inspeccion sola sobre un paquete del
+        // tamano exacto de la ventana y sobre uno de cuatro megabytes: tienen que
+        // costar practicamente igual.
+        let mut en_ventana = cabecera.to_vec();
+        en_ventana.extend(std::iter::repeat_n(b'A', VENTANA - cabecera.len()));
+        let cociente = cocientes(&r, &en_ventana, &[&grande], 200)[0];
+        eprintln!(
+            "ventana: mirar {} B cuesta {cociente:.2} veces mirar {} B",
             grande.len(),
-            pequeno.len()
+            en_ventana.len()
+        );
+        assert!(
+            cociente <= 3.0,
+            "MIRAR {} bytes cuesta {cociente:.2} veces lo que mirar {}: pasado el tamano de \
+             la ventana el coste sigue creciendo, asi que la ventana no esta acotando nada",
+            grande.len(),
+            en_ventana.len()
         );
 
         // Y lo que sale tiene el tamano que entro, tapado o no.
