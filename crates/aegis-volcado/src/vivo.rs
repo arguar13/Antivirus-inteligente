@@ -155,6 +155,29 @@ fn leer_proceso(raiz: &Path, pid: u32) -> Option<Proceso> {
 mod pruebas {
     use super::*;
 
+    /// Un tope para el barrido uno a uno que cubre TODOS los procesos que hay.
+    ///
+    /// No puede ser una constante: el nucleo asigna identificadores hasta
+    /// `pid_max` (4 194 304 en un Linux de 64 bits), y una maquina que lleva
+    /// tiempo encendida ya los da por encima de 65 536 —un tope fijo ahi dejaba
+    /// fuera a la propia prueba y la hacia fallar por la edad de la maquina—.
+    /// Se toma el mayor identificador que hay ahora mismo, con margen para los
+    /// que nazcan mientras se recorre, y nunca por encima de `pid_max`.
+    fn tope_holgado() -> u32 {
+        let mayor = std::fs::read_dir("/proc")
+            .map(|d| {
+                d.flatten()
+                    .filter_map(|e| e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()))
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
+            .max(std::process::id());
+        mayor
+            .saturating_add(65_536)
+            .min(pid_max(Path::new("/proc")))
+    }
+
     #[test]
     fn los_tres_caminos_de_esta_maquina_encuentran_procesos_y_coinciden() {
         // El ejercicio real de la vista cruzada. En una maquina sin rootkit los
@@ -166,8 +189,8 @@ mod pruebas {
         }
         // Se acota el barrido uno a uno: preguntar por cuatro millones de
         // identificadores tarda, y para comprobar la propiedad basta con cubrir
-        // holgadamente los que hay.
-        let v = caminos_de_proc(raiz, Some(65_536));
+        // holgadamente los que hay (ver `tope_holgado`).
+        let v = caminos_de_proc(raiz, Some(tope_holgado()));
         assert_eq!(v.caminos_recorridos().len(), 3);
 
         let listados = v.de(Camino::ListaEnlazada).unwrap();
@@ -180,14 +203,21 @@ mod pruebas {
         eprintln!("/proc: {}", c.frase());
         assert!(c.es_un_cruce());
 
-        // El camino uno a uno tiene que encontrar al menos los mismos que el
-        // listado: si encontrara menos, es que `leer_proceso` esta fallando.
+        // Todo proceso listado que SIGUE VIVO tras los dos recorridos tiene que
+        // haber salido tambien al preguntar uno a uno: si no, es que
+        // `leer_proceso` falla. No se comparan recuentos: un proceso que muere
+        // entre el listado y la pregunta los descuadra sin que nada este mal, y
+        // en una maquina que compila y prueba en paralelo eso pasa a menudo.
         let uno_a_uno = v.de(Camino::ArbolDePid).unwrap();
+        let perdidos: Vec<u32> = listados
+            .iter()
+            .map(|p| p.pid)
+            .filter(|pid| !uno_a_uno.iter().any(|q| q.pid == *pid))
+            .filter(|pid| leer_proceso(raiz, *pid).is_some())
+            .collect();
         assert!(
-            uno_a_uno.len() >= listados.len(),
-            "preguntar uno a uno encontro {} y listar encontro {}",
-            uno_a_uno.len(),
-            listados.len()
+            perdidos.is_empty(),
+            "procesos vivos que salen al listar y no al preguntar uno a uno: {perdidos:?}"
         );
     }
 
@@ -196,7 +226,7 @@ mod pruebas {
         // La comprobacion mas concreta que se puede hacer: este proceso existe,
         // se conoce su identificador, y tiene que salir por los tres.
         let yo = std::process::id();
-        let v = caminos_de_proc(Path::new("/proc"), Some(65_536));
+        let v = caminos_de_proc(Path::new("/proc"), Some(tope_holgado()));
         for c in Camino::todos() {
             let vistos = v.de(c).unwrap_or(&[]);
             assert!(

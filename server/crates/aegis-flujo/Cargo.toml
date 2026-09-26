@@ -1,0 +1,38 @@
+[package]
+name = "aegis-flujo"
+description = "AegisFlow: automatizacion de respuesta con flujos tipados y transaccionales, reversion obligatoria, idempotencia, aprobacion humana como tipo y los cinco frenos por paso"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Cada paso actua sobre una entidad del modelo unico (FASE 79), y su tipo se
+# comprueba contra la clase de esa entidad.
+aegis-entidad = { path = "../../../crates/aegis-entidad" }
+# La aprobacion humana es una firma hibrida (Ed25519 + ML-DSA), la misma del
+# resto del producto; solo verificacion y firma, sin el KEM.
+aegis-pqc = { path = "../../../crates/aegis-pqc", default-features = false, features = ["sign"] }
+# Los cinco frenos son los de la FASE 69: la misma configuracion y las mismas
+# constantes, no una copia que pueda divergir.
+aegis-predict = { path = "../aegis-predict" }
+# Abrir un caso escribe en su rastro encadenado: la entrada se construye con la
+# MISMA funcion que en memoria (ver aegis_case::auditoria::Entrada::nueva).
+aegis-case = { path = "../aegis-case" }
+thiserror = "2"
+sha2 = "0.10"
+serde_json = "1"
+# Identificadores de efecto derivados (version 8) para las ordenes y los casos.
+uuid = { version = "1", features = ["v4"] }
+# Direcciones y redes de la cuarentena de enjambre (FASE 44): INET en la base.
+ipnet = "2"
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls", "postgres", "json", "uuid", "ipnet", "migrate", "macros",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# AegisProof (FASE 80): las catorce invariantes, comprobadas sobre el producto
+# AegisProof (FASE 80): las quince invariantes, comprobadas sobre el producto
 # COMPLETO y no sobre una fase.
 #
 # POR QUE ESTA PUERTA EXISTE APARTE DE LAS DEMAS
@@ -18,13 +18,14 @@
 # Una invariante que se relaja «solo esta vez» deja de ser una invariante y pasa a
 # ser una aspiracion.
 #
-# LAS TRECE, Y DE DONDE SALEN
+# LAS QUINCE, Y DE DONDE SALEN
 # ---------------------------
-# Ocho estructurales, una de autoataque con una fila por capacidad, y cuatro doctrinales
+# Ocho estructurales, una de autoataque con una fila por capacidad, cuatro doctrinales
 # que el producto ya sostiene y que aqui se comprueban mecanicamente en vez de
-# afirmarse.
+# afirmarse, y dos que anadio el MEGAPROMPT 10: el almacen historico (14) y la
+# automatizacion de respuesta (15).
 #
-# Uso:  ./tools/verificar-invariantes.sh          (las catorce)
+# Uso:  ./tools/verificar-invariantes.sh          (las quince)
 #       ./tools/verificar-invariantes.sh 4        (solo la cuarta)
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -83,7 +84,7 @@ pasadas() {
         | grep -oE '[0-9]+' | paste -sd+ - | bc 2>/dev/null || echo 0
 }
 
-echo "AegisProof · las catorce invariantes sobre el producto completo"
+echo "AegisProof · las quince invariantes sobre el producto completo"
 
 # ── 01. PRESUPUESTO ────────────────────────────────────────────────────────────
 #
@@ -543,9 +544,39 @@ if toca 14; then
     fi
 fi
 
+
+# ── 15. UNA AUTOMATIZACION SIN FRENO ES UN ARMA (MEGAPROMPT 10, FASE 97) ────────
+if toca 15; then
+    titulo 15 "UNA AUTOMATIZACION SIN FRENO ES UN ARMA · frenos por paso, reversion obligatoria"
+    # Por ESTRUCTURA, en el motor (`Motor::ejecutar`): hay UNA sola llamada que
+    # aplica un efecto (`n.ejecutar(`), y antes de ella estan los frenos
+    # (`self.frenos.evaluar(`) y el permiso (`n.cubre(`). Un segundo camino que
+    # ejecutara pasos se saltaria los frenos sin que ninguna prueba lo notara.
+    MOTOR=$(awk '/pub async fn ejecutar</,/^    }$/' server/crates/aegis-flujo/src/flujo.rs 2>/dev/null)
+    EFECTOS=$(echo "$MOTOR" | grep -c 'n\.ejecutar(')
+    ORDEN=$(echo "$MOTOR" | grep -n 'self\.frenos\.evaluar(\|n\.cubre(\|n\.ejecutar(' | cut -d: -f2 \
+        | grep -oE 'frenos\.evaluar|cubre|ejecutar' | tr '\n' ' ')
+    # Y la reversion no tiene cuerpo por defecto en el trait: sin ella no compila.
+    SIN_DEFECTO=$(awk '/^pub trait Paso</,/^}$/' server/crates/aegis-flujo/src/paso.rs 2>/dev/null \
+        | tr -d '\n' | grep -oE 'fn revertir<[^{;]*;' | wc -l)
+    if pruebas servidor aegis-flujo "--test autoataque" "" /tmp/inv-flujo.log \
+        && ! grep -q 'OMITIDA' /tmp/inv-flujo.log \
+        && [ "$EFECTOS" = "1" ] \
+        && [ "$ORDEN" = "frenos.evaluar cubre ejecutar " ] \
+        && [ "$SIN_DEFECTO" = "1" ]; then
+        veredicto 15 "una automatizacion sin freno es un arma" si "aislar la flota entera, firmado o expandido en mil pasos, y bloquear 0.0.0.0/0: detenidos y escalados contra PostgreSQL real"
+        porque "Un SOAR que puede aislar mil maquinas por un error de plantilla es un arma"
+        porque "apuntando al cliente. Los frenos miran cada paso con el radio ACUMULADO de"
+        porque "la ejecucion, una firma no abre el radio, y un paso sin reversion no compila."
+    else
+        veredicto 15 "una automatizacion sin freno es un arma" no "ver /tmp/inv-flujo.log (llamadas que aplican efecto: $EFECTOS; orden: $ORDEN; revertir sin cuerpo: $SIN_DEFECTO)"
+        tail -25 /tmp/inv-flujo.log | sed 's/^/     | /'
+    fi
+fi
+
 echo
 if [ "$FALLOS" -eq 0 ]; then
-    printf '%s==> Las catorce invariantes siguen en pie%s\n' "$VERDE" "$FIN"
+    printf '%s==> Las quince invariantes siguen en pie%s\n' "$VERDE" "$FIN"
 else
     printf '%s==> %s invariante(s) ROTAS%s\n' "$ROJO" "$FALLOS" "$FIN"
     for r in "${ROTAS[@]}"; do

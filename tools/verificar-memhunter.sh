@@ -47,6 +47,25 @@ else
     exit 1
 fi
 
+echo "==> AegisMemHunter: el coste propio del decisor, sobre el binario optimizado"
+# Con --release y sola: el tope es del decisor que corre en el agente, no del
+# perfil de depuracion ni de la carga del resto de pruebas en paralelo.
+if cargo test --release -p aegis-memhunter --quiet --lib \
+        hunter::pruebas::el_decisor_resuelve_un_proceso_grande -- --nocapture --test-threads=1 \
+        >/tmp/aegis-memhunter-coste.log 2>&1; then
+    if grep -q 'sin juzgar' /tmp/aegis-memhunter-coste.log \
+        || ! grep -q '1 passed' /tmp/aegis-memhunter-coste.log; then
+        echo "    ${ROJO}FALLO${FIN}: el tope de coste no se juzgo sobre el binario optimizado"
+        sed 's/^/    | /' /tmp/aegis-memhunter-coste.log | tail -20
+        exit 1
+    fi
+    echo "    ${VERDE}OK${FIN} (2000 regiones por debajo de 5 ms en la mejor de 9 pasadas, --release)"
+else
+    echo "    ${ROJO}FALLO${FIN}: el decisor supera su tope de coste sobre el binario optimizado"
+    sed 's/^/    | /' /tmp/aegis-memhunter-coste.log | tail -20
+    exit 1
+fi
+
 echo "==> AegisMemHunter: las dos tecnicas, construidas de verdad en un proceso vivo"
 if cargo test -p aegis-memhunter --quiet hunter::pruebas_vivas:: -- --nocapture \
     >/tmp/aegis-memhunter-vivo.log 2>&1; then

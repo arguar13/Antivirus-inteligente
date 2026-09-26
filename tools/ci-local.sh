@@ -1041,6 +1041,22 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "almacen" ]; then
     fi
 fi
 
+# AegisFlow (FASE 97): la automatizacion de respuesta. Lo primero, el autoataque:
+# los flujos que un error de plantilla escribiria para dejar a la organizacion
+# sin red, contra mil maquinas en PostgreSQL real, detenidos por los frenos. Y
+# lo que no compila, leyendo el error real del compilador de cada caso.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "flujo" ]; then
+    printf '%s==>%s AegisFlow · flujos tipados y transaccionales con los cinco frenos por paso\n' "$GRIS" "$FIN"
+    if ./tools/verificar-flujo.sh > $LOGS/aegis-flujo-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-flujo-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-flujo-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
 # un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
 # que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la
@@ -1226,7 +1242,7 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
     fi
 fi
 
-# LAS TRECE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
+# LAS QUINCE INVARIANTES sobre el producto COMPLETO (AegisProof, FASE 80).
 #
 # Va la ULTIMA a proposito: comprueba lo que se rompe al sumar, y para eso todo lo
 # demas tiene que haber corrido ya. Cada verificar-<fase>.sh comprueba lo suyo y lo
@@ -1242,7 +1258,7 @@ fi
 # fase anterior. Una invariante que se relaja «solo esta vez» deja de ser una
 # invariante y pasa a ser una aspiracion.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "invariantes" ]; then
-    printf '%s==>%s AegisProof · las catorce invariantes sobre el producto completo\n' "$GRIS" "$FIN"
+    printf '%s==>%s AegisProof · las quince invariantes sobre el producto completo\n' "$GRIS" "$FIN"
     if ./tools/verificar-invariantes.sh > $LOGS/aegis-invariantes-ci.log 2>&1; then
         sed 's/^/    | /' $LOGS/aegis-invariantes-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"

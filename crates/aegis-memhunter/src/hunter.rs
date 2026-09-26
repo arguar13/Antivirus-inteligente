@@ -1274,6 +1274,19 @@ mod pruebas {
             peor = peor.max(transcurrido);
         }
 
+        // El tope es del decisor OPTIMIZADO, que es el que corre en el agente.
+        // En un binario de depuracion, y con el resto del espacio de trabajo
+        // probandose en paralelo, el minimo mide el perfil de compilacion y la
+        // carga de la maquina, no el decisor: juzgarlo ahi seria una cifra que
+        // falla o pasa por azar. `tools/verificar-memhunter.sh` ejecuta esta
+        // prueba con `--release`, y ahi el tope se exige.
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "sin juzgar: tope de {TOPE:?} solo sobre el binario optimizado (--release); \
+                 mejor pasada en depuracion {mejor:?}"
+            );
+            return;
+        }
         assert!(
             mejor < TOPE,
             "el decisor tardo {mejor:?} en su mejor pasada de {REPETICIONES} sobre 2000 \

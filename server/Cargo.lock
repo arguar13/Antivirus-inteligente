@@ -177,6 +177,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-flujo"
+version = "0.1.0"
+dependencies = [
+ "aegis-case",
+ "aegis-entidad",
+ "aegis-pqc",
+ "aegis-predict",
+ "ipnet",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "aegis-hunt"
 version = "0.1.0"
 dependencies = [
