@@ -163,15 +163,52 @@ impl Scanner {
     }
 
     /// Cruza el inventario contra el feed.
+    ///
+    /// # Por el nombre binario Y por el fuente
+    ///
+    /// Los avisos de las distribuciones se publican por paquete FUENTE: el fallo
+    /// de OpenSSL esta en `openssl`, y lo que carga cada proceso es la biblioteca
+    /// del paquete binario `libssl3`. Cruzar solo por el nombre instalado no veia
+    /// la vulnerabilidad en una maquina con la biblioteca y sin la herramienta de
+    /// linea de ordenes —que es la maquina normal—, y no decia nada.
+    ///
+    /// Cada paquete se cruza por los dos nombres, cada uno con SU version: la
+    /// binaria para las entradas escritas con el nombre binario y la fuente para
+    /// las del fuente. Un registro que aparezca por los dos caminos cuenta una
+    /// vez.
     fn match_cves(&self, inv: &Inventory) -> Vec<Finding> {
         let mut out = Vec::new();
-        for (nombre, paquete) in &inv.packages {
-            for registro in self.feed.for_package(nombre) {
-                if !registro.affects(&paquete.version) {
+        for paquete in inv.packages.values() {
+            let nombre = &paquete.name;
+            let mut vistos: Vec<&str> = Vec::new();
+            let por_binario = self
+                .feed
+                .for_package(nombre)
+                .iter()
+                .map(|r| (r, &paquete.version));
+            let del_fuente = if paquete.source_name() == nombre.as_str() {
+                &[][..]
+            } else {
+                self.feed.for_package(paquete.source_name())
+            };
+            let por_fuente = del_fuente.iter().map(|r| (r, paquete.source_version()));
+            for (registro, version) in por_binario.chain(por_fuente) {
+                if vistos.contains(&registro.id.as_str()) || !registro.affects(version) {
                     continue;
                 }
+                vistos.push(&registro.id);
+                // Si el registro llego por el nombre fuente, el rango es de la
+                // version fuente, y la evidencia tiene que decir cual se comparo.
+                let via = if registro.package == *nombre {
+                    String::new()
+                } else {
+                    format!(" (paquete fuente {} {version})", registro.package)
+                };
                 let arreglo = match &registro.fixed {
-                    Some(v) => format!("Actualizar {nombre} a {v} o superior"),
+                    Some(v) => format!(
+                        "Actualizar {nombre} (fuente {}) a {v} o superior",
+                        paquete.source_name()
+                    ),
                     None => format!(
                         "No hay correccion publicada para {nombre}. Aplicar mitigaciones \
                          o retirar el paquete si no es imprescindible."
@@ -183,7 +220,7 @@ impl Scanner {
                     severity: registro.severity,
                     title: format!("{} afecta a {} {}", registro.id, nombre, paquete.version),
                     evidence: format!(
-                        "instalada {}; rango afectado: {} .. {} (CVSS {:.1}) - {}",
+                        "instalada {}{via}; rango afectado: {} .. {} (CVSS {:.1}) - {}",
                         paquete.version,
                         registro
                             .introduced

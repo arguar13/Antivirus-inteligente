@@ -27,6 +27,37 @@ pub struct Package {
     pub arch: String,
     /// Origen del dato.
     pub source: PackageSource,
+    /// El paquete FUENTE del que se construyo, cuando no se llama igual.
+    ///
+    /// Es lo que decide si una vulnerabilidad aplica: Debian y Ubuntu publican
+    /// sus avisos —y OSV los indexa— por paquete fuente. El fallo de OpenSSL
+    /// esta en `openssl`, y lo que hay instalado se llama `libssl3`. Correlacionar
+    /// por el nombre binario no encuentra nada para casi ninguna biblioteca, y
+    /// no lo dice.
+    ///
+    /// `None` significa que el gestor no declaro fuente, y entonces la fuente es
+    /// el propio paquete: ver [`Package::source_name`].
+    pub source_package: Option<String>,
+    /// La version del paquete fuente, cuando difiere de la del binario.
+    ///
+    /// Pasa con los binNMU y con los paquetes que llevan version propia: dpkg lo
+    /// escribe como `Source: zlib (1:1.3.dfsg-3)`. Los rangos de un aviso son de
+    /// la version FUENTE.
+    pub source_version: Option<Version>,
+}
+
+impl Package {
+    /// El nombre del paquete fuente: el declarado o, si no hay, el propio.
+    #[must_use]
+    pub fn source_name(&self) -> &str {
+        self.source_package.as_deref().unwrap_or(&self.name)
+    }
+
+    /// La version del paquete fuente: la declarada o, si no hay, la propia.
+    #[must_use]
+    pub fn source_version(&self) -> &Version {
+        self.source_version.as_ref().unwrap_or(&self.version)
+    }
 }
 
 /// Gestor de paquetes del que proviene la informacion.
@@ -148,37 +179,60 @@ fn collect_packages(root: &Path) -> BTreeMap<String, Package> {
 /// `installed`: la base de datos conserva entradas de paquetes desinstalados
 /// pero con configuracion residual, y contarlos como instalados inventaria
 /// software que no esta en el disco y genera CVE fantasma.
+///
+/// # Multiarquitectura
+///
+/// Un mismo paquete puede estar instalado para dos arquitecturas a la vez
+/// —`libc6:amd64` y `libc6:i386`—, y son dos instalaciones con sus ficheros y sus
+/// vulnerabilidades. Indexar solo por nombre hacia que la segunda **pisara** a la
+/// primera y el inventario perdia un paquete sin decirlo. Cuando un nombre
+/// aparece con dos arquitecturas, las dos entradas pasan a `nombre:arq`, que es
+/// como las nombra el propio dpkg, y el resultado no depende del orden en que
+/// esten en el fichero.
 pub fn parse_dpkg_status(texto: &str, salida: &mut BTreeMap<String, Package>) {
     let mut nombre = String::new();
     let mut version = String::new();
     let mut arch = String::new();
+    let mut fuente = String::new();
     let mut instalado = false;
 
     let cerrar = |nombre: &mut String,
                   version: &mut String,
                   arch: &mut String,
+                  fuente: &mut String,
                   instalado: &mut bool,
                   salida: &mut BTreeMap<String, Package>| {
         if *instalado && !nombre.is_empty() && !version.is_empty() {
-            salida.insert(
-                nombre.clone(),
+            let (source_package, source_version) = analizar_source(fuente, nombre);
+            insertar_multiarq(
+                salida,
                 Package {
                     name: std::mem::take(nombre),
                     version: Version::parse(version),
                     arch: std::mem::take(arch),
                     source: PackageSource::Dpkg,
+                    source_package,
+                    source_version,
                 },
             );
         }
         nombre.clear();
         version.clear();
         arch.clear();
+        fuente.clear();
         *instalado = false;
     };
 
     for linea in texto.lines() {
         if linea.is_empty() {
-            cerrar(&mut nombre, &mut version, &mut arch, &mut instalado, salida);
+            cerrar(
+                &mut nombre,
+                &mut version,
+                &mut arch,
+                &mut fuente,
+                &mut instalado,
+                salida,
+            );
             continue;
         }
         // Las lineas de continuacion empiezan por espacio y no son campos.
@@ -193,59 +247,127 @@ pub fn parse_dpkg_status(texto: &str, salida: &mut BTreeMap<String, Package>) {
             "Package" => nombre = valor.to_string(),
             "Version" => version = valor.to_string(),
             "Architecture" => arch = valor.to_string(),
+            "Source" => fuente = valor.to_string(),
             // "install ok installed" es el unico estado que significa que el
             // software esta realmente en el disco.
             "Status" => instalado = valor.split_whitespace().nth(2) == Some("installed"),
             _ => {}
         }
     }
-    cerrar(&mut nombre, &mut version, &mut arch, &mut instalado, salida);
+    cerrar(
+        &mut nombre,
+        &mut version,
+        &mut arch,
+        &mut fuente,
+        &mut instalado,
+        salida,
+    );
+}
+
+/// Separa el campo `Source` de dpkg: `zlib` o `zlib (1:1.3.dfsg-3)`.
+///
+/// Devuelve `None` en el nombre cuando la fuente es el propio paquete, para que
+/// «no declaro fuente» y «declaro la misma» se lean igual: en los dos casos la
+/// fuente es el paquete.
+fn analizar_source(campo: &str, paquete: &str) -> (Option<String>, Option<Version>) {
+    let campo = campo.trim();
+    if campo.is_empty() {
+        return (None, None);
+    }
+    let (nombre, version) = match campo.split_once('(') {
+        Some((n, resto)) => (n.trim(), resto.split(')').next().map(str::trim)),
+        None => (campo, None),
+    };
+    let nombre = (!nombre.is_empty() && nombre != paquete).then(|| nombre.to_string());
+    let version = version.filter(|v| !v.is_empty()).map(Version::parse);
+    (nombre, version)
+}
+
+/// Inserta un paquete distinguiendo arquitecturas cuando el nombre se repite.
+fn insertar_multiarq(salida: &mut BTreeMap<String, Package>, p: Package) {
+    let calificada = |p: &Package| format!("{}:{}", p.name, p.arch);
+    // Si ya hay una entrada calificada con este nombre, esta tambien lo va.
+    let hay_calificadas = salida
+        .range(format!("{}:", p.name)..)
+        .next()
+        .is_some_and(|(k, v)| v.name == p.name && k.starts_with(&format!("{}:", p.name)));
+    if hay_calificadas {
+        salida.insert(calificada(&p), p);
+        return;
+    }
+    match salida.get(&p.name) {
+        Some(previo) if previo.arch != p.arch => {
+            // Segunda arquitectura: las dos pasan a nombre calificado.
+            if let Some(previo) = salida.remove(&p.name) {
+                salida.insert(calificada(&previo), previo);
+            }
+            salida.insert(calificada(&p), p);
+        }
+        _ => {
+            salida.insert(p.name.clone(), p);
+        }
+    }
 }
 
 /// Analiza `/lib/apk/db/installed` (Alpine).
 ///
-/// Formato de campos de una sola letra: `P:` nombre, `V:` version, `A:` arquitectura.
+/// Formato de campos de una sola letra: `P:` nombre, `V:` version, `A:`
+/// arquitectura y `o:` origen, que es el paquete fuente —el que usan los avisos
+/// de Alpine, igual que en Debian—.
 pub fn parse_apk_installed(texto: &str, salida: &mut BTreeMap<String, Package>) {
     let mut nombre = String::new();
     let mut version = String::new();
     let mut arch = String::new();
+    let mut origen = String::new();
+
+    let cerrar = |nombre: &mut String,
+                  version: &mut String,
+                  arch: &mut String,
+                  origen: &mut String,
+                  salida: &mut BTreeMap<String, Package>| {
+        if !nombre.is_empty() && !version.is_empty() {
+            let source_package =
+                (!origen.is_empty() && origen != nombre).then(|| std::mem::take(origen));
+            salida.insert(
+                nombre.clone(),
+                Package {
+                    name: std::mem::take(nombre),
+                    version: Version::parse(version),
+                    arch: std::mem::take(arch),
+                    source: PackageSource::Apk,
+                    source_package,
+                    // apk construye todos los subpaquetes de un origen con su
+                    // misma version: no hay version fuente distinta que leer.
+                    source_version: None,
+                },
+            );
+        }
+        nombre.clear();
+        version.clear();
+        arch.clear();
+        origen.clear();
+    };
 
     for linea in texto.lines() {
         if linea.is_empty() {
-            if !nombre.is_empty() && !version.is_empty() {
-                salida.insert(
-                    nombre.clone(),
-                    Package {
-                        name: std::mem::take(&mut nombre),
-                        version: Version::parse(&version),
-                        arch: std::mem::take(&mut arch),
-                        source: PackageSource::Apk,
-                    },
-                );
-            }
-            nombre.clear();
-            version.clear();
-            arch.clear();
+            cerrar(&mut nombre, &mut version, &mut arch, &mut origen, salida);
             continue;
         }
-        match linea.split_at(2) {
-            ("P:", v) => nombre = v.to_string(),
-            ("V:", v) => version = v.to_string(),
-            ("A:", v) => arch = v.to_string(),
+        // `split_at(2)` sobre una linea de menos de dos bytes, o que parte un
+        // caracter multibyte, entraria en panico: una base de datos corrupta no
+        // puede tumbar el inventario.
+        let Some((clave, v)) = linea.get(..2).zip(linea.get(2..)) else {
+            continue;
+        };
+        match clave {
+            "P:" => nombre = v.to_string(),
+            "V:" => version = v.to_string(),
+            "A:" => arch = v.to_string(),
+            "o:" => origen = v.to_string(),
             _ => {}
         }
     }
-    if !nombre.is_empty() && !version.is_empty() {
-        salida.insert(
-            nombre.clone(),
-            Package {
-                name: nombre,
-                version: Version::parse(&version),
-                arch,
-                source: PackageSource::Apk,
-            },
-        );
-    }
+    cerrar(&mut nombre, &mut version, &mut arch, &mut origen, salida);
 }
 
 /// Rutas de las bases de datos que el inventario sabe leer.
@@ -303,6 +425,82 @@ Description: GNU Bourne Again SHell
         let mut m = BTreeMap::new();
         parse_dpkg_status(texto, &mut m);
         assert_eq!(m["bash"].version.to_string(), "5.2.21-2ubuntu4");
+    }
+
+    #[test]
+    fn dpkg_guarda_el_paquete_fuente_y_su_version() {
+        // Los dos formatos reales del campo, copiados de un status de Ubuntu.
+        let texto = "\
+Package: libssl3t64
+Status: install ok installed
+Architecture: amd64
+Source: openssl
+Version: 3.0.13-0ubuntu3.4
+
+Package: zlib1g
+Status: install ok installed
+Architecture: amd64
+Source: zlib (1:1.3.dfsg-3.1ubuntu2)
+Version: 1:1.3.dfsg-3.1ubuntu2.1
+
+Package: bash
+Status: install ok installed
+Architecture: amd64
+Version: 5.2.21-2ubuntu4
+";
+        let mut m = BTreeMap::new();
+        parse_dpkg_status(texto, &mut m);
+        assert_eq!(m["libssl3t64"].source_name(), "openssl");
+        assert_eq!(
+            m["libssl3t64"].source_version().to_string(),
+            "3.0.13-0ubuntu3.4",
+            "sin version fuente declarada, es la del binario"
+        );
+        assert_eq!(m["zlib1g"].source_name(), "zlib");
+        assert_eq!(
+            m["zlib1g"].source_version().to_string(),
+            "1:1.3.dfsg-3.1ubuntu2",
+            "la version fuente declarada manda sobre la del binario"
+        );
+        assert_eq!(m["bash"].source_name(), "bash");
+        assert_eq!(m["bash"].source_package, None);
+    }
+
+    #[test]
+    fn dpkg_no_pierde_la_segunda_arquitectura_de_un_paquete() {
+        // Antes la segunda pisaba a la primera. El orden del fichero no puede
+        // cambiar el resultado, asi que se prueba en los dos.
+        let amd = "Package: libc6\nStatus: install ok installed\nArchitecture: amd64\n\
+                   Source: glibc\nVersion: 2.39-0ubuntu8\n";
+        let i386 = "Package: libc6\nStatus: install ok installed\nArchitecture: i386\n\
+                    Source: glibc\nVersion: 2.39-0ubuntu8\n";
+        let unico = "Package: bash\nStatus: install ok installed\nArchitecture: amd64\n\
+                     Version: 5.2\n";
+        for orden in [
+            format!("{amd}\n{i386}\n{unico}"),
+            format!("{i386}\n{unico}\n{amd}"),
+        ] {
+            let mut m = BTreeMap::new();
+            parse_dpkg_status(&orden, &mut m);
+            let claves: Vec<&str> = m.keys().map(String::as_str).collect();
+            assert_eq!(claves, ["bash", "libc6:amd64", "libc6:i386"], "{orden}");
+            assert_eq!(m["libc6:i386"].arch, "i386");
+            assert_eq!(m["libc6:amd64"].name, "libc6");
+        }
+    }
+
+    #[test]
+    fn apk_guarda_el_origen_y_no_se_cae_con_una_linea_corta() {
+        // `o:` es el paquete fuente en Alpine; la linea de un solo byte y la
+        // que parte un caracter multibyte antes hacian entrar en panico.
+        let texto = "P:libcrypto3\nV:3.1.4-r5\nA:x86_64\no:openssl\nx\n\u{e9}\n\nP:musl\nV:1.2.4-r2\no:musl\n";
+        let mut m = BTreeMap::new();
+        parse_apk_installed(texto, &mut m);
+        assert_eq!(m["libcrypto3"].source_name(), "openssl");
+        assert_eq!(
+            m["musl"].source_package, None,
+            "el origen es el propio paquete"
+        );
     }
 
     #[test]

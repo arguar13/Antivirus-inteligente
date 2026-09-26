@@ -243,6 +243,51 @@ fn cruza_el_inventario_contra_el_feed() {
 }
 
 #[test]
+fn cruza_tambien_por_el_paquete_fuente_con_su_version() {
+    // LA MAQUINA NORMAL: la biblioteca instalada, la herramienta no. El aviso
+    // esta publicado por el paquete FUENTE (`openssl`), y antes solo se cruzaba
+    // por el nombre instalado (`libssl3`): la vulnerabilidad no salia, y el
+    // informe no decia que no habia podido mirarla.
+    let r = RaizFalsa::nueva("fuente");
+    r.escribir(
+        "/var/lib/dpkg/status",
+        "Package: libssl3\nStatus: install ok installed\nSource: openssl\nVersion: 3.0.2-0ubuntu1\n\n\
+         Package: zlib1g\nStatus: install ok installed\nSource: zlib (1.2.13-1)\n\
+         Version: 1:1.3.dfsg-3.1ubuntu2\n",
+        0o644,
+    );
+    let feed = CveFeed::parse(
+        "CVE-2022-3602|openssl|3.0.0|3.0.7|high|7.5|Desbordamiento punycode\n\
+         CVE-2023-45853|zlib|1.2.12|1.2.14|critical|9.8|Desbordamiento en MiniZip\n\
+         CVE-2023-45853|zlib1g|1.2.12|1.3.dfsg-3.1ubuntu2|critical|9.8|Desbordamiento en MiniZip\n",
+    )
+    .expect("feed valido");
+
+    let informe = Scanner::with_feed(feed).scan(r.path());
+
+    let ssl = buscar(&informe, "CVE-2022-3602").expect("por el fuente, libssl3 es vulnerable");
+    assert!(ssl.title.contains("libssl3"), "{}", ssl.title);
+    assert!(
+        ssl.evidence.contains("paquete fuente openssl"),
+        "la evidencia dice por que camino se cruzo: {}",
+        ssl.evidence
+    );
+
+    // zlib: por el nombre binario la version 1:1.3... YA esta corregida, pero
+    // la version FUENTE declarada (1.2.13-1) cae en el rango del aviso fuente.
+    // Cada camino se compara con su version, y el hallazgo cuenta una vez.
+    let de_zlib = informe
+        .findings
+        .iter()
+        .filter(|f| f.id == "CVE-2023-45853")
+        .count();
+    assert_eq!(
+        de_zlib, 1,
+        "un registro que llega por dos caminos cuenta una vez"
+    );
+}
+
+#[test]
 fn sin_feed_no_hay_hallazgos_de_vulnerabilidad() {
     let r = RaizFalsa::nueva("sinfeed");
     r.escribir(
