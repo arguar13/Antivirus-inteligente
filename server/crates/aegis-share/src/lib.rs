@@ -71,12 +71,13 @@ pub mod puente;
 pub mod stix;
 pub mod taxii;
 pub mod taxonomia;
+mod trozos;
 
 pub use difusion::{Canal, Destino, Difusor, Reparto, Retenido};
 pub use federacion::{Absorcion, Descarte, EnTransito, Instancia, Par};
 pub use marcado::{Marcado, Pap, Tlp};
 pub use procedencia::{Aporte, Fiabilidad, Registro, Revocacion};
 pub use puente::{Carga, Indicador, Puente};
-pub use stix::{Objeto, Paquete, Rechazo, Tipo};
+pub use stix::{Declaracion, Objeto, Paquete, Rechazo, Recorrido, Tipo};
 pub use taxii::{Cliente, Coleccion, Cursor, Peticion, Servidor};
 pub use taxonomia::{Etiqueta, Galaxia, Grupo, Taxonomia, Vocabulario};

@@ -466,51 +466,8 @@ impl Paquete {
         // SEGUNDA PASADA: resolver el marcado efectivo de cada objeto.
         let mut objetos = BTreeMap::new();
         for (id_obj, tipo, o) in crudos {
-            let creado_ns = tiempo_de(&o, "created", &id_obj)?.unwrap_or(0);
-            let modificado_ns = tiempo_de(&o, "modified", &id_obj)?.unwrap_or(creado_ns);
-            if modificado_ns < creado_ns {
-                return Err(Rechazo::TiempoImposible { id: id_obj });
-            }
-
-            let marcado = if tipo == Tipo::MarkingDefinition {
-                // UNA DEFINICION DE MARCADO ES PUBLICA SALVO QUE DIGA OTRA COSA.
-                //
-                // Parece contradecir la regla de que lo no marcado es lo mas
-                // restrictivo, y en realidad es lo que la hace funcionar: la
-                // definicion TIENE que viajar con los objetos que marca, porque si
-                // no llega, su referencia no resuelve y —por nuestra propia
-                // regla— esos objetos acaban en RED en el otro extremo.
-                //
-                // Una definicion que no se puede distribuir hace que nada se
-                // pueda distribuir. Y no abre ningun agujero: una definicion no
-                // lleva inteligencia, lleva el nombre de una etiqueta, y los
-                // marcados TLP son constantes publicas conocidas por todos.
-                let propio = resolver_marcado_parcial(&o, &marcados);
-                Marcado {
-                    tlp: propio.tlp.unwrap_or(crate::marcado::Tlp::Clear),
-                    pap: propio.pap.unwrap_or(crate::marcado::Pap::Clear),
-                }
-            } else {
-                resolver_marcado(&o, &marcados)
-            };
-            let etiquetas = lista_de_textos(&o, "labels");
-            let referencias = referencias_de(&o);
-            let revocado = o.get("revoked").and_then(Value::as_bool).unwrap_or(false);
-
-            objetos.insert(
-                id_obj.clone(),
-                Objeto {
-                    tipo,
-                    id: id_obj,
-                    creado_ns,
-                    modificado_ns,
-                    marcado,
-                    revocado,
-                    etiquetas,
-                    referencias,
-                    crudo: o,
-                },
-            );
+            let objeto = objeto_de(id_obj, tipo, o, &marcados, None)?;
+            objetos.insert(objeto.id.clone(), objeto);
         }
 
         Ok(Paquete { id, objetos })
@@ -569,6 +526,223 @@ impl Paquete {
         fuera.sort_unstable();
         fuera.dedup();
         fuera
+    }
+}
+
+/// Construye un objeto ya validado: tiempos, marcado efectivo, etiquetas y
+/// referencias.
+///
+/// Es el UNICO sitio donde se hace, para los dos caminos de entrada —el paquete
+/// entero ([`Paquete::validar`]) y el recorrido por objetos
+/// ([`Paquete::recorrer`])—: dos construcciones distintas acabarian resolviendo
+/// el marcado de dos formas, y la diferencia seria justo la fuga que la regla de
+/// marcado existe para impedir.
+fn objeto_de(
+    id_obj: String,
+    tipo: Tipo,
+    o: Map<String, Value>,
+    marcados: &BTreeMap<String, Parcial>,
+    declarado: Option<Marcado>,
+) -> Result<Objeto, Rechazo> {
+    let creado_ns = tiempo_de(&o, "created", &id_obj)?.unwrap_or(0);
+    let modificado_ns = tiempo_de(&o, "modified", &id_obj)?.unwrap_or(creado_ns);
+    if modificado_ns < creado_ns {
+        return Err(Rechazo::TiempoImposible { id: id_obj });
+    }
+
+    let marcado = if tipo == Tipo::MarkingDefinition {
+        // UNA DEFINICION DE MARCADO ES PUBLICA SALVO QUE DIGA OTRA COSA.
+        //
+        // Parece contradecir la regla de que lo no marcado es lo mas
+        // restrictivo, y en realidad es lo que la hace funcionar: la
+        // definicion TIENE que viajar con los objetos que marca, porque si
+        // no llega, su referencia no resuelve y —por nuestra propia
+        // regla— esos objetos acaban en RED en el otro extremo.
+        //
+        // Una definicion que no se puede distribuir hace que nada se
+        // pueda distribuir. Y no abre ningun agujero: una definicion no
+        // lleva inteligencia, lleva el nombre de una etiqueta, y los
+        // marcados TLP son constantes publicas conocidas por todos.
+        let propio = resolver_marcado_parcial(&o, marcados);
+        Marcado {
+            tlp: propio.tlp.unwrap_or(crate::marcado::Tlp::Clear),
+            pap: propio.pap.unwrap_or(crate::marcado::Pap::Clear),
+        }
+    } else {
+        // El marcado efectivo. LA REGLA QUE IMPIDE LA FUGA SILENCIOSA: si el
+        // objeto declara `object_marking_refs` y alguna no resuelve, el
+        // resultado es `Marcado::desconocido` —lo mas restrictivo— y no «sin
+        // marcar». Es el caso que mas se ha visto filtrar en sistemas reales: la
+        // referencia apunta a un marcado que no viaja en el paquete, no se
+        // encuentra, y el objeto se pinta sin la etiqueta que decia que no se
+        // podia ensenar.
+        match (resolver_parcial(&o, marcados), declarado) {
+            (Some(p), Some(d)) => p.resolver_declarado(d),
+            (Some(p), None) => p.resolver(),
+            // LA REGLA QUE IMPIDE LA FUGA SILENCIOSA, tambien con declaracion:
+            // una referencia que no resuelve deja el objeto en lo mas
+            // restrictivo, diga lo que diga el operador de la coleccion.
+            (None, _) => Marcado::desconocido(),
+        }
+    };
+    let etiquetas = lista_de_textos(&o, "labels");
+    let referencias = referencias_de(&o);
+    let revocado = o.get("revoked").and_then(Value::as_bool).unwrap_or(false);
+
+    Ok(Objeto {
+        tipo,
+        id: id_obj,
+        creado_ns,
+        modificado_ns,
+        marcado,
+        revocado,
+        etiquetas,
+        referencias,
+        crudo: o,
+    })
+}
+
+/// Tope de un objeto suelto en el recorrido por objetos: el MISMO que el de un
+/// paquete de red entero.
+///
+/// No puede ser menor: un objeto real puede ser grande —la `x-mitre-collection`
+/// de ATT&CK Enterprise, que enumera los 26 000 objetos de la coleccion, pesa
+/// 4,8 MB— y cabe en un paquete de red. Y no debe ser mayor: un objeto suelto
+/// que no cabria en un paquete no tiene por que caber por el camino confiado.
+pub const MAX_OBJETO: usize = MAX_PAQUETE;
+
+/// Tope de objetos de un recorrido: lo que un grafo de conocimiento puede querer
+/// absorber de una coleccion confiada (ATT&CK entero son unos 31 000).
+pub const MAX_OBJETOS_RECORRIDO: usize = 2_000_000;
+
+/// El marcado que un operador declara para lo que una coleccion calla.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Declaracion {
+    /// El marcado declarado.
+    pub marcado: Marcado,
+    /// Quien lo declara: queda en el registro de la importacion.
+    pub por: String,
+}
+
+/// Lo que dejo un recorrido.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Recorrido {
+    /// El identificador del paquete.
+    pub id: String,
+    /// Objetos entregados.
+    pub objetos: usize,
+}
+
+impl Paquete {
+    /// Valida un paquete GRANDE objeto a objeto, sin construirlo entero, y
+    /// entrega cada objeto ya validado a `cada`.
+    ///
+    /// # Por que existe, y por que no relaja nada
+    ///
+    /// [`MAX_PAQUETE`] es un tope de SEGURIDAD para lo que llega por la red: un
+    /// paquete se analiza entero en memoria, y sin tope un envio hostil la agota.
+    /// Una coleccion confiada y grande —ATT&CK Enterprise son 53 MB— no cabe, y
+    /// subir el tope lo subiria tambien para lo hostil. Aqui el documento se
+    /// trocea con un analizador lexico que solo sigue comillas, escapes y
+    /// corchetes, y cada objeto se analiza POR SEPARADO con sus propios topes
+    /// ([`MAX_OBJETO`], [`MAX_PROFUNDIDAD`], [`MAX_PROPIEDADES`]) y las MISMAS
+    /// validaciones que [`Paquete::validar`]: cabecera, propiedades, tiempos,
+    /// duplicados y la regla del marcado que no resuelve.
+    ///
+    /// Dos pasadas sobre el texto: la primera valida todo y recoge las
+    /// definiciones de marcado —que pueden venir despues de los objetos que
+    /// marcan—; la segunda construye y entrega. Si la primera encuentra un
+    /// error, no se entrega nada: un paquete a medio absorber es peor que uno
+    /// rechazado.
+    ///
+    /// # Errors
+    ///
+    /// El primer [`Rechazo`], igual que [`Paquete::validar`].
+    pub fn recorrer(texto: &str, cada: impl FnMut(Objeto)) -> Result<Recorrido, Rechazo> {
+        Paquete::recorrer_con(texto, None, cada)
+    }
+
+    /// Como [`Paquete::recorrer`], con el marcado que el operador DECLARA para lo
+    /// que la coleccion calla.
+    ///
+    /// Para colecciones que son publicas y no lo dicen en TLP: ATT&CK lleva solo
+    /// su marca de copyright, y por la regla de lo desconocido se quedaria en
+    /// `TLP:RED` —correcto sin declaracion: nadie ha dicho que se pueda
+    /// compartir—. La declaracion tiene autor, y solo rellena lo que cada objeto
+    /// calla (ver [`Parcial::resolver_declarado`]).
+    ///
+    /// # Errors
+    ///
+    /// Como [`Paquete::recorrer`], y [`Rechazo::NoEsJson`] si la declaracion no
+    /// tiene autor.
+    pub fn recorrer_declarado(
+        texto: &str,
+        declaracion: &Declaracion,
+        cada: impl FnMut(Objeto),
+    ) -> Result<Recorrido, Rechazo> {
+        if declaracion.por.trim().is_empty() {
+            return Err(Rechazo::NoEsJson {
+                detalle: "una declaracion de marcado sin autor no es una declaracion".into(),
+            });
+        }
+        Paquete::recorrer_con(texto, Some(declaracion.marcado), cada)
+    }
+
+    fn recorrer_con(
+        texto: &str,
+        declarado: Option<Marcado>,
+        mut cada: impl FnMut(Objeto),
+    ) -> Result<Recorrido, Rechazo> {
+        let trozos = crate::trozos::trocear(texto, MAX_OBJETO, MAX_OBJETOS_RECORRIDO)?;
+
+        // PRIMERA PASADA: validar y recoger los marcados.
+        let mut marcados: BTreeMap<String, Parcial> = BTreeMap::new();
+        let mut vistos: BTreeSet<String> = BTreeSet::new();
+        for t in &trozos.objetos {
+            let o = mapa_de_trozo(&texto[t.clone()])?;
+            let (id_obj, tipo) = validar_cabecera(&o)?;
+            validar_propiedades(&o, &id_obj, &tipo)?;
+            if !vistos.insert(clave_version(&o, &id_obj)) {
+                return Err(Rechazo::Duplicado { id: id_obj });
+            }
+            if tipo == Tipo::MarkingDefinition {
+                marcados.insert(id_obj.clone(), marcado_de_definicion(&o));
+            }
+            // Los tiempos tambien se comprueban aqui: la segunda pasada no
+            // puede fallar a medias.
+            let c = tiempo_de(&o, "created", &id_obj)?.unwrap_or(0);
+            if tiempo_de(&o, "modified", &id_obj)?.unwrap_or(c) < c {
+                return Err(Rechazo::TiempoImposible { id: id_obj });
+            }
+        }
+        drop(vistos);
+
+        // SEGUNDA PASADA: construir y entregar.
+        let mut n = 0;
+        for t in &trozos.objetos {
+            let o = mapa_de_trozo(&texto[t.clone()])?;
+            let (id_obj, tipo) = validar_cabecera(&o)?;
+            cada(objeto_de(id_obj, tipo, o, &marcados, declarado)?);
+            n += 1;
+        }
+        Ok(Recorrido {
+            id: trozos.id.unwrap_or_else(|| "bundle--sin-id".into()),
+            objetos: n,
+        })
+    }
+}
+
+/// Analiza un trozo que deberia ser un objeto JSON, con los topes de uno.
+fn mapa_de_trozo(t: &str) -> Result<Map<String, Value>, Rechazo> {
+    comprobar_profundidad(t)?;
+    match serde_json::from_str::<Value>(t) {
+        Ok(Value::Object(o)) => Ok(o),
+        Ok(_) => Err(Rechazo::NoEsJson {
+            detalle: "un elemento de «objects» no es un objeto".into(),
+        }),
+        Err(e) => Err(Rechazo::NoEsJson {
+            detalle: recortar(&e.to_string(), 200),
+        }),
     }
 }
 
@@ -653,26 +827,6 @@ fn validar_propiedades(o: &Map<String, Value>, id: &str, tipo: &Tipo) -> Result<
         }
     }
     Ok(())
-}
-
-/// Resuelve el marcado efectivo de un objeto.
-///
-/// # La regla que impide la fuga silenciosa
-///
-/// Si el objeto declara `object_marking_refs` y **alguna no resuelve**, el
-/// resultado es [`Marcado::desconocido`] —lo mas restrictivo— y no «sin marcar».
-///
-/// Es el caso que mas veces se ha visto filtrar en sistemas reales: el objeto
-/// trae una referencia a un marcado que no viaja en el paquete, no se encuentra,
-/// y se pinta sin etiqueta. El documento es valido, el objeto se ve entero, y lo
-/// unico que falta es justo la etiqueta que decia que no se podia enseñar.
-fn resolver_marcado(o: &Map<String, Value>, conocidos: &BTreeMap<String, Parcial>) -> Marcado {
-    match resolver_parcial(o, conocidos) {
-        Some(p) => p.resolver(),
-        // LA REGLA QUE IMPIDE LA FUGA SILENCIOSA. Una referencia que no resuelve
-        // no deja el objeto «sin marcar»: lo deja en lo mas restrictivo.
-        None => Marcado::desconocido(),
-    }
 }
 
 /// Lo mismo, pero sin resolver lo que se calla.

@@ -1057,6 +1057,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "flujo" ]; then
     fi
 fi
 
+# AegisKnowledge (FASE 98): el grafo de conocimiento STIX 2.1 unido a lo
+# observado. Lo primero, el autoataque: una relacion falsa inyectada por un
+# canal se aisla por su procedencia y se revierte revocandolo, sin tirar lo que
+# sostenian los demas. Despues, ATT&CK entero de ida y vuelta, la hipotesis que
+# no se puede hacer pasar por un hecho, y la comparativa medida con OpenCTI.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "conocimiento" ]; then
+    printf '%s==>%s AegisKnowledge · grafo STIX 2.1 unido a lo observado, con inferencia explicable\n' "$GRIS" "$FIN"
+    if ./tools/verificar-conocimiento.sh > $LOGS/aegis-conocimiento-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-conocimiento-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-conocimiento-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
 # un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
 # que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la

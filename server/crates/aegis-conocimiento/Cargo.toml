@@ -1,0 +1,20 @@
+[package]
+name = "aegis-conocimiento"
+description = "AegisKnowledge: el grafo de conocimiento STIX 2.1 completo, unido a las entidades observadas, con inferencia acotada y explicable"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# El modelo STIX, la procedencia recalculada (FASE 78) y el estrangulamiento
+# unico de salida: el grafo se construye SOBRE ellos, no al lado.
+aegis-share = { path = "../aegis-share" }
+# Lo observado se nombra con el modelo unico de entidad (FASE 79).
+aegis-entidad = { path = "../../../crates/aegis-entidad" }
+serde_json = "1"
+sha2 = "0.10"

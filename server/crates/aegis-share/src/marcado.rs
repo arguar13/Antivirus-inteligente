@@ -322,6 +322,21 @@ impl Parcial {
         }
     }
 
+    /// Resuelve lo que falta con lo que el operador DECLARO para la coleccion.
+    ///
+    /// Es el mismo punto unico donde se aplica el valor por defecto, con otro
+    /// valor: solo rellena el eje que el objeto calla. Lo que el objeto dice
+    /// manda siempre —una coleccion declarada publica no abre un objeto que se
+    /// marco `TLP:AMBER`—, y lo que no resuelve no llega aqui: una referencia de
+    /// marcado que no se encuentra sigue siendo [`Marcado::desconocido`].
+    #[must_use]
+    pub fn resolver_declarado(self, declarado: Marcado) -> Marcado {
+        Marcado {
+            tlp: self.tlp.unwrap_or(declarado.tlp),
+            pap: self.pap.unwrap_or(declarado.pap),
+        }
+    }
+
     /// Si se sabe algo de los dos ejes.
     #[must_use]
     pub fn completa(self) -> bool {

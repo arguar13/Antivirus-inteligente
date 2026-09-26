@@ -82,6 +82,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-conocimiento"
+version = "0.1.0"
+dependencies = [
+ "aegis-entidad",
+ "aegis-share",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "aegis-detonate"
 version = "0.1.0"
 dependencies = [

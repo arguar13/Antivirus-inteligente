@@ -411,17 +411,23 @@ fi
 if toca 11; then
     titulo 11 "UN SOLO ESTRANGULAMIENTO · nada sale sin pasar por la politica"
     CANALES=$(grep -cE "^    (Taxii|Federacion|Enjambre|Exportacion)," server/crates/aegis-share/src/difusion.rs 2>/dev/null || echo 0)
+    # FASE 98: el grafo de conocimiento tampoco tiene otra salida. El unico sitio
+    # que construye el documento para fuera esta en `exportar`, despues del juez.
+    CONOCIMIENTO=$(grep -rn 'a_json(' server/crates/aegis-conocimiento/src 2>/dev/null | wc -l)
+    ORDEN_CONOC=$(awk '/^pub fn exportar/,/^}/' server/crates/aegis-conocimiento/src/intercambio.rs 2>/dev/null \
+        | grep -oE 'repartir\(|a_json\(' | tr -d '(' | tr '\n' ' ')
     if [ "$CANALES" = "4" ] \
+        && [ "$CONOCIMIENTO" = "1" ] && [ "$ORDEN_CONOC" = "repartir a_json " ] \
         && grep -q "pub const NO_DISTRIBUIBLE" server/crates/aegis-share/src/difusion.rs \
         && pruebas servidor aegis-share "" "difusion" /tmp/inv-estrangulamiento.log; then
-        veredicto 11 "un solo estrangulamiento" si "los 4 canales pasan por el mismo juez; $(pasadas /tmp/inv-estrangulamiento.log) prueba(s)"
+        veredicto 11 "un solo estrangulamiento" si "los 4 canales pasan por el mismo juez, tambien el grafo de conocimiento; $(pasadas /tmp/inv-estrangulamiento.log) prueba(s)"
         porque "Si cada camino de salida tuviera su filtro, el que se quedara atras no"
         porque "fallaria ruidosamente: compartiria de mas. Y no hace falta un ataque —basta"
         porque "añadir un camino nuevo y olvidar el filtro—. Con un solo estrangulamiento,"
         porque "el motivo de retencion es EL MISMO en los cinco destinos, asi que la"
         porque "propiedad es cierta por construccion y no por haber configurado bien."
     else
-        veredicto 11 "un solo estrangulamiento" no "$CANALES canal(es) declarados, o la prueba de difusion en rojo"
+        veredicto 11 "un solo estrangulamiento" no "$CANALES canal(es) declarados; el conocimiento construye documentos en $CONOCIMIENTO sitio(s) (orden: $ORDEN_CONOC); o la prueba de difusion en rojo"
     fi
 fi
 
