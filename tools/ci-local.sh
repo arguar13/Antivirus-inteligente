@@ -197,6 +197,22 @@ if [ "$SOLO" = "--reanudar" ]; then
         printf '%s==> La lista de grupos no cubre:%s%s\n' "$ROJO" "$SIN_GRUPO" "$FIN"
         printf '    Arregla `grupos()` antes de reanudar: si no, se saltaria esas\n'
         printf '    puertas y daria un verde que no ha comprobado.\n'
+        # LO NECESARIO PARA DISTINGUIR LAS DOS CAUSAS. Las dos derivaciones usan el
+        # mismo patron sobre el mismo fichero, asi que solo discrepan si `grupos()`
+        # tiene de verdad un hueco —y entonces vuelve a faltar— o si dos lecturas
+        # del fichero devolvieron contenido distinto. Paso una vez, en la primera
+        # tanda tras arrancar la VM de WSL, sobre un fichero que llevaba horas sin
+        # tocarse, y no se reprodujo en 300 vueltas: se deja la huella y la lista
+        # de ese instante para que la proxima vez no haya que adivinar.
+        printf '    huella de %s: %s\n' "$0" "$(sha256sum "$0" | cut -c1-16)"
+        printf '    grupos derivados (%s): %s\n' "$(echo "$LISTA" | wc -l)" "$(echo $LISTA)"
+        OTRA=$(grupos)
+        if [ "$OTRA" = "$LISTA" ]; then
+            printf '    derivada otra vez: IDENTICA, el hueco es de `grupos()`\n'
+        else
+            printf '    derivada otra vez: DISTINTA (%s grupos): dos lecturas del mismo\n' "$(echo "$OTRA" | wc -l)"
+            printf '    fichero no coincidieron; el sistema de ficheros, no la lista\n'
+        fi
         exit 1
     fi
 
