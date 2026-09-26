@@ -245,3 +245,133 @@ pub const CAMBIO_DE_PRIVILEGIOS: &[Syscall] = &[
     Syscall::PivotRoot,
     Syscall::Chroot,
 ];
+
+// ─── Todas las llamadas, por nombre (FASE 93) ─────────────────────────────────
+//
+// El enumerado de arriba nombra las llamadas que una POLITICA escrita a mano
+// prohibe. Un perfil APRENDIDO, en cambio, habla de cualquiera de las
+// cuatrocientas que un proceso puede usar, y el analista tiene que poder leerlo:
+// «este servicio usa `openat`, `read`, `epoll_wait`…», no «usa 257, 0, 232».
+// La tabla sale de la cabecera del kernel (ver `tabla_x86_64.rs`).
+
+#[cfg(target_arch = "x86_64")]
+use crate::tabla_x86_64::LLAMADAS;
+#[cfg(not(target_arch = "x86_64"))]
+const LLAMADAS: &[(u32, &str)] = &[];
+
+/// El nombre de una llamada por su numero, si esta arquitectura tiene tabla.
+#[must_use]
+pub fn nombre(nr: u32) -> Option<&'static str> {
+    LLAMADAS
+        .binary_search_by_key(&nr, |(n, _)| *n)
+        .ok()
+        .map(|i| LLAMADAS[i].1)
+}
+
+/// El numero de una llamada por su nombre.
+#[must_use]
+pub fn numero(nombre: &str) -> Option<u32> {
+    LLAMADAS
+        .iter()
+        .find(|(_, n)| *n == nombre)
+        .map(|(nr, _)| *nr)
+}
+
+/// Todas las llamadas que conoce la tabla de esta arquitectura.
+#[must_use]
+pub fn todas() -> &'static [(u32, &'static str)] {
+    LLAMADAS
+}
+
+#[cfg(all(test, target_arch = "x86_64"))]
+mod pruebas_tabla {
+    use super::*;
+
+    #[test]
+    fn la_tabla_esta_ordenada_y_sin_repetidos() {
+        for w in LLAMADAS.windows(2) {
+            assert!(w[0].0 < w[1].0, "{:?} {:?}", w[0], w[1]);
+        }
+        assert!(LLAMADAS.len() > 300);
+    }
+
+    /// La tabla y el enumerado escrito a mano tienen que decir lo mismo: si no,
+    /// uno de los dos esta mal, y el que este mal confina la llamada que no es.
+    #[test]
+    fn el_enumerado_y_la_tabla_generada_coinciden() {
+        use Syscall::*;
+        for (s, n) in [
+            (Ptrace, "ptrace"),
+            (ProcessVmReadv, "process_vm_readv"),
+            (ProcessVmWritev, "process_vm_writev"),
+            (KexecLoad, "kexec_load"),
+            (KexecFileLoad, "kexec_file_load"),
+            (InitModule, "init_module"),
+            (FinitModule, "finit_module"),
+            (DeleteModule, "delete_module"),
+            (Bpf, "bpf"),
+            (PerfEventOpen, "perf_event_open"),
+            (Socket, "socket"),
+            (Connect, "connect"),
+            (Bind, "bind"),
+            (Listen, "listen"),
+            (Accept, "accept"),
+            (Accept4, "accept4"),
+            (Sendto, "sendto"),
+            (Sendmsg, "sendmsg"),
+            (Recvfrom, "recvfrom"),
+            (Recvmsg, "recvmsg"),
+            (Mount, "mount"),
+            (Umount2, "umount2"),
+            (PivotRoot, "pivot_root"),
+            (Chroot, "chroot"),
+            (Setuid, "setuid"),
+            (Setgid, "setgid"),
+            (Setreuid, "setreuid"),
+            (Setregid, "setregid"),
+            (Setresuid, "setresuid"),
+            (Setresgid, "setresgid"),
+            (Capset, "capset"),
+            (Unshare, "unshare"),
+            (Setns, "setns"),
+            (Personality, "personality"),
+            (Userfaultfd, "userfaultfd"),
+            (Keyctl, "keyctl"),
+            (AddKey, "add_key"),
+            (RequestKey, "request_key"),
+        ] {
+            assert_eq!(numero(n), Some(s.number()), "{n}");
+            assert_eq!(nombre(s.number()), Some(n));
+        }
+    }
+
+    /// Y contra la cabecera del kernel de ESTA maquina, cuando la hay.
+    #[test]
+    fn la_tabla_casa_con_la_cabecera_del_kernel() {
+        let ruta = "/usr/include/x86_64-linux-gnu/asm/unistd_64.h";
+        let Ok(texto) = std::fs::read_to_string(ruta) else {
+            eprintln!("NO APLICABLE: {ruta} no existe en esta maquina");
+            return;
+        };
+        let mut vistas = 0;
+        for l in texto.lines() {
+            let mut p = l.split_whitespace();
+            if p.next() != Some("#define") {
+                continue;
+            }
+            let (Some(n), Some(v)) = (p.next(), p.next()) else {
+                continue;
+            };
+            let (Some(n), Ok(v)) = (n.strip_prefix("__NR_"), v.parse::<u32>()) else {
+                continue;
+            };
+            assert_eq!(numero(n), Some(v), "{n} = {v} en la cabecera");
+            vistas += 1;
+        }
+        assert_eq!(
+            vistas,
+            LLAMADAS.len(),
+            "la tabla y la cabecera no tienen las mismas llamadas"
+        );
+    }
+}

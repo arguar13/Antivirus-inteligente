@@ -1,0 +1,24 @@
+[package]
+name = "aegis-confinar"
+description = "Confinamiento derivado del comportamiento: aprende lo que un proceso hace de verdad, lo ensaya en modo permisivo, lo impone solo con confirmacion, y se retira solo si rompe algo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Toda la frontera con el kernel —fork, seccomp con escucha, pidfd_getfd, las
+# notificaciones, Landlock y el conjunto limite de capacidades— vive en
+# `aegis-sandbox`, que ya es el crate de FFI declarado en la linea base de
+# `unsafe`. Este crate solo DECIDE, y por eso lleva `forbid(unsafe_code)`.
+aegis-sandbox = { path = "../aegis-sandbox" }
+# La desviacion del perfil aprendido llega al arbitro como una `Senal` del motor
+# conductual sobre la entidad proceso. Un veredicto propio seria volver a la
+# averia que cerro la FASE 79.
+aegis-entidad = { path = "../aegis-entidad" }
+libc = "0.2"
+thiserror = "2"

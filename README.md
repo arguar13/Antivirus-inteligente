@@ -238,7 +238,7 @@ drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf) — 2.7
 kernel/windows/aegis/         Minifilter + ObCallbacks + politica (C, WDK) — 887 lineas
 deploy/terraform/             Aprovisionamiento del plano de control
 fuzz/                         Objetivos de libFuzzer sobre los analizadores
-tools/                        39 puertas de verificacion + ABI check + CI local
+tools/                        40 puertas de verificacion + ABI check + CI local
 docs/                         Blueprint arquitectonico, una pagina por fase
 ```
 
@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**64 crates · 2850 pruebas**
+**65 crates · 2904 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -279,6 +279,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-behavior` | Motor conductual de AegisCore: grafo dirigido de procesos, tecnicas MITRE ATT&CK y puntuacion de riesgo | 22 | — | sí |
 | `aegis-captura` | Captura de trafico indexada por entidad con retencion selectiva por veredicto y reproduccion determinista | 88 | `verificar-captura.sh` | sí |
 | `aegis-cloudnative` | Deteccion de escape de contenedor (Deepce/Traitor) a partir de setns/unshare/capset/bpf/mount, con el decisor en Rust puro y el enganche eBPF declarado gated | 13 | `verificar-cloudnative.sh` | sí |
+| `aegis-confinar` | Confinamiento derivado del comportamiento: aprende lo que un proceso hace de verdad, lo ensaya en modo permisivo, lo impone solo con confirmacion y se retira solo si rompe algo; no puede volverse contra el agente ni contra los activos protegidos | 41 | `verificar-confinar.sh` | sí |
 | `aegis-ctl` | Protocolo de control por socket Unix y CLI de administracion aegisctl | 10 | — | sí |
 | `aegis-custodia` | Cadena de custodia verificable para la evidencia forense de una flota: sello de procedencia, encadenado por resumen y veredicto que enumera lo que NO prueba | 67 | `verificar-custodia.sh` | sí |
 | `aegis-deception` | Servicios senuelo de red y deteccion de reconocimiento sin falsos positivos | 18 | — | — |
@@ -323,7 +324,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-ransom` | Motor de deteccion y contencion de ransomware en tiempo real | 22 | — | sí |
 | `aegis-resp` | Motor de respuesta activa de AegisCore: terminacion, cuarentena y aislamiento | 22 | — | — |
 | `aegis-rollback` | Reversion de ransomware: copia-sombra cifrada y restauracion en milisegundos (FASE 50) | 6 | — | — |
-| `aegis-sandbox` | Aislamiento preventivo de procesos con Landlock y seccomp-bpf | 17 | — | — |
+| `aegis-sandbox` | Aislamiento preventivo con Landlock y seccomp-bpf, y la supervision por notificacion de seccomp y los perfiles aprendidos (lista blanca, reglas de Landlock y conjunto limite de capacidades) sobre los que se construye el confinamiento | 30 | `verificar-confinar.sh` | — |
 | `aegis-scal` | Capa de abstraccion del nucleo del sistema (SCAL): telemetria y control independientes del sistema operativo | 52 | — | — |
 | `aegis-scan` | Motor de deteccion profunda de AegisCore: YARA sobre ficheros y memoria de procesos | 27 | `verificar-memscanner.sh` | sí |
 | `aegis-selfdefense` | Autodefensa legitima: OTP firmado del Control Plane, decision de tamper, clasificacion ELAM y requisitos PPL | 42 | — | sí |
@@ -446,6 +447,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | 82 | [AegisCapture: captura de paquetes indexada por entidad](docs/82-captura-indexada-por-entidad.md) — un capturador es un sitio del que robar y una forma de llenar el disco. El anillo sólo acepta bytes redactados, guardar entero exige un veredicto, la retención se decide en el tipo, y el índice es por entidad: buscar una entidad devuelve su tráfico sin correlacionar por texto |
 | 83 | [AegisLure: red de señuelos atribuible](docs/83-senuelos-atribuibles.md) — diecinueve señuelos que conversan varios turnos sin nada que encarcelar, cero falsos positivos por construcción, amplificación acotada a x1 en UDP por el envoltorio, y un token distinto por señuelo y por destino: cuando una credencial aparece, el sitio del que salió está dentro de ella |
 | 84 | [AegisFirmware+: auditoría de plataforma de grado CHIPSEC, sin poder escribir](docs/84-auditoria-de-plataforma.md) — de dos superficies de firmware a **doce**: protecciones de la flash, SMM, chipset y MSR, IOMMU, mitigaciones, microcódigo frente al publicado por el fabricante, variables UEFI, AML y la cadena de arranque **explicada** medida a medida, con el texto de cada evento comprobado contra su resumen. La escritura es **imposible de expresar** —cinco `compile_fail` con código de error— y se ejerce contra el kernel en seis superficies reales, con el errno que el kernel da de verdad y no el que pedía el enunciado. Compromiso y exposición van separados en el tipo: al árbitro sólo llegan los compromisos. El AML real se coteja en cada `make ci` contra `iasl` (2457 métodos, idéntico) y `acpiexec` (7 cargados, idéntico); frente a CHIPSEC, 21 módulos cubiertos, 3 parciales, 6 no cubiertos —escritos como derrota— y 6 excluidos por escribir o atacar |
+| 85 | [AegisConfine: confinamiento que se aprende, se ensaya y se retira solo](docs/85-confinamiento-aprendido.md) — SELinux, AppArmor, gVisor y Kata saben confinar; lo que no resuelven es **de dónde sale la política** ni qué pasa cuando rompe algo. Aquí se **aprende** del programa real con la notificación de usuario de seccomp (sin perder ni una llamada y sin que el proceso lo note), se **ensaya** en permisivo dejando pasar todo y anotando lo que se habría bloqueado, se **impone** sólo con una confirmación con autor y motivo —el tipo no admite otra forma— y un **ensayo limpio**, y si rompe la producción **se retira solo**, de forma pegajosa. Contra el kernel real: lo aprendido funciona, el `socket` no aprendido lo bloquea seccomp y el fichero no aprendido Landlock, un proceso de root arranca sólo con sus cinco capacidades implícitas, y un perfil roto se retira a los tres fallos. Sobre `ls` real, el perfil cierra el **91,7 %** de la superficie de llamadas. El motor no puede ni construir el objetivo para el propio agente, `init` o un activo protegido |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo

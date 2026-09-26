@@ -338,6 +338,12 @@ if toca 9; then
         # escribir por cada superficie contra el kernel, y ademas se comprueba
         # que el tipo no pueda ni pedirlo (compile_fail con codigo de error).
         "la auditoria de firmware como ladrillo;raiz|aegis-fwaudit|--test solo_lectura|+raiz|aegis-fwaudit|--doc|"
+        # El confinamiento (FASE 93) puede dejar sin red, sin ficheros o sin
+        # capacidades a cualquier proceso. Vuelto contra el propio agente lo
+        # ciega; contra init o sshd deja al cliente sin maquina. El objetivo ni se
+        # puede construir para ellos, un perfil malo se retira solo, y el modo
+        # obligatorio no se puede construir sin confirmacion.
+        "el confinamiento como denegacion de servicio;raiz|aegis-confinar|--test confinamiento_real|el_motor_no_puede un_perfil_malo+raiz|aegis-confinar|--lib|despliegue objetivo+raiz|aegis-confinar|--doc|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
@@ -450,8 +456,20 @@ if toca 12; then
             AUSENCIAS+=("aegis-fwaudit abre algo para escribir en $(basename "$f")")
         fi
     done
+    # FASE 93: el confinamiento no rompe al cliente. El modo por defecto es el que
+    # no bloquea nada, y la confirmacion que exige el obligatorio no tiene valor
+    # por defecto ni campos publicos con los que fabricarla.
+    if ! grep -B1 -A1 '#\[default\]' crates/aegis-confinar/src/modo.rs 2>/dev/null | grep -q 'Aprendiendo,'; then
+        AUSENCIAS+=("aegis-confinar::Modo no tiene Aprendiendo como modo por defecto")
+    fi
+    if awk '/^pub struct Confirmacion/,/^}/' crates/aegis-confinar/src/modo.rs 2>/dev/null | grep -qE '^\s+pub '; then
+        AUSENCIAS+=("aegis-confinar::Confirmacion tiene campos publicos: se puede fabricar sin autor ni motivo")
+    fi
+    if grep -qE 'impl Default for Confirmacion|derive\(.*Default.*\)\]\s*$' <(grep -B3 'pub struct Confirmacion' crates/aegis-confinar/src/modo.rs 2>/dev/null); then
+        AUSENCIAS+=("aegis-confinar::Confirmacion tiene valor por defecto")
+    fi
     if [ ${#AUSENCIAS[@]} -eq 0 ] && [ "$SALIDAS" = "2" ]; then
-        veredicto 12 "la ausencia es la frontera" si "4 tipos sin su variante peligrosa (la auditoria de firmware no puede escribir); la salida de la detonacion tiene 2 y ninguna es red real"
+        veredicto 12 "la ausencia es la frontera" si "6 tipos sin su variante peligrosa (la auditoria de firmware no puede escribir; el confinamiento no nace obligatorio ni se confirma sin autor); la salida de la detonacion tiene 2 y ninguna es red real"
         porque "Es la unica clase de garantia que no depende de que el codigo de"
         porque "comprobacion este bien: si la variante no existe, no hay configuracion,"
         porque "error ni atacante que la produzca. Por eso se verifica por lo que FALTA."

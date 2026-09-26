@@ -88,6 +88,16 @@ name = "aegis-cloudnative"
 version = "0.1.0"
 
 [[package]]
+name = "aegis-confinar"
+version = "0.1.0"
+dependencies = [
+ "aegis-entidad",
+ "aegis-sandbox",
+ "libc",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-ctl"
 version = "0.1.0"
 dependencies = [

@@ -57,6 +57,24 @@ pub enum SandboxError {
     /// El programa excede el limite de BPF clasico.
     #[error("el filtro tiene {0} instrucciones y el maximo es 65535")]
     FilterTooLong(usize),
+
+    /// Fallo en la supervision de un hijo (FASE 93).
+    #[error("supervision: {op}: {source}")]
+    Supervision {
+        /// Que se estaba haciendo.
+        op: &'static str,
+        /// Causa.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// El hijo supervisado murio antes de entregar su escucha.
+    #[error("el hijo supervisado termino antes de entregar su escucha (estado {0})")]
+    HijoSinEscucha(i32),
+
+    /// Un argumento no se puede pasar a `execve` (lleva un byte nulo).
+    #[error("argumento invalido para execve: {0}")]
+    Argumento(String),
 }
 
 impl SandboxError {

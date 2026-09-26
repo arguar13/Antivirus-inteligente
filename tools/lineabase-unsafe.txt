@@ -48,7 +48,7 @@ aegis-net            Filtro XDP y captura: mapas de eBPF y sockets crudos
 aegis-ptguard        `mmap` de la traza de Intel PT, que no cabe en memoria
 aegis-resp           Terminacion, cuarentena y aislamiento: `kill`, `setns` y control de interfaces
 aegis-rollback       Copia-sombra: `ioctl` de instantaneas del sistema de ficheros
-aegis-sandbox        Landlock y seccomp-bpf: las dos son llamadas al sistema sin envoltura segura
+aegis-sandbox        Landlock, seccomp-bpf, la supervision por notificacion (fork, seccomp con escucha, pidfd_getfd, ioctl de notificaciones, process_vm_readv) y PR_CAPBSET_DROP: llamadas al sistema sin envoltura segura; el confinamiento que decide sobre ellas (aegis-confinar) lleva forbid
 aegis-scal           ES la capa de abstraccion del nucleo del sistema: si el `unsafe` no estuviera aqui, estaria repartido por veinte crates
 aegis-sync           Baja su propia prioridad con `setpriority` para no competir con la deteccion
 aegis-syscallguard   Registros de depuracion (DRx) y contadores de la PMU para verificar el origen de cada syscall

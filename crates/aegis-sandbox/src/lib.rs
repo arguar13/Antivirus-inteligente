@@ -57,7 +57,10 @@ pub mod landlock;
 pub mod policy;
 pub mod sandbox;
 pub mod seccomp;
+pub mod supervisor;
 pub mod syscalls;
+#[cfg(target_arch = "x86_64")]
+pub mod tabla_x86_64;
 
 pub use error::SandboxError;
 pub use policy::{FsPolicy, SandboxPolicy};

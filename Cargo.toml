@@ -55,6 +55,7 @@ members = [
     "crates/aegis-selfdefense",
     "crates/aegis-hardsense",
     "crates/aegis-cloudnative",
+    "crates/aegis-confinar",
     "crates/aegis-memhunter",
     "crates/aegis-l7hunter",
     "crates/aegis-fwaudit",

@@ -984,6 +984,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "plataforma" ]; then
     fi
 fi
 
+# AegisConfine (FASE 93): confinamiento DERIVADO del comportamiento. Se aprende lo
+# que un programa hace de verdad con la notificacion de usuario de seccomp, se
+# ensaya en permisivo sin bloquear nada, se impone solo con confirmacion —seccomp
+# en lista blanca, Landlock sobre las rutas usadas y el conjunto limite de
+# capacidades— y se retira solo si rompe la produccion. Lo que se comprueba aqui
+# es contra el KERNEL: lo aprendido funciona y lo demas lo bloquea el kernel. Y el
+# autoataque: el motor no puede confinar al propio agente ni a los activos
+# protegidos, porque ni siquiera puede construir el objetivo.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "confinar" ]; then
+    printf '%s==>%s AegisConfine · confinamiento aprendido, ensayado y reversible\n' "$GRIS" "$FIN"
+    if ./tools/verificar-confinar.sh > $LOGS/aegis-confinar-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-confinar-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-confinar-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
 # un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
 # que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la

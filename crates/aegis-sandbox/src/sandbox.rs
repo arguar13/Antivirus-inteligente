@@ -34,6 +34,38 @@ pub struct Applied {
     /// No es fatal: seccomp ya bloquea la red entera, y esta bandera solo dice
     /// que la capa redundante no esta.
     pub landlock_net_skipped: bool,
+    /// Capacidades que se quitan del conjunto limite antes del `exec` (FASE 93).
+    pub capacidades_quitadas: u32,
+    /// Cierto si el perfil pedia quitar capacidades y este proceso no puede
+    /// (le falta `CAP_SETPCAP`).
+    ///
+    /// No deja un hueco: sin privilegio, el hijo tampoco tiene capacidades que
+    /// usar, y `no_new_privs` —que el filtro de seccomp pone siempre— impide que
+    /// un binario `setuid` o con capacidades de fichero se las devuelva.
+    pub capacidades_sin_privilegio: bool,
+}
+
+/// La ultima capacidad que conoce este kernel.
+#[must_use]
+pub fn ultima_capacidad() -> u32 {
+    std::fs::read_to_string("/proc/sys/kernel/cap_last_cap")
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(40)
+}
+
+/// Si el proceso actual puede quitar capacidades del conjunto limite: hace
+/// falta `CAP_SETPCAP` (la 8) en el conjunto efectivo.
+#[must_use]
+pub fn puede_quitar_capacidades() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .find_map(|l| l.strip_prefix("CapEff:"))
+                .and_then(|v| u64::from_str_radix(v.trim(), 16).ok())
+        })
+        .is_some_and(|c| c & (1 << 8) != 0)
 }
 
 /// Sandbox ya compilado, listo para aplicarse.
@@ -58,6 +90,8 @@ pub struct CompiledSandbox {
     rutas_sin_regla: usize,
     net_omitida: bool,
     bloqueadas: usize,
+    quitar_capacidades: u64,
+    capacidades_sin_privilegio: bool,
 }
 
 impl CompiledSandbox {
@@ -123,6 +157,77 @@ impl CompiledSandbox {
             rutas,
             rutas_sin_regla,
             net_omitida,
+            quitar_capacidades: 0,
+            capacidades_sin_privilegio: false,
+        })
+    }
+
+    /// Compila un sandbox a partir de las piezas de un perfil APRENDIDO (FASE
+    /// 93): un programa de seccomp ya hecho —una lista blanca—, las rutas que el
+    /// proceso uso, y las capacidades que necesita conservar.
+    ///
+    /// `capacidades_retenidas` en `None` no toca las capacidades; en
+    /// `Some(mascara)` quita del conjunto limite todas las que no esten en la
+    /// mascara, que es lo que hace que un servicio de root arranque sin las
+    /// capacidades que nunca uso.
+    ///
+    /// # Errores
+    /// Si el kernel no admite seccomp, o una regla de Landlock falla.
+    pub fn desde_perfil(
+        programa: Vec<SockFilter>,
+        fs: &crate::policy::FsPolicy,
+        capacidades_retenidas: Option<u64>,
+    ) -> Result<CompiledSandbox, SandboxError> {
+        if !seccomp::available() {
+            return Err(SandboxError::SeccompUnsupported);
+        }
+        let mut rutas = 0usize;
+        let mut rutas_sin_regla = 0usize;
+        let ruleset = match landlock::Abi::detect() {
+            Some(abi) if !fs.is_empty() => {
+                let rs = Ruleset::new(abi, abi.supported_fs(), 0)?;
+                for (lista, derechos) in [
+                    (&fs.read_only, landlock::LECTURA),
+                    (&fs.read_write, landlock::LECTURA | landlock::ESCRITURA),
+                ] {
+                    for ruta in lista {
+                        if rs.allow_path(ruta, derechos)? {
+                            rutas += 1;
+                        } else {
+                            rutas_sin_regla += 1;
+                        }
+                    }
+                }
+                Some(rs)
+            }
+            _ => None,
+        };
+        let (quitar_capacidades, capacidades_sin_privilegio) = match capacidades_retenidas {
+            None => (0, false),
+            Some(retenidas) => {
+                let ultima = ultima_capacidad().min(63);
+                let todas = if ultima == 63 {
+                    u64::MAX
+                } else {
+                    (1u64 << (ultima + 1)) - 1
+                };
+                let quitar = todas & !retenidas;
+                if quitar != 0 && !puede_quitar_capacidades() {
+                    (0, true)
+                } else {
+                    (quitar, false)
+                }
+            }
+        };
+        Ok(CompiledSandbox {
+            bloqueadas: 0,
+            programa,
+            ruleset,
+            rutas,
+            rutas_sin_regla,
+            net_omitida: false,
+            quitar_capacidades,
+            capacidades_sin_privilegio,
         })
     }
 
@@ -139,6 +244,8 @@ impl CompiledSandbox {
             allowed_paths: self.rutas,
             skipped_paths: self.rutas_sin_regla,
             landlock_net_skipped: self.net_omitida,
+            capacidades_quitadas: self.quitar_capacidades.count_ones(),
+            capacidades_sin_privilegio: self.capacidades_sin_privilegio,
         }
     }
 
@@ -162,6 +269,21 @@ impl CompiledSandbox {
     pub fn apply(&self) -> Result<Applied, SandboxError> {
         if let Some(rs) = &self.ruleset {
             landlock::restrict_self(rs.raw_fd())?;
+        }
+        // Las capacidades van ANTES que seccomp: un perfil aprendido no contiene
+        // `prctl` si el programa no lo usaba, y el filtro lo bloquearia.
+        for cap in 0..64u64 {
+            if self.quitar_capacidades & (1 << cap) != 0 {
+                // SAFETY: `prctl(PR_CAPBSET_DROP)` no toca memoria del proceso.
+                let r =
+                    unsafe { libc::prctl(libc::PR_CAPBSET_DROP, cap as libc::c_ulong, 0, 0, 0) };
+                if r != 0 {
+                    return Err(SandboxError::Supervision {
+                        op: "prctl(PR_CAPBSET_DROP)",
+                        source: std::io::Error::last_os_error(),
+                    });
+                }
+            }
         }
         seccomp::install(&self.programa)?;
         Ok(self.summary())
