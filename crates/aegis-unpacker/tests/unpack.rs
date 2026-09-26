@@ -36,7 +36,7 @@ rule payload_desempaquetado {
 /// Se compila en la prueba en vez de versionar el binario: un binario en git no
 /// es reproducible ni auditable, y la fuente C si.
 fn compilar_stub() -> Option<PathBuf> {
-    let fuente = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packer_stub.c");
+    let fuente = PathBuf::from(raiz_crate()).join("tests/fixtures/packer_stub.c");
     // Nombre unico por invocacion: los tests corren en hilos del mismo proceso,
     // asi que un nombre basado solo en el PID los hace chocar y borrarse el
     // fichero unos a otros.
@@ -166,4 +166,16 @@ fn el_proceso_desempaquetado_no_queda_vivo() {
         "el proceso trazado no puede quedar vivo tras desempaquetar"
     );
     let _ = std::fs::remove_file(&stub);
+}
+
+/// La raiz del crate, leida al EJECUTAR y no congelada al compilar.
+///
+/// Con `env!("CARGO_MANIFEST_DIR")` la ruta quedaba fijada en el binario, y
+/// Cargo no lo recompila al mover el repositorio de carpeta (el hash de un
+/// paquete de ruta es relativo al workspace): la prueba seguia buscando sus
+/// ficheros en la ruta vieja y fallaba diciendo que no existian. Cargo define la
+/// variable al lanzar pruebas y ejemplos; el valor de compilacion queda solo para
+/// quien ejecute el binario a mano.
+fn raiz_crate() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string())
 }

@@ -24,7 +24,7 @@ static CONTADOR: AtomicU32 = AtomicU32::new(0);
 
 /// Compila el stub a un binario temporal unico. `None` si no hay compilador.
 fn compilar_stub() -> Option<PathBuf> {
-    let dir = env!("CARGO_MANIFEST_DIR");
+    let dir = raiz_crate();
     let fuente = format!("{dir}/tests/fixtures/syscall_stub.c");
     let n = CONTADOR.fetch_add(1, Ordering::Relaxed);
     let bin = std::env::temp_dir().join(format!("aegis_syscall_stub_{}_{n}", std::process::id()));
@@ -129,4 +129,16 @@ fn un_binario_normal_no_dispara_evasion() {
         EstadoSyscall::Evasion,
         "un binario normal no es evasion"
     );
+}
+
+/// La raiz del crate, leida al EJECUTAR y no congelada al compilar.
+///
+/// Con `env!("CARGO_MANIFEST_DIR")` la ruta quedaba fijada en el binario, y
+/// Cargo no lo recompila al mover el repositorio de carpeta (el hash de un
+/// paquete de ruta es relativo al workspace): la prueba seguia buscando sus
+/// ficheros en la ruta vieja y fallaba diciendo que no existian. Cargo define la
+/// variable al lanzar pruebas y ejemplos; el valor de compilacion queda solo para
+/// quien ejecute el binario a mano.
+fn raiz_crate() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string())
 }

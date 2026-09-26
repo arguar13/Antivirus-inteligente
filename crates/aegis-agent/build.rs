@@ -13,7 +13,11 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    let bpf_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // En ejecucion y no con `env!`: ver `crates/aegis-net/build.rs`. Con `env!`
+    // un repositorio movido de carpeta dejaba de compilar.
+    let manifiesto = std::env::var_os("CARGO_MANIFEST_DIR")
+        .expect("cargo define CARGO_MANIFEST_DIR al ejecutar el script");
+    let bpf_dir = PathBuf::from(manifiesto)
         .join("../../drivers/linux/aegis-bpf")
         .canonicalize()
         .expect("el subproyecto eBPF debe existir dentro del repositorio");

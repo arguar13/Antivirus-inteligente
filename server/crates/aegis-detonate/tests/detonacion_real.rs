@@ -38,7 +38,7 @@ fn agente_invitado() -> Option<PathBuf> {
         }
     }
     // Respaldo: el arbol del repositorio, como se hacia antes.
-    let manifiesto = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifiesto = PathBuf::from(raiz_crate());
     // server/crates/aegis-detonate -> server/crates -> server -> raiz
     let raiz = manifiesto.parent()?.parent()?.parent()?;
     for perfil in ["debug", "release"] {
@@ -428,4 +428,16 @@ fn se_dice_si_este_anfitrion_puede_levantar_maquinas_virtuales() {
         "la jaula tiene que declarar que no aguanta una elevacion local: {}",
         f.resumen()
     );
+}
+
+/// La raiz del crate, leida al EJECUTAR y no congelada al compilar.
+///
+/// Con `env!("CARGO_MANIFEST_DIR")` la ruta quedaba fijada en el binario, y
+/// Cargo no lo recompila al mover el repositorio de carpeta (el hash de un
+/// paquete de ruta es relativo al workspace): la prueba seguia buscando sus
+/// ficheros en la ruta vieja y fallaba diciendo que no existian. Cargo define la
+/// variable al lanzar pruebas y ejemplos; el valor de compilacion queda solo para
+/// quien ejecute el binario a mano.
+fn raiz_crate() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string())
 }

@@ -178,17 +178,15 @@ fn lo_que_firma_python_lo_verifica_el_crate() {
 }
 
 fn ruta_tool() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../drivers/linux/aegis-bpf/tools/sign_bytecode.py")
+    PathBuf::from(raiz_crate()).join("../../drivers/linux/aegis-bpf/tools/sign_bytecode.py")
 }
 
 fn ruta_manifiesto() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../drivers/linux/aegis-bpf/out/bytecode.manifest")
+    PathBuf::from(raiz_crate()).join("../../drivers/linux/aegis-bpf/out/bytecode.manifest")
 }
 
 fn restaurar_manifiesto() {
-    let bpf_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../drivers/linux/aegis-bpf");
+    let bpf_dir = PathBuf::from(raiz_crate()).join("../../drivers/linux/aegis-bpf");
     let probes = bpf_dir.join("out/aegis_probes.bpf.o");
     let xdp = bpf_dir.join("out/aegis_xdp.bpf.o");
     if probes.exists() && xdp.exists() {
@@ -272,4 +270,16 @@ fn hex_a_bytes(s: &str) -> Vec<u8> {
     (0..s.len() / 2)
         .map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).unwrap())
         .collect()
+}
+
+/// La raiz del crate, leida al EJECUTAR y no congelada al compilar.
+///
+/// Con `env!("CARGO_MANIFEST_DIR")` la ruta quedaba fijada en el binario, y
+/// Cargo no lo recompila al mover el repositorio de carpeta (el hash de un
+/// paquete de ruta es relativo al workspace): la prueba seguia buscando sus
+/// ficheros en la ruta vieja y fallaba diciendo que no existian. Cargo define la
+/// variable al lanzar pruebas y ejemplos; el valor de compilacion queda solo para
+/// quien ejecute el binario a mano.
+fn raiz_crate() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string())
 }

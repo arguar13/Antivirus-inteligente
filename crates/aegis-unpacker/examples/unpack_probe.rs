@@ -15,7 +15,7 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::from(2);
     }
 
-    let fuente = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/packer_stub.c");
+    let fuente = PathBuf::from(raiz_crate()).join("tests/fixtures/packer_stub.c");
     let bin = std::env::temp_dir().join(format!("aegis-rt-packer-{}", std::process::id()));
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
     let compilar = std::process::Command::new(&cc)
@@ -80,4 +80,16 @@ fn main() -> std::process::ExitCode {
         eprintln!("BRECHA: el desempaquetado no expuso el codigo escondido");
         std::process::ExitCode::FAILURE
     }
+}
+
+/// La raiz del crate, leida al EJECUTAR y no congelada al compilar.
+///
+/// Con `env!("CARGO_MANIFEST_DIR")` la ruta quedaba fijada en el binario, y
+/// Cargo no lo recompila al mover el repositorio de carpeta (el hash de un
+/// paquete de ruta es relativo al workspace): la prueba seguia buscando sus
+/// ficheros en la ruta vieja y fallaba diciendo que no existian. Cargo define la
+/// variable al lanzar pruebas y ejemplos; el valor de compilacion queda solo para
+/// quien ejecute el binario a mano.
+fn raiz_crate() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string())
 }

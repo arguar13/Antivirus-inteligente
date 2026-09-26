@@ -18,7 +18,7 @@ use aegis_harden::strings;
 
 /// Los textos en claro del manifiesto, para cotejar el descifrado.
 fn secretos_del_manifiesto() -> HashMap<String, String> {
-    let raiz = env!("CARGO_MANIFEST_DIR");
+    let raiz = raiz_crate();
     let ruta = format!("{raiz}/../../tools/secrets.json");
     let texto =
         std::fs::read_to_string(&ruta).unwrap_or_else(|e| panic!("no se pudo leer {ruta}: {e}"));
@@ -76,7 +76,7 @@ fn lo_que_cifra_python_lo_descifra_el_crate() {
 /// codigo generado. Si estuvieran, el cifrado seria decorativo.
 #[test]
 fn las_cadenas_no_aparecen_en_claro_en_el_fichero_generado() {
-    let raiz = env!("CARGO_MANIFEST_DIR");
+    let raiz = raiz_crate();
     let generado = std::fs::read_to_string(format!("{raiz}/src/generated_strings.rs")).unwrap();
     for (nombre, claro) in secretos_del_manifiesto() {
         // El nombre logico SI puede aparecer (es la etiqueta de busqueda); el
@@ -131,7 +131,7 @@ fn el_nonce_debe_tener_doce_bytes() {
 /// derivacion de clave y de nonce coinciden entre Python y Rust.
 #[test]
 fn el_self_test_del_tool_pasa() {
-    let raiz = env!("CARGO_MANIFEST_DIR");
+    let raiz = raiz_crate();
     let tool = format!("{raiz}/../../tools/obfuscate.py");
     let salida = match Command::new("python3")
         .arg(&tool)
@@ -155,7 +155,7 @@ fn el_self_test_del_tool_pasa() {
 /// alguien cambia una cadena y no regenera, `--check` lo detecta.
 #[test]
 fn el_fichero_generado_esta_al_dia() {
-    let raiz = env!("CARGO_MANIFEST_DIR");
+    let raiz = raiz_crate();
     let tool = format!("{raiz}/../../tools/obfuscate.py");
     let salida = match Command::new("python3").arg(&tool).arg("--check").output() {
         Ok(o) => o,
@@ -280,4 +280,16 @@ fn report_only_nunca_cierra_el_proceso() {
         0
     });
     assert_eq!(codigo, 0, "ReportOnly no puede terminar el proceso");
+}
+
+/// La raiz del crate, leida al EJECUTAR y no congelada al compilar.
+///
+/// Con `env!("CARGO_MANIFEST_DIR")` la ruta quedaba fijada en el binario, y
+/// Cargo no lo recompila al mover el repositorio de carpeta (el hash de un
+/// paquete de ruta es relativo al workspace): la prueba seguia buscando sus
+/// ficheros en la ruta vieja y fallaba diciendo que no existian. Cargo define la
+/// variable al lanzar pruebas y ejemplos; el valor de compilacion queda solo para
+/// quien ejecute el binario a mano.
+fn raiz_crate() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string())
 }

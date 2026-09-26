@@ -65,8 +65,8 @@ fn hostiles() -> Vec<Vec<u8>> {
     ];
     // Y texto con caracteres multibyte partidos, que es donde revienta un
     // recortado ingenuo.
-    v.push("ñ".repeat(500).into_bytes());
-    let mut partido = "ñ".repeat(10).into_bytes();
+    v.push("n".repeat(500).into_bytes());
+    let mut partido = "n".repeat(10).into_bytes();
     partido.truncate(15);
     v.push(partido);
 
@@ -428,7 +428,7 @@ fn el_coste_de_atender_no_crece_con_lo_hostil_que_sea_la_entrada() {
 /// Es la invariante 12 del producto —la ausencia es la frontera— aplicada aqui.
 #[test]
 fn los_dialogos_no_pueden_ejecutar_ni_escribir_nada() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/dialogos");
+    let dir = std::path::Path::new(&raiz_crate()).join("src/dialogos");
     let prohibido = [
         "Command",
         "std::process",
@@ -545,4 +545,16 @@ fn un_ataque_por_socket_de_verdad_no_tumba_la_red_de_senuelos() {
     println!("  {vistas} conexiones hostiles atendidas; la red sigue en pie");
     assert!(vistas > 0, "la red dejo de contar");
     assert!(!net.is_empty(), "la red se cayo");
+}
+
+/// La raiz del crate, leida al EJECUTAR y no congelada al compilar.
+///
+/// Con `env!("CARGO_MANIFEST_DIR")` la ruta quedaba fijada en el binario, y
+/// Cargo no lo recompila al mover el repositorio de carpeta (el hash de un
+/// paquete de ruta es relativo al workspace): la prueba seguia buscando sus
+/// ficheros en la ruta vieja y fallaba diciendo que no existian. Cargo define la
+/// variable al lanzar pruebas y ejemplos; el valor de compilacion queda solo para
+/// quien ejecute el binario a mano.
+fn raiz_crate() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string())
 }

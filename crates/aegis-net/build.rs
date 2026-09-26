@@ -13,7 +13,14 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
-    let bpf_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    // `CARGO_MANIFEST_DIR` se lee EN EJECUCION, no con `env!`. Con `env!` la
+    // ruta queda congelada al compilar este script, y Cargo no lo recompila al
+    // mover el repositorio —el hash de un paquete de ruta es relativo al
+    // workspace—, asi que el script reutilizado seguia buscando el subproyecto
+    // en la ruta vieja. Paso de verdad al renombrar la carpeta del proyecto.
+    let manifiesto = std::env::var_os("CARGO_MANIFEST_DIR")
+        .expect("cargo define CARGO_MANIFEST_DIR al ejecutar el script");
+    let bpf_dir = PathBuf::from(manifiesto)
         .join("../../drivers/linux/aegis-bpf")
         .canonicalize()
         .expect("el subproyecto eBPF debe existir dentro del repositorio");
