@@ -99,6 +99,8 @@ impl Nodo {
 /// agentes de los demas.
 #[must_use]
 pub fn peso_de(agente: &str, nodo: &Nodo) -> u64 {
+    #[cfg(test)]
+    pruebas::RESUMENES.with(|c| c.set(c.get() + 1));
     let mut h = Sha256::new();
     h.update(agente.as_bytes());
     h.update([0x1f]);
@@ -142,40 +144,58 @@ impl Reparto {
         &self.nodos
     }
 
+    /// El orden del sorteo: gana la clave MAYOR.
+    ///
+    /// El desempate por identificador hace la funcion TOTAL: sin el, dos nodos con
+    /// el mismo peso —improbable pero posible— darian resultados distintos segun
+    /// el orden de la lista, y dos nodos del plano de control discreparian sobre a
+    /// quien le toca el agente. El sintoma seria un agente atendido por los dos o
+    /// por ninguno.
+    ///
+    /// Es UNA sola clave para [`Reparto::nodo_de`] y [`Reparto::preferidos`]. Cada
+    /// uno llevaba antes su comparador, y los dos desempataban al reves: con dos
+    /// pesos iguales, el primero de `preferidos` no era el nodo del agente, que es
+    /// justo lo que `preferidos` promete.
+    fn clave<'a>(agente: &str, nodo: &'a Nodo) -> (u64, &'a str) {
+        (peso_de(agente, nodo), nodo.id.as_str())
+    }
+
     /// A que nodo le toca un agente.
     ///
     /// Devuelve `None` solo si no hay ningun nodo, que es un plano de control
     /// apagado y no un caso que haya que disimular.
+    ///
+    /// Cuesta exactamente un resumen por nodo: la clave se calcula una vez por
+    /// nodo, no una vez por comparacion. Con un comparador que la calculaba dentro
+    /// eran dos resumenes por comparacion —treinta por agente con dieciseis nodos
+    /// en vez de dieciseis—.
     #[must_use]
     pub fn nodo_de(&self, agente: &str) -> Option<&Nodo> {
-        self.nodos.iter().max_by(|a, b| {
-            peso_de(agente, a)
-                .cmp(&peso_de(agente, b))
-                // El desempate por identificador hace la funcion TOTAL: sin el,
-                // dos nodos con el mismo peso —improbable pero posible— darian
-                // resultados distintos segun el orden de la lista, y dos nodos
-                // del plano de control discreparian sobre a quien le toca el
-                // agente. El sintoma seria un agente atendido por los dos o por
-                // ninguno.
-                .then_with(|| a.id.cmp(&b.id))
-        })
+        self.nodos
+            .iter()
+            .map(|n| (Self::clave(agente, n), n))
+            .max_by(|a, b| a.0.cmp(&b.0))
+            .map(|(_, n)| n)
     }
 
     /// Los `n` nodos preferidos para un agente, de mejor a peor.
     ///
     /// El segundo de la lista es **a donde se va el agente si su nodo cae**, y es
     /// exactamente el mismo que calcularia el resto del plano de control. Eso
-    /// hace que la conmutacion por error no necesite coordinacion.
+    /// hace que la conmutacion por error no necesite coordinacion. El primero es
+    /// siempre [`Reparto::nodo_de`], empates incluidos.
+    ///
+    /// Tambien un resumen por nodo: ordenar con la clave dentro del comparador
+    /// costaba O(n log n) resumenes.
     #[must_use]
     pub fn preferidos(&self, agente: &str, n: usize) -> Vec<&Nodo> {
-        let mut v: Vec<&Nodo> = self.nodos.iter().collect();
-        v.sort_by(|a, b| {
-            peso_de(agente, b)
-                .cmp(&peso_de(agente, a))
-                .then_with(|| a.id.cmp(&b.id))
-        });
-        v.truncate(n);
-        v
+        let mut v: Vec<((u64, &str), &Nodo)> = self
+            .nodos
+            .iter()
+            .map(|nodo| (Self::clave(agente, nodo), nodo))
+            .collect();
+        v.sort_by(|a, b| b.0.cmp(&a.0));
+        v.into_iter().take(n).map(|(_, nodo)| nodo).collect()
     }
 
     /// Cuantos agentes de una muestra cambian de nodo al pasar a otro reparto.
@@ -377,6 +397,12 @@ impl Mapa {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+
+    std::thread_local! {
+        /// Cuantos resumenes ha calculado [`peso_de`] en este hilo. Cada prueba
+        /// corre en su hilo, asi que las demas no lo tocan.
+        pub(super) static RESUMENES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
 
     fn nodos(n: usize) -> Vec<Nodo> {
         (0..n)
@@ -622,15 +648,52 @@ mod pruebas {
     }
 
     #[test]
-    fn cien_mil_agentes_se_reparten_en_un_tiempo_razonable() {
-        // El sorteo es O(nodos) por agente y aqui se comprueba que eso es
-        // aceptable a la escala de la fase, no solo en teoria.
-        let flota = agentes(100_000);
-        let r = Reparto::nuevo(nodos(16));
-        let inicio = std::time::Instant::now();
+    fn cien_mil_agentes_se_reparten_con_un_resumen_por_nodo() {
+        // El sorteo es O(nodos) por agente, y lo que cuesta es el resumen: se
+        // CUENTAN los resumenes, que es la propiedad, en vez de cronometrarlos.
+        //
+        // Antes se exigia tardar menos de treinta segundos. Eso no mide el
+        // algoritmo sino la maquina y la compilacion: sin optimizar y con el resto
+        // de pruebas en paralelo tardo cincuenta en una tanda de CI. Y no vio el
+        // defecto que si habia: el comparador calculaba el resumen de los dos
+        // nodos en cada comparacion, treinta por agente en vez de dieciseis. Un
+        // umbral en segundos deja pasar un algoritmo el doble de caro si la
+        // maquina es rapida; la cuenta no.
+        const NODOS: usize = 16;
+        const FLOTA: usize = 100_000;
+        let flota = agentes(FLOTA);
+        let r = Reparto::nuevo(nodos(NODOS));
+
+        RESUMENES.with(|c| c.set(0));
         let d = r.distribucion(&flota);
-        let coste = inicio.elapsed();
-        assert_eq!(d.values().sum::<usize>(), 100_000);
-        assert!(coste.as_secs() < 30, "tardo {coste:?}");
+        assert_eq!(d.values().sum::<usize>(), FLOTA);
+        assert_eq!(
+            RESUMENES.with(std::cell::Cell::get),
+            (FLOTA * NODOS) as u64,
+            "repartir tiene que costar exactamente un resumen por nodo y agente"
+        );
+
+        // Y la lista de preferidos, lo mismo: n resumenes, no n log n.
+        RESUMENES.with(|c| c.set(0));
+        let p = r.preferidos("agente-000042", NODOS);
+        assert_eq!(p.len(), NODOS);
+        assert_eq!(RESUMENES.with(std::cell::Cell::get), NODOS as u64);
+    }
+
+    #[test]
+    fn el_primero_de_los_preferidos_es_el_nodo_del_agente() {
+        // Un empate EXACTO de pesos no se puede provocar desde fuera: exigiria dos
+        // resumenes SHA-256 con los mismos 64 bits altos. Por eso la garantia
+        // ante empates es de construccion —las dos funciones ordenan con la misma
+        // `clave`— y lo que se comprueba aqui es su consecuencia sobre una flota
+        // entera: el primero de los preferidos es siempre el asignado.
+        let r = Reparto::nuevo(nodos(7));
+        for ag in agentes(5_000) {
+            assert_eq!(
+                r.preferidos(&ag, 1)[0].id,
+                r.nodo_de(&ag).unwrap().id,
+                "{ag}: el preferido y el asignado discrepan"
+            );
+        }
     }
 }
