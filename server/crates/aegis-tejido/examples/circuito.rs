@@ -324,8 +324,31 @@ fn fase_linaje() -> usize {
 
 // ─── 4. LA RUTA CALIENTE ───────────────────────────────────────────────────────
 
-/// El numero de decisiones que se cronometran.
+/// El numero de decisiones que se cronometran en cada pasada.
 const DECISIONES: usize = 200_000;
+
+/// Cuantas pasadas se cronometran; se queda la mas rapida.
+const PASADAS: usize = 5;
+
+/// Nanosegundos por iteracion de la pasada MAS RAPIDA de `f`.
+///
+/// Se toma el minimo y no la media porque lo que se quiere medir es lo que cuesta
+/// el codigo, y lo unico que puede hacer una pasada mas lenta que ese coste es que
+/// otra cosa le quite la CPU: una interrupcion, otro proceso compilando al lado.
+/// Ninguna pasada puede salir MAS rapida que el codigo, asi que el minimo es la
+/// cifra que no depende de lo cargada que este la maquina en ese momento.
+fn ns_por_iteracion(mut f: impl FnMut()) -> u128 {
+    (0..PASADAS)
+        .map(|_| {
+            let t = Instant::now();
+            for _ in 0..DECISIONES {
+                f();
+            }
+            t.elapsed().as_nanos() / DECISIONES as u128
+        })
+        .min()
+        .unwrap_or(u128::MAX)
+}
 
 fn fase_ruta_caliente() -> usize {
     println!("  [4/5] la ruta caliente: unificar no puede haber costado latencia");
@@ -369,32 +392,26 @@ fn fase_ruta_caliente() -> usize {
 
     // ANTES: cada motor decidia solo y el consumidor se quedaba con el peor. Es lo
     // que habia, y es la referencia honesta contra la que medir.
-    let t = Instant::now();
     let mut suma = 0u64;
-    for _ in 0..DECISIONES {
+    let ns_antes = ns_por_iteracion(|| {
         let peor = senales
             .iter()
             .filter(|s| s.juicio.acusa())
             .map(|s| s.severidad)
             .max()
             .unwrap_or(Severidad::Info);
-        suma = suma.wrapping_add(peor as u64);
-    }
-    let antes = t.elapsed();
+        suma = suma.wrapping_add(std::hint::black_box(peor) as u64);
+    });
 
     // DESPUES: el arbitro unificado, con sus seis reglas, el recuento de planos y
     // la frase.
-    let t = Instant::now();
     let mut ultimo = Resultado::SinDatos;
-    for _ in 0..DECISIONES {
-        let v = arbitrar(&e, &senales, T0 + SEG);
+    let ns_despues = ns_por_iteracion(|| {
+        let v = std::hint::black_box(arbitrar(&e, &senales, T0 + SEG));
         ultimo = v.resultado;
         suma = suma.wrapping_add(v.confianza.centesimas().into());
-    }
-    let despues = t.elapsed();
+    });
 
-    let ns_antes = antes.as_nanos() / DECISIONES as u128;
-    let ns_despues = despues.as_nanos() / DECISIONES as u128;
     println!("      antes  (peor severidad, sin explicacion): {ns_antes:>6} ns/decision");
     println!("      ahora  (arbitro con frase y planos):      {ns_despues:>6} ns/decision");
     println!(
@@ -411,11 +428,27 @@ fn fase_ruta_caliente() -> usize {
     // Cinco microsegundos por decision es el techo. A mil decisiones por segundo
     // —que es una maquina bajo ataque, no una en reposo— son 5 ms/s: cinco
     // milesimas del 1 % de una CPU.
+    //
+    // EL TECHO ES DEL BINARIO QUE SE DISTRIBUYE. Sin optimizar, el mismo arbitro
+    // cuesta unas diez veces mas —medido en la maquina de integracion: ~600 ns
+    // optimizado, entre 5 500 y 13 000 sin optimizar—, y juzgarlo asi hacia que
+    // la propiedad pasara o fallara segun la maquina y el momento, sin que el
+    // arbitro cambiara. Sobre un binario sin optimizar la cifra no dice nada del
+    // producto: no se juzga, y tampoco se da por buena, se declara rota para que
+    // nadie la lea como una medida. `tools/verificar-fabric.sh` lo ejecuta con
+    // `--release`.
     const TECHO_NS: u128 = 5_000;
-    fallos += exigir(
-        ns_despues <= TECHO_NS,
-        &format!("el arbitro decide en {ns_despues} ns, por debajo del techo de {TECHO_NS} ns"),
-    );
+    if cfg!(debug_assertions) {
+        fallos += exigir(
+            false,
+            "el techo de latencia solo se juzga sobre el binario optimizado: ejecutar con --release",
+        );
+    } else {
+        fallos += exigir(
+            ns_despues <= TECHO_NS,
+            &format!("el arbitro decide en {ns_despues} ns, por debajo del techo de {TECHO_NS} ns"),
+        );
+    }
 
     // Y el resultado no es el mismo que el del maximo: el arbitro llega a
     // `Malicioso` **y** dice con cuantos planos, que es justo lo que el maximo no

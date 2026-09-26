@@ -71,7 +71,11 @@ else
 fi
 
 echo "==> AegisFabric: la ejecucion entera, con las cinco propiedades a la vez"
-if (cd server && CARGO_INCREMENTAL=0 cargo run -q -p aegis-tejido --example circuito) \
+# `--release`: la ruta caliente juzga un techo de latencia, y ese techo es del
+# binario que se distribuye. Sin optimizar el arbitro cuesta unas diez veces mas y
+# la propiedad pasaba o fallaba segun la carga de la maquina; el ejemplo se niega a
+# juzgarla sobre un binario de depuracion.
+if (cd server && CARGO_INCREMENTAL=0 cargo run -q --release -p aegis-tejido --example circuito) \
     > /tmp/aegis-fabric.log 2>&1; then
     sed 's/^/    | /' /tmp/aegis-fabric.log
     echo "    ${VERDE}OK${FIN}"
