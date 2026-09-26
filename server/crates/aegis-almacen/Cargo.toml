@@ -1,0 +1,38 @@
+[package]
+name = "aegis-almacen"
+description = "AegisStore: almacen de telemetria historica columnar por particion de tiempo, indexado por entidad, con AegisQL de coste declarado sobre PostgreSQL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# EL MISMO LENGUAJE. El analizador del endpoint y el del historico viven en el
+# mismo crate y comparten el codigo de los predicados: una consulta se escribe
+# una vez y corre contra el vivo y contra el historico. Tambien la semantica de
+# comparacion (`valor`): la misma fila tiene que casar o no casar igual en los
+# dos sitios.
+aegis-parser = { path = "../../../crates/aegis-parser" }
+# El indice primario es la entidad del modelo unico (FASE 79).
+aegis-entidad = { path = "../../../crates/aegis-entidad" }
+# Los eventos normalizados de la ingesta. Sin la caracteristica `endpoint`: el
+# plano de control no lleva el presupuesto ni los lectores del agente.
+aegis-ingest = { path = "../../../crates/aegis-ingest", default-features = false }
+# PostgreSQL de verdad, con particiones declarativas. Las mismas caracteristicas
+# minimas que ya usa el servidor.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+# Deflate en Rust puro, sin C: la compresion de cada columna. Ya estaba en el
+# arbol del servidor por `aegis-sbom`.
+miniz_oxide = "0.9"
+thiserror = "2"
+
+[dev-dependencies]
+# «La misma consulta contra el endpoint y contra el historico» se prueba con el
+# ejecutor REAL del endpoint sobre tablas REALES de la maquina.
+aegis-hunt = { path = "../../../crates/aegis-hunt" }
+aegis-estado = { path = "../../../crates/aegis-estado" }

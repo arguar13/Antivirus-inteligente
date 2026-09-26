@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# AegisProof (FASE 80): las trece invariantes, comprobadas sobre el producto
+# AegisProof (FASE 80): las catorce invariantes, comprobadas sobre el producto
 # COMPLETO y no sobre una fase.
 #
 # POR QUE ESTA PUERTA EXISTE APARTE DE LAS DEMAS
@@ -24,7 +24,7 @@
 # que el producto ya sostiene y que aqui se comprueban mecanicamente en vez de
 # afirmarse.
 #
-# Uso:  ./tools/verificar-invariantes.sh          (las trece)
+# Uso:  ./tools/verificar-invariantes.sh          (las catorce)
 #       ./tools/verificar-invariantes.sh 4        (solo la cuarta)
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -83,7 +83,7 @@ pasadas() {
         | grep -oE '[0-9]+' | paste -sd+ - | bc 2>/dev/null || echo 0
 }
 
-echo "AegisProof · las trece invariantes sobre el producto completo"
+echo "AegisProof · las catorce invariantes sobre el producto completo"
 
 # ── 01. PRESUPUESTO ────────────────────────────────────────────────────────────
 #
@@ -520,9 +520,32 @@ if toca 13; then
     fi
 fi
 
+# ── 14. UNA CONSULTA NO TUMBA EL ALMACEN (MEGAPROMPT 10, FASE 96) ───────────────
+if toca 14; then
+    titulo 14 "UNA CONSULTA NO TUMBA EL ALMACEN · el coste se declara antes de leer"
+    # Por ESTRUCTURA: el unico camino que lee columnas (`leer_y_resolver`) solo se
+    # alcanza desde `ejecutar`, y `ejecutar` planifica antes. Si alguien anadiera
+    # otro camino de lectura, la garantia dependeria de acordarse de planificar.
+    CAMINOS=$(grep -c 'leer_y_resolver(' server/crates/aegis-almacen/src/ejecucion.rs 2>/dev/null)
+    PLANIFICA=$(awk '/pub fn ejecutar</,/^    }$/' server/crates/aegis-almacen/src/ejecucion.rs 2>/dev/null \
+        | grep -n 'planificar(\|leer_y_resolver(' | cut -d: -f2 | tr -d ' ' | cut -c1-20 | tr '\n' ' ')
+    if pruebas servidor aegis-almacen "--test pg" "una_consulta_cara" /tmp/inv-almacen.log \
+        && ! grep -q 'OMITIDA' /tmp/inv-almacen.log \
+        && [ "$CAMINOS" = "2" ] \
+        && echo "$PLANIFICA" | grep -q 'letplan=self.planifi.*self.leer_y_resolver'; then
+        veredicto 14 "una consulta no tumba el almacen" si "rechazada contra PostgreSQL real sin leer un solo segmento; el unico camino de lectura pasa por el planificador"
+        porque "Un SIEM que se cuelga con una consulta mal escrita deja al SOC ciego justo"
+        porque "cuando alguien, con prisa, la escribe sin acotar. El coste se calcula del"
+        porque "catalogo antes de descomprimir nada, y el rechazo dice como arreglarla."
+    else
+        veredicto 14 "una consulta no tumba el almacen" no "ver /tmp/inv-almacen.log (caminos de lectura: $CAMINOS; orden en ejecutar: $PLANIFICA)"
+        tail -25 /tmp/inv-almacen.log | sed 's/^/     | /'
+    fi
+fi
+
 echo
 if [ "$FALLOS" -eq 0 ]; then
-    printf '%s==> Las trece invariantes siguen en pie%s\n' "$VERDE" "$FIN"
+    printf '%s==> Las catorce invariantes siguen en pie%s\n' "$VERDE" "$FIN"
 else
     printf '%s==> %s invariante(s) ROTAS%s\n' "$ROJO" "$FALLOS" "$FIN"
     for r in "${ROTAS[@]}"; do

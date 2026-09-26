@@ -98,7 +98,8 @@ pub enum Coste {
     ///
     /// La diferencia no es de grado sino de clase, y por eso tiene nivel
     /// propio: una consulta que toca una tabla peligrosa SIN FILTRO no se
-    /// ejecuta. Ver `validar_coste` en [`crate::plan`]. No es una recomendacion
+    /// ejecuta: lo rechaza `aegis_estado::coste::validar` en el endpoint, y
+    /// `Tabla::exige_cota` antes de leer nada. No es una recomendacion
     /// que el operador pueda saltarse con una opcion «avanzada»: esa opcion no
     /// existe, porque quien paga el error son cien mil maquinas de un cliente.
     Peligroso,
@@ -139,6 +140,8 @@ impl Tabla {
 pub mod contenedores;
 /// Ficheros, atributos extendidos, ACL y montajes (FASE 81).
 pub mod ficheros;
+/// Las tablas y columnas que solo existen en el historico (FASE 96).
+pub mod historico;
 /// Usuarios, grupos, sesiones y credenciales (FASE 81).
 pub mod identidad;
 /// Las cinco tablas originales de AegisQL (FASES 34, 38 y 57).
@@ -241,6 +244,16 @@ pub fn columnas_parecidas(t: &Tabla, nombre: &str) -> Vec<&'static str> {
         .iter()
         .filter(|c| parecidos(c.nombre, nombre))
         .map(|c| c.nombre)
+        .collect()
+}
+
+/// Nombres parecidos a uno dado dentro de una lista cualquiera: lo usan los
+/// ambitos que anaden columnas a una tabla (ver `crate::historico`).
+pub fn nombres_parecidos(candidatos: &[&'static str], nombre: &str) -> Vec<&'static str> {
+    candidatos
+        .iter()
+        .copied()
+        .filter(|c| parecidos(c, nombre))
         .collect()
 }
 

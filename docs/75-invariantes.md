@@ -1,4 +1,4 @@
-# 75 · AegisProof — las trece invariantes, demostradas sobre el producto completo
+# 75 · AegisProof — las catorce invariantes, demostradas sobre el producto completo
 
 > FASE 80. `tools/verificar-invariantes.sh`, `tools/lineabase-agente.txt`,
 > `tools/lineabase-unsafe.txt`, `server/crates/aegis-tejido/tests/autonomia.rs`.
@@ -21,7 +21,7 @@ antes de dar el trabajo por terminado, aunque obligue a volver sobre una fase
 anterior. Una invariante que se relaja «sólo esta vez» deja de ser una invariante
 y pasa a ser una aspiración.
 
-## Las trece
+## Las catorce
 
 Ocho estructurales, una de autoataque con sus siete pruebas, y cuatro doctrinales
 que el producto ya sostenía y que aquí se comprueban mecánicamente en vez de
@@ -42,6 +42,7 @@ afirmarse.
 | 11 | **Un solo estrangulamiento** | Los cuatro canales de salida pasan por el mismo juez |
 | 12 | **La ausencia es la frontera** | Siete tipos **sin** su variante peligrosa (entre ellos: la auditoría de firmware no puede escribir, el confinamiento no nace obligatorio, el inventario del agente no sabe salir de la máquina) |
 | 13 | **El identificador único** | Once subsistemas, un identificador (FASE 79) |
+| 14 | **Una consulta no tumba el almacén** | Del MEGAPROMPT 10 (FASE 96): una consulta que barrería demasiados días sin acotar se rechaza contra PostgreSQL real **antes de leer un solo segmento**, y el único camino de lectura del almacén pasa por el planificador |
 
 ## 1 · Presupuesto: por qué no son 46 080 KB
 
@@ -189,7 +190,7 @@ se comprueba aquí, y por esta razón» y el silencio.
 | `verificar-vmi.sh` | El recorrido de EPT, el parser del kernel desde memoria física | Arrancar el hipervisor necesita VT-x/AMD-V |
 | `verificar-presupuesto.sh` | El agente arranca de verdad y se mide su RSS; el drop-in impone los dos límites | Se omite si el agente no arranca en este entorno, **diciéndolo** |
 | `verificar-estado.sh` | Las 52 tablas contra el sistema real de esta máquina, las 6 peligrosas negándose sin filtro, el rechazo en compilación, las diez consultas medidas | **osquery no está instalado**: sus cifras se citan, no se miden. Lo que esta máquina no tiene (TPM, contenedores, `/proc/modules`) se ejerce por su **motivo** |
-| `verificar-invariantes.sh` | Las trece, sobre el producto completo | — |
+| `verificar-invariantes.sh` | Las catorce, sobre el producto completo | — |
 
 ## Lo que esta fase encontró
 

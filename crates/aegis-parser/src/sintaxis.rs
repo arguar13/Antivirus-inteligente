@@ -56,30 +56,42 @@ pub const ELEMENTOS_IN_MAXIMOS: usize = 256;
 
 /// Analiza una consulta y la valida contra el esquema.
 pub fn analizar(consulta: &str) -> Result<Consulta, ErrorConsulta> {
-    let tokens = lexico::analizar(consulta).map_err(|(i, f)| {
-        ErrorConsulta::nuevo("no entiendo este texto", i, f).con_sugerencia(
-            "AegisQL admite identificadores, numeros y cadenas entre comillas simples",
-        )
-    })?;
-
-    if tokens.is_empty() {
-        return Err(ErrorConsulta::nuevo("la consulta esta vacia", 0, 0)
-            .con_sugerencia("empieza por SELECT"));
-    }
-
-    let mut a = Analizador {
-        tokens,
-        pos: 0,
-        fin_entrada: consulta.len(),
-        profundidad: 0,
-    };
+    let mut a = Analizador::nuevo(consulta)?;
     let c = a.consulta()?;
     a.exigir_final()?;
     Ok(c)
 }
 
+/// Donde se resuelven los nombres de columna de una consulta.
+///
+/// Para el endpoint es la tabla y nada mas. El historico (ver
+/// [`crate::historico`]) anade a cada tabla las columnas que solo existen en el
+/// almacen —el instante y la entidad de cada fila—, y resuelve con el MISMO
+/// codigo de predicados: los mensajes de error, las sugerencias y las
+/// comprobaciones de tipo son uno solo, y no dos copias que acaben divergiendo.
+pub(crate) trait Ambito {
+    /// Nombre de la tabla, para los mensajes.
+    fn nombre_tabla(&self) -> &'static str;
+    /// Busca una columna por nombre.
+    fn columna(&self, nombre: &str) -> Option<&'static esquema::Columna>;
+    /// Todas las columnas, para sugerir en un error.
+    fn nombres(&self) -> Vec<&'static str>;
+}
+
+impl Ambito for Tabla {
+    fn nombre_tabla(&self) -> &'static str {
+        self.nombre
+    }
+    fn columna(&self, nombre: &str) -> Option<&'static esquema::Columna> {
+        Tabla::columna(self, nombre)
+    }
+    fn nombres(&self) -> Vec<&'static str> {
+        self.columnas.iter().map(|c| c.nombre).collect()
+    }
+}
+
 /// Estado del analisis.
-struct Analizador {
+pub(crate) struct Analizador {
     tokens: Vec<Situado>,
     pos: usize,
     fin_entrada: usize,
@@ -87,24 +99,75 @@ struct Analizador {
 }
 
 impl Analizador {
+    /// Analiza el texto en tokens y prepara el recorrido.
+    pub(crate) fn nuevo(consulta: &str) -> Result<Analizador, ErrorConsulta> {
+        let tokens = lexico::analizar(consulta).map_err(|(i, f)| {
+            ErrorConsulta::nuevo("no entiendo este texto", i, f).con_sugerencia(
+                "AegisQL admite identificadores, numeros y cadenas entre comillas simples",
+            )
+        })?;
+        if tokens.is_empty() {
+            return Err(ErrorConsulta::nuevo("la consulta esta vacia", 0, 0)
+                .con_sugerencia("empieza por SELECT"));
+        }
+        Ok(Analizador {
+            tokens,
+            pos: 0,
+            fin_entrada: consulta.len(),
+            profundidad: 0,
+        })
+    }
+
     // --- Utilidades de recorrido -------------------------------------------
 
-    fn actual(&self) -> Option<&Situado> {
+    pub(crate) fn actual(&self) -> Option<&Situado> {
         self.tokens.get(self.pos)
+    }
+
+    /// Posicion del recorrido, para volver atras en una lectura tentativa.
+    pub(crate) fn posicion(&self) -> usize {
+        self.pos
+    }
+
+    /// Vuelve a una posicion guardada con [`Analizador::posicion`].
+    pub(crate) fn volver(&mut self, pos: usize) {
+        self.pos = pos;
+    }
+
+    /// Profundidad de anidamiento, compartida con el historico para que una
+    /// subconsulta cuente contra el mismo tope que un parentesis.
+    pub(crate) fn entrar(&mut self) -> Result<(), ErrorConsulta> {
+        self.profundidad += 1;
+        if self.profundidad > PROFUNDIDAD_MAXIMA {
+            let (i, f) = self.tramo_actual();
+            self.profundidad -= 1;
+            return Err(ErrorConsulta::nuevo(
+                format!("la condicion anida mas de {PROFUNDIDAD_MAXIMA} niveles"),
+                i,
+                f,
+            )
+            .con_sugerencia("divide la caceria en varias consultas mas simples"));
+        }
+        Ok(())
+    }
+
+    /// Sale de un nivel abierto con [`Analizador::entrar`].
+    pub(crate) fn salir(&mut self) {
+        self.profundidad = self.profundidad.saturating_sub(1);
     }
 
     /// Tramo al que apuntar en un error "aqui esperaba otra cosa".
     ///
     /// Si ya no quedan tokens, apunta al final de la entrada: decirle al
     /// operador "falta algo al final" es util; apuntar a la posicion 0 no.
-    fn tramo_actual(&self) -> (usize, usize) {
+    pub(crate) fn tramo_actual(&self) -> (usize, usize) {
         match self.actual() {
             Some(s) => (s.inicio, s.fin),
             None => (self.fin_entrada, self.fin_entrada),
         }
     }
 
-    fn avanzar(&mut self) -> Option<Situado> {
+    pub(crate) fn avanzar(&mut self) -> Option<Situado> {
         let s = self.tokens.get(self.pos).cloned();
         if s.is_some() {
             self.pos += 1;
@@ -113,7 +176,7 @@ impl Analizador {
     }
 
     /// Consume el token si es el esperado.
-    fn acepta(&mut self, t: &Token) -> bool {
+    pub(crate) fn acepta(&mut self, t: &Token) -> bool {
         if self.actual().map(|s| &s.token) == Some(t) {
             self.pos += 1;
             true
@@ -123,7 +186,7 @@ impl Analizador {
     }
 
     /// Consume el token esperado o falla con un mensaje concreto.
-    fn exigir(&mut self, t: &Token, que: &str) -> Result<Situado, ErrorConsulta> {
+    pub(crate) fn exigir(&mut self, t: &Token, que: &str) -> Result<Situado, ErrorConsulta> {
         if self.actual().map(|s| &s.token) == Some(t) {
             // El `unwrap` es seguro: la comparacion de arriba ya vio el token.
             Ok(self.avanzar().expect("el token acaba de comprobarse"))
@@ -133,7 +196,7 @@ impl Analizador {
         }
     }
 
-    fn exigir_final(&self) -> Result<(), ErrorConsulta> {
+    pub(crate) fn exigir_final(&self) -> Result<(), ErrorConsulta> {
         match self.actual() {
             None => Ok(()),
             Some(s) => {
@@ -218,7 +281,7 @@ impl Analizador {
     fn resolver_proyeccion(
         &self,
         cruda: ProyeccionCruda,
-        tabla: &'static Tabla,
+        tabla: &dyn Ambito,
     ) -> Result<Proyeccion, ErrorConsulta> {
         match cruda {
             ProyeccionCruda::Todo => Ok(Proyeccion::Todo),
@@ -237,7 +300,7 @@ impl Analizador {
         }
     }
 
-    fn tabla(&mut self) -> Result<&'static Tabla, ErrorConsulta> {
+    pub(crate) fn tabla(&mut self) -> Result<&'static Tabla, ErrorConsulta> {
         let (nombre, i, f) = self.identificador("un nombre de tabla")?;
         match esquema::tabla(&nombre) {
             Some(t) => Ok(t),
@@ -255,9 +318,9 @@ impl Analizador {
         }
     }
 
-    fn columna(
+    pub(crate) fn columna(
         &self,
-        tabla: &'static Tabla,
+        tabla: &dyn Ambito,
         nombre: &str,
         i: usize,
         f: usize,
@@ -266,18 +329,21 @@ impl Analizador {
             Some(c) => Ok(c),
             None => {
                 let mut e = ErrorConsulta::nuevo(
-                    format!("la tabla '{}' no tiene la columna '{nombre}'", tabla.nombre),
+                    format!(
+                        "la tabla '{}' no tiene la columna '{nombre}'",
+                        tabla.nombre_tabla()
+                    ),
                     i,
                     f,
                 );
-                let parecidas = esquema::columnas_parecidas(tabla, nombre);
+                let todas = tabla.nombres();
+                let parecidas = esquema::nombres_parecidos(&todas, nombre);
                 e = if let Some(p) = parecidas.first() {
                     e.con_sugerencia(format!("quiza querias decir '{p}'"))
                 } else {
-                    let todas: Vec<&str> = tabla.columnas.iter().map(|c| c.nombre).collect();
                     e.con_sugerencia(format!(
                         "columnas de '{}': {}",
-                        tabla.nombre,
+                        tabla.nombre_tabla(),
                         todas.join(", ")
                     ))
                 };
@@ -286,7 +352,10 @@ impl Analizador {
         }
     }
 
-    fn identificador(&mut self, que: &str) -> Result<(String, usize, usize), ErrorConsulta> {
+    pub(crate) fn identificador(
+        &mut self,
+        que: &str,
+    ) -> Result<(String, usize, usize), ErrorConsulta> {
         let (i, f) = self.tramo_actual();
         match self.actual().map(|s| s.token.clone()) {
             Some(Token::Ident(n)) => {
@@ -297,7 +366,7 @@ impl Analizador {
         }
     }
 
-    fn orden(&mut self, tabla: &'static Tabla) -> Result<Orden, ErrorConsulta> {
+    pub(crate) fn orden(&mut self, tabla: &dyn Ambito) -> Result<Orden, ErrorConsulta> {
         let (nombre, i, f) = self.identificador("un nombre de columna tras ORDER BY")?;
         let c = self.columna(tabla, &nombre, i, f)?;
         let descendente = if self.acepta(&Token::Desc) {
@@ -313,7 +382,7 @@ impl Analizador {
         })
     }
 
-    fn limite(&mut self) -> Result<u32, ErrorConsulta> {
+    pub(crate) fn limite(&mut self) -> Result<u32, ErrorConsulta> {
         let (i, f) = self.tramo_actual();
         match self.actual().map(|s| s.token.clone()) {
             Some(Token::Entero(n)) => {
@@ -354,7 +423,7 @@ impl Analizador {
     // no absorbe operadores: es lo que hace que `a OR b AND c` se agrupe como
     // `a OR (b AND c)` sin escribir un metodo por nivel.
 
-    fn expresion(&mut self, tabla: &'static Tabla, minimo: u8) -> Result<Expr, ErrorConsulta> {
+    fn expresion(&mut self, tabla: &dyn Ambito, minimo: u8) -> Result<Expr, ErrorConsulta> {
         self.profundidad += 1;
         if self.profundidad > PROFUNDIDAD_MAXIMA {
             let (i, f) = self.tramo_actual();
@@ -371,11 +440,7 @@ impl Analizador {
         r
     }
 
-    fn expresion_interna(
-        &mut self,
-        tabla: &'static Tabla,
-        minimo: u8,
-    ) -> Result<Expr, ErrorConsulta> {
+    fn expresion_interna(&mut self, tabla: &dyn Ambito, minimo: u8) -> Result<Expr, ErrorConsulta> {
         let mut izq = self.prefijo(tabla)?;
 
         loop {
@@ -402,7 +467,7 @@ impl Analizador {
         Ok(izq)
     }
 
-    fn prefijo(&mut self, tabla: &'static Tabla) -> Result<Expr, ErrorConsulta> {
+    fn prefijo(&mut self, tabla: &dyn Ambito) -> Result<Expr, ErrorConsulta> {
         if self.acepta(&Token::Not) {
             // NOT liga mas que AND pero menos que una comparacion.
             let e = self.expresion(tabla, 2)?;
@@ -417,7 +482,7 @@ impl Analizador {
     }
 
     /// Una comparacion, un LIKE, un IN o una columna booleana suelta.
-    fn predicado(&mut self, tabla: &'static Tabla) -> Result<Expr, ErrorConsulta> {
+    pub(crate) fn predicado(&mut self, tabla: &dyn Ambito) -> Result<Expr, ErrorConsulta> {
         // Forma invertida: `4444 = network.port`. Se normaliza para que el
         // ejecutor tenga un solo caso que tratar.
         if let Some(e) = self.predicado_invertido(tabla)? {
@@ -485,10 +550,7 @@ impl Analizador {
     ///
     /// Se mira sin consumir: si lo que hay no es un literal, o tras el literal
     /// no viene un comparador, se deja el analizador donde estaba.
-    fn predicado_invertido(
-        &mut self,
-        tabla: &'static Tabla,
-    ) -> Result<Option<Expr>, ErrorConsulta> {
+    fn predicado_invertido(&mut self, tabla: &dyn Ambito) -> Result<Option<Expr>, ErrorConsulta> {
         let guardado = self.pos;
         let Ok((valor, vi, vf)) = self.literal() else {
             self.pos = guardado;
@@ -588,7 +650,7 @@ impl Analizador {
         Ok(c)
     }
 
-    fn literal(&mut self) -> Result<(Literal, usize, usize), ErrorConsulta> {
+    pub(crate) fn literal(&mut self) -> Result<(Literal, usize, usize), ErrorConsulta> {
         let (i, f) = self.tramo_actual();
         let l = match self.actual().map(|s| s.token.clone()) {
             Some(Token::Entero(n)) => Literal::Entero(n),

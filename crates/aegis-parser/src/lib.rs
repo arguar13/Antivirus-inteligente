@@ -46,6 +46,9 @@ pub mod ast;
 pub mod error;
 /// Descripcion de tablas, columnas, tipos y coste de acceso.
 pub mod esquema;
+/// AegisQL sobre el historico: ventanas, agregaciones y subconsultas acotadas
+/// que solo existen contra el almacen del plano de control (FASE 96).
+pub mod historico;
 /// Analisis lexico.
 pub mod lexico;
 /// Planificacion por coste de acceso.

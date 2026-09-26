@@ -238,7 +238,7 @@ drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf) — 2.7
 kernel/windows/aegis/         Minifilter + ObCallbacks + politica (C, WDK) — 887 lineas
 deploy/terraform/             Aprovisionamiento del plano de control
 fuzz/                         Objetivos de libFuzzer sobre los analizadores
-tools/                        41 puertas de verificacion + ABI check + CI local
+tools/                        42 puertas de verificacion + ABI check + CI local
 docs/                         Blueprint arquitectonico, una pagina por fase
 ```
 
@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**66 crates · 2980 pruebas**
+**66 crates · 2993 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -316,7 +316,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-mesh` | Malla P2P de la red local: propagacion cifrada y autenticada de vacunas entre agentes | 19 | — | — |
 | `aegis-ml` | Extraccion de atributos estaticos PE/ELF e inferencia local ONNX para AegisCore | 22 | — | sí |
 | `aegis-net` | IDS de red y filtro XDP de AegisCore | 45 | — | — |
-| `aegis-parser` | Lexer, parser y validador del lenguaje de consulta de telemetria de AegisCore | 69 | — | sí |
+| `aegis-parser` | Lexer, parser y validador de AegisQL: el del endpoint y, en un analizador aparte que el endpoint no acepta, el del historico (ventanas, agregaciones, subconsultas acotadas) | 82 | `verificar-almacen.sh` | sí |
 | `aegis-pe` | Lector de ejecutables de Windows (PE/COFF) y de la huella Authenticode, endurecido contra entrada hostil | 42 | `verificar-pe.sh` | sí |
 | `aegis-pqc` | Criptografia post-cuantica hibrida (ML-KEM-768 + ML-DSA-65) para el canal C2 y el firmado de actualizaciones | 39 | — | sí |
 | `aegis-presupuesto` | Presupuesto de memoria del agente: reparto por host, regimenes y obligacion desde el kernel | 50 | `verificar-presupuesto.sh` | sí |
@@ -342,10 +342,11 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del plano de control (`server/crates/`)
 
-**15 crates · 1054 pruebas**
+**16 crates · 1075 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia |
 |---|---|---:|---|
+| `aegis-almacen` | Almacen historico del plano de control: columnar por particion de dia en PostgreSQL, purga por DROP, indice primario por entidad y secundarios declarados, retencion caliente/tibio/frio, y AegisQL de coste declarado —la consulta que no cabe se rechaza antes de leer, y dice como arreglarla— | 21 | `verificar-almacen.sh` |
 | `aegis-almacen-pcap` | Almacen de captura de red: una particion es un fichero PCAP, se busca por entidad y se purga con un unlink | 10 | `verificar-captura.sh` |
 | `aegis-case` | Ciclo de vida del incidente: de alerta a caso cerrado, con cronologia automatica y rastro inmutable | 79 | `verificar-case.sh` |
 | `aegis-detonate` | Detonacion de muestras en microVM con invitado hostil, informe determinista y MODO de observacion declarado: con agente dentro y cero eventos no hay camino a «sin hallazgos» | 99 | `verificar-detonate.sh` |
@@ -451,6 +452,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | 84 | [AegisFirmware+: auditoría de plataforma de grado CHIPSEC, sin poder escribir](docs/84-auditoria-de-plataforma.md) — de dos superficies de firmware a **doce**: protecciones de la flash, SMM, chipset y MSR, IOMMU, mitigaciones, microcódigo frente al publicado por el fabricante, variables UEFI, AML y la cadena de arranque **explicada** medida a medida, con el texto de cada evento comprobado contra su resumen. La escritura es **imposible de expresar** —cinco `compile_fail` con código de error— y se ejerce contra el kernel en seis superficies reales, con el errno que el kernel da de verdad y no el que pedía el enunciado. Compromiso y exposición van separados en el tipo: al árbitro sólo llegan los compromisos. El AML real se coteja en cada `make ci` contra `iasl` (2457 métodos, idéntico) y `acpiexec` (7 cargados, idéntico); frente a CHIPSEC, 21 módulos cubiertos, 3 parciales, 6 no cubiertos —escritos como derrota— y 6 excluidos por escribir o atacar |
 | 85 | [AegisConfine: confinamiento que se aprende, se ensaya y se retira solo](docs/85-confinamiento-aprendido.md) — SELinux, AppArmor, gVisor y Kata saben confinar; lo que no resuelven es **de dónde sale la política** ni qué pasa cuando rompe algo. Aquí se **aprende** del programa real con la notificación de usuario de seccomp (sin perder ni una llamada y sin que el proceso lo note), se **ensaya** en permisivo dejando pasar todo y anotando lo que se habría bloqueado, se **impone** sólo con una confirmación con autor y motivo —el tipo no admite otra forma— y un **ensayo limpio**, y si rompe la producción **se retira solo**, de forma pegajosa. Contra el kernel real: lo aprendido funciona, el `socket` no aprendido lo bloquea seccomp y el fichero no aprendido Landlock, un proceso de root arranca sólo con sus cinco capacidades implícitas, y un perfil roto se retira a los tres fallos. Sobre `ls` real, el perfil cierra el **91,7 %** de la superficie de llamadas. El motor no puede ni construir el objetivo para el propio agente, `init` o un activo protegido |
 | 86 | [AegisPosture: vulnerabilidades que importan, SBOM y postura de nube](docs/86-postura-y-alcanzabilidad.md) — Trivy, Grype y Syft dicen que **hay** una vulnerabilidad; aquí se dice si **importa**: si el componente está **cargado** en un proceso vivo, si la función vulnerable es **alcanzable** por el grafo de llamadas desde las raíces del programa y si el servicio está **expuesto** en red, cada respuesta tri-estado y sacada de telemetría que el agente ya tenía. Medido en esta máquina: de las 15 899 vulnerabilidades de Trivy, 12 319 están en componentes que ningún proceso carga; el inventario completo cabe en 38 MiB frente a los 0,9–5,5 GB de las otras. El SBOM no sale del agente: se exporta solo desde el plano de control, detrás del juez de difusión, marcado `TLP:AMBER+STRICT`, y Trivy lo lee. Y la postura de nube, reconstruida de los eventos que ya se ingerían, sin credenciales de lectura en la nube del cliente. |
+| 87 | [AegisStore: el almacén y el lenguaje sobre el histórico](docs/87-almacen-historico.md) — Elastic, OpenSearch y Graylog indexan documentos y buscan por texto; aquí el índice primario es la **entidad** del modelo único, y el lenguaje es **el mismo AegisQL** del endpoint: 14 consultas de caza devuelven las mismas filas contra el ejecutor real del endpoint y contra el histórico. Las extensiones del histórico —ventanas, agregaciones, subconsultas acotadas— no existen para el endpoint, **por tipo**. Columnar por partición de día en PostgreSQL real (el muro de la FASE 75, derribado), purga por `DROP`, retención caliente/tibio/frío, y **coste declarado**: la consulta que no cabe se rechaza en 1 ms sin leer nada y dice cómo arreglarla. Medido con 4,2 millones de eventos: 284 000 eventos/s de ingesta, 108 MiB en disco, «todo de una entidad en 7 días» en 87 ms. La comparativa con OpenSearch no se hizo, y se declara. |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo
