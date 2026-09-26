@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 
 use aegis_ingest::esquema::{
     confianza, recortar, Clase, Evento, Origen, Resultado as ResultadoEvento, Severidad, Valor,
-    MAX_CAMPO, MAX_CAMPOS, MAX_MENSAJE, VERSION,
+    MAX_CAMPO, MAX_CAMPOS, MAX_CRUDO, MAX_MENSAJE, VERSION,
 };
 use aegis_ingest::tiempo::desde_rfc3339;
 use serde_json::Value;
@@ -390,9 +390,18 @@ fn montar(
         productor: recortar(productor, 255),
         mensaje: recortar(mensaje, MAX_MENSAJE),
         campos,
-        crudo: ctx
-            .conservar_crudo
-            .then(|| serde_json::to_vec(v).unwrap_or_default()),
+        // Con el tope del esquema, como el crudo de syslog: el documento lo
+        // escribe en parte quien llama a la API, y sin tope cada evento podia
+        // llevar hasta `MAX_DOCUMENTO` de crudo. Recortado deja de ser JSON
+        // valido, y quien lo lee (la postura de nube) lo trata como ausente:
+        // la direccion segura del error. No se anade ningun campo que lo diga
+        // porque los campos entran en el identificador del evento, y cambiarlo
+        // romperia la desduplicacion de lo ya guardado.
+        crudo: ctx.conservar_crudo.then(|| {
+            let mut c = serde_json::to_vec(v).unwrap_or_default();
+            c.truncate(MAX_CRUDO);
+            c
+        }),
     };
     e.sellar();
     e
@@ -588,14 +597,40 @@ pub mod catalogo {
     pub fn gcp(accion: &str) -> Option<Conocido> {
         use Clase::*;
         use Severidad::*;
+        // Cada accion se reconoce en sus DOS formas: la del permiso de IAM
+        // (`iam.serviceAccounts.keys.create`) y la del `methodName` que escribe de
+        // verdad el registro de auditoria (`google.iam.admin.v1.
+        // CreateServiceAccountKey`). La primera version solo tenia la del
+        // permiso, que no es la que llega, y crear una clave de cuenta de
+        // servicio o borrar el sumidero de registros se clasificaban como una
+        // llamada cualquiera a la API.
         Some(match accion {
             x if x.contains("SetIamPolicy") => c(GestionDeCuentas, Critica),
-            x if x.contains("serviceAccounts.keys.create") => c(GestionDeCuentas, Critica),
-            x if x.contains("serviceAccounts.create") => c(GestionDeCuentas, Alta),
-            x if x.contains("logging.sinks.delete") || x.contains("logging.buckets.delete") => {
+            x if x.contains("serviceAccounts.keys.create")
+                || x.ends_with("CreateServiceAccountKey") =>
+            {
+                c(GestionDeCuentas, Critica)
+            }
+            x if x.contains("serviceAccounts.create") || x.ends_with("CreateServiceAccount") => {
+                c(GestionDeCuentas, Alta)
+            }
+            x if x.contains("logging.sinks.delete")
+                || x.contains("logging.buckets.delete")
+                || x.ends_with("ConfigServiceV2.DeleteSink")
+                || x.ends_with("ConfigServiceV2.DeleteBucket") =>
+            {
                 c(HallazgoDeSeguridad, Critica)
             }
-            x if x.contains("cryptoKeyVersions.destroy") => c(HallazgoDeSeguridad, Critica),
+            x if x.contains("cryptoKeyVersions.destroy")
+                || x.ends_with("DestroyCryptoKeyVersion") =>
+            {
+                c(HallazgoDeSeguridad, Critica)
+            }
+            // Permisos de un cubo de Cloud Storage: el `methodName` real.
+            x if x.contains("storage.setIamPermissions") => c(ActividadDeConfiguracion, Critica),
+            x if x.ends_with("SecretManagerService.AccessSecretVersion") => {
+                c(ActividadDeConfiguracion, Media)
+            }
             x if x.contains("instances.insert") || x.contains("instances.delete") => {
                 c(ActividadDeProceso, Media)
             }
@@ -645,6 +680,57 @@ mod pruebas {
         "eventID": "abcd-1234-efgh-5678"
       }]
     }"#;
+
+    #[test]
+    fn el_catalogo_de_gcp_reconoce_los_method_name_reales() {
+        // Los nombres exactos que escribe el registro de auditoria de GCP.
+        let casos = [
+            (
+                "google.iam.admin.v1.CreateServiceAccountKey",
+                Clase::GestionDeCuentas,
+                Severidad::Critica,
+            ),
+            (
+                "google.iam.admin.v1.CreateServiceAccount",
+                Clase::GestionDeCuentas,
+                Severidad::Alta,
+            ),
+            (
+                "google.logging.v2.ConfigServiceV2.DeleteSink",
+                Clase::HallazgoDeSeguridad,
+                Severidad::Critica,
+            ),
+            (
+                "google.cloud.kms.v1.KeyManagementService.DestroyCryptoKeyVersion",
+                Clase::HallazgoDeSeguridad,
+                Severidad::Critica,
+            ),
+            (
+                "storage.setIamPermissions",
+                Clase::ActividadDeConfiguracion,
+                Severidad::Critica,
+            ),
+            (
+                "google.cloud.secretmanager.v1.SecretManagerService.AccessSecretVersion",
+                Clase::ActividadDeConfiguracion,
+                Severidad::Media,
+            ),
+        ];
+        for (m, clase, sev) in casos {
+            let k = catalogo::gcp(m).unwrap_or_else(|| panic!("{m} no se reconoce"));
+            assert_eq!((k.clase, k.severidad), (clase, sev), "{m}");
+        }
+    }
+
+    #[test]
+    fn el_crudo_de_nube_respeta_el_tope_del_esquema() {
+        let mut v: serde_json::Value = serde_json::from_str(CLOUDTRAIL).unwrap();
+        let r = &mut v["Records"][0];
+        r["requestParameters"] = serde_json::json!({ "relleno": "x".repeat(200 * 1024) });
+        let e = analizar(r, &ctx()).expect("evento");
+        let c = e.crudo.expect("se conserva crudo");
+        assert_eq!(c.len(), MAX_CRUDO, "un documento grande no pasa del tope");
+    }
 
     #[test]
     fn apagar_cloudtrail_es_critico_y_sale_con_quien_lo_hizo() {
