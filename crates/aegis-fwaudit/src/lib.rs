@@ -1,78 +1,153 @@
-//! # `aegis-fwaudit` — AegisFirmwareAudit: auditoría de firmware, **sólo
+//! # `aegis-fwaudit` — AegisFirmwareAudit: auditoria de firmware, **solo
 //! lectura** (FASE 67)
 //!
 //! ## Por debajo del sistema operativo
 //!
 //! Una APT con recursos no se queda en el disco. Implanta en la **placa base**:
 //! LoJax en el firmware UEFI, MoonBounce en la ROM SPI, CosmicStrand en el
-//! bootkit. Desde ahí sobrevive a formatear el disco, a reinstalar el sistema y a
-//! cambiar el disco duro, porque no está en ninguno de los tres.
+//! bootkit. Desde ahi sobrevive a formatear el disco, a reinstalar el sistema y a
+//! cambiar el disco duro, porque no esta en ninguno de los tres.
 //!
-//! Este módulo audita las dos superficies donde eso se ve:
+//! Este modulo audita las dos superficies donde eso se ve:
 //!
 //! 1. **Las tablas ACPI** que el firmware le entrega al kernel
 //!    ([`acpi`], [`wpbt`]). El SO **se las cree**: son la palabra de algo que se
-//!    ejecuta antes que él y por debajo de él. El caso extremo es **WPBT**, que
+//!    ejecuta antes que el y por debajo de el. El caso extremo es **WPBT**, que
 //!    literalmente dice «ejecuta este binario en cada arranque».
 //! 2. **El contenido de la ROM SPI** ([`spi`], [`uefi`]): el descriptor de flash
-//!    de Intel delimita la región BIOS, dentro viven los volúmenes de firmware, y
-//!    dentro de ellos los ficheros FFS que un implante añade o sustituye.
+//!    de Intel delimita la region BIOS, dentro viven los volumenes de firmware, y
+//!    dentro de ellos los ficheros FFS que un implante anade o sustituye.
 //!
-//! ## La regla que gobierna el módulo entero: JAMÁS se escribe
+//! ## La regla que gobierna el modulo entero: JAMAS se escribe
 //!
 //! Una escritura accidental en la ROM SPI no es un bug: es un **ladrillo**. Deja
-//! la máquina sin arrancar y no hay recuperación por software. Un EDR capaz de
+//! la maquina sin arrancar y no hay recuperacion por software. Un EDR capaz de
 //! hacer eso es peor que el malware que busca.
 //!
-//! Por eso la garantía es estructural y tiene **dos capas independientes**:
+//! Por eso la garantia es estructural y tiene **dos capas independientes**:
 //!
 //! - El crate lleva `#![forbid(unsafe_code)]` y **todo** su acceso a disco pasa
-//!   por [`solo_lectura::LecturaSolo`], un tipo que no expone ninguna operación
+//!   por [`solo_lectura::LecturaSolo`], un tipo que no expone ninguna operacion
 //!   de escritura. No es que no se use: es que no existe.
-//! - Ese tipo abre siempre con `O_RDONLY`, así que quien prohíbe escribir es el
+//! - Ese tipo abre siempre con `O_RDONLY`, asi que quien prohibe escribir es el
 //!   **kernel**. `tests/solo_lectura.rs` lo **ejerce**: intenta `write`,
 //!   `ftruncate` y `pwrite` sobre el descriptor y exige `EBADF` en los tres.
 //!
-//! Una capa sola no bastaría: `forbid(unsafe_code)` no impide llamar a
-//! `File::write`, y `O_RDONLY` no impide un fallo lógico en otra parte.
+//! Una capa sola no bastaria: `forbid(unsafe_code)` no impide llamar a
+//! `File::write`, y `O_RDONLY` no impide un fallo logico en otra parte.
 //!
-//! ## Honestidad de validación
+//! ## Honestidad de validacion
 //!
-//! | Pieza | Aquí | Cómo |
+//! | Pieza | Aqui | Como |
 //! |---|---|---|
-//! | Parseo de tablas ACPI | **sí** | contra las tablas **reales** del firmware de esta máquina |
-//! | Checksum ACPI | **sí** | el de una tabla auténtica tiene que dar cero, y da |
-//! | Garantía de sólo lectura | **sí** | ejercida contra el kernel: `write`/`ftruncate`/`pwrite` → `EBADF` |
-//! | WPBT, descriptor Intel, volúmenes UEFI, FFS | sí | vectores binarios construidos byte a byte según la especificación |
-//! | Decisor de anomalías | sí | y el firmware real de la máquina **no** produce avisos |
-//! | **Leer la ROM SPI** | — | esta máquina no la expone (`/sys/class/mtd` no existe); **no aplicable**, que no es lo mismo que «bien» ni que «mal» |
+//! | Parseo de tablas ACPI | **si** | contra las tablas **reales** del firmware de esta maquina |
+//! | Checksum ACPI | **si** | el de una tabla autentica tiene que dar cero, y da |
+//! | Garantia de solo lectura | **si** | ejercida contra el kernel: `write`/`ftruncate`/`pwrite` → `EBADF` |
+//! | WPBT, descriptor Intel, volumenes UEFI, FFS | si | vectores binarios construidos byte a byte segun la especificacion |
+//! | Decisor de anomalias | si | y el firmware real de la maquina **no** produce avisos |
+//! | **Leer la ROM SPI** | — | esta maquina no la expone (`/sys/class/mtd` no existe); **no aplicable**, que no es lo mismo que «bien» ni que «mal» |
 //!
-//! Esa última fila es la razón de reutilizar el tri-estado de
+//! Esa ultima fila es la razon de reutilizar el tri-estado de
 //! [`aegis_firmware::report::CheckState`] en vez de un booleano: confundir «no se
-//! puede mirar» con «está bien» o con «está mal» son los dos errores que ese
+//! puede mirar» con «esta bien» o con «esta mal» son los dos errores que ese
 //! enumerado existe para impedir.
+//!
+//! # FASE 92: de dos superficies a la plataforma entera
+//!
+//! ## El inventario, antes de ampliar nada
+//!
+//! Lo que el producto auditaba al empezar esta fase, repartido entre dos crates, y
+//! lo que cubre CHIPSEC —el auditor de plataforma de referencia del mundo
+//! abierto— en cada superficie. Es el mapa de la fase: lo que no este aqui no se
+//! puede afirmar que se amplio.
+//!
+//! | Superficie | Antes de la FASE 92 | CHIPSEC |
+//! |---|---|---|
+//! | Tablas ACPI | cabecera, checksum, PE embebido, tabla dinamica, **WPBT** (`fwaudit`) | no las audita como superficie de implante |
+//! | Contenido de la ROM SPI | descriptor Intel, volumenes UEFI, FFS contra linea base por hash canonico (`fwaudit`) | `tools.uefi.scan_image`, `scan_blocked` (lista de bloqueo) |
+//! | Secure Boot | `SecureBoot` y `SetupMode` (`firmware`) | `common.secureboot.variables` |
+//! | Revocacion (DBX) | analisis de listas de firmas, hash del binario arrancado (`firmware`) | parcial, dentro de las variables |
+//! | Arranque medido | reproduccion del event log contra los PCR del TPM (`firmware`) | no |
+//! | Variables UEFI | **solo dos**, sin atributos | `common.uefi.access_uefispec`, `secureboot.variables` |
+//! | Protecciones de la flash (BIOSWE, BLE, SMM_BWP, PRx, FLOCKDN, FRAP) | **nada** | `bios_wp`, `spi_lock`, `spi_access`, `spi_desc`, `spi_fdopss`, `bios_ts` |
+//! | SMM (D_LCK, TSEG, SMRR, codigo fuera de SMRAM) | **nada** | `smm`, `smm_dma`, `smrr`, `smm_code_chk` |
+//! | Configuracion del chipset (bloqueos del puente, SMI_LOCK, IA32_FEATURE_CONTROL, depuracion, ME) | **nada** | `memconfig`, `memlock`, `remap`, `bios_smi`, `ia32cfg`, `debugenabled`, `me_mfg_mode` |
+//! | IOMMU y proteccion DMA | **nada** | no como tal |
+//! | Mitigaciones de CPU | **nada** | `cpu.spectre_v2`, `cpu.cpu_info` |
+//! | Microcodigo frente al del fabricante | **nada** | no |
+//! | AML de DSDT/SSDT | **nada** (solo la cabecera) | no |
+//! | Option ROMs PCI | **nada** | no como modulo de auditoria |
+//! | Cadena de arranque explicada medida a medida | **nada** (se reproducia, no se explicaba) | no |
+//!
+//! Eran **dos superficies y media** frente a **veintitantos modulos**. Lo que esta
+//! fase anade, modulo a modulo:
+//!
+//! | Modulo | Superficie | Fuente real, siempre de solo lectura |
+//! |---|---|---|
+//! | [`pci`] | espacio de configuracion PCI | `/sys/bus/pci/devices/*/config` |
+//! | [`registros`] | BIOS_CNTL, SPIBAR (HSFS, FRAP, PRx), puente anfitrion (SMRAMC, TSEGMB, BGSM, TOLUD…), PMC, ME | configuracion PCI y MMIO por `/dev/mem` |
+//! | [`msr`] | IA32_FEATURE_CONTROL, SMRR, depuracion, SMM_FEATURE_CONTROL, Boot Guard | `/dev/cpu/N/msr` |
+//! | [`variables`] | todas las variables UEFI, sus atributos, `BootOrder`, `Boot####`, PK/KEK/db/dbx | `efivarfs` |
+//! | [`ruta_dispositivo`] | rutas de dispositivo EFI, que usan variables y event log | — |
+//! | [`tablas`] | FADT, DMAR, IVRS, WSMT, MCFG, TPM2 | tablas ACPI reales |
+//! | [`aml`] | metodos AML y los que el sistema ejecuta solo al arrancar | DSDT y SSDT reales |
+//! | [`mitigaciones`] | estado de cada vulnerabilidad de CPU | `/sys/devices/system/cpu/vulnerabilities` |
+//! | [`microcodigo`] | revision cargada frente a la ultima del fabricante | `/proc/cpuinfo` y `/lib/firmware/{intel,amd}-ucode` |
+//! | [`opcion_rom`] | imagenes de expansion PCI, contra linea base | imagen de ROM o volcado; **nunca** el `rom` de sysfs |
+//! | [`arranque`] | la cadena de PCR 0 al cargador, cada medida explicada y su resumen comprobado | event log TCG |
+//! | [`plataforma`] | todo lo anterior en un informe con naturaleza (compromiso o exposicion) | — |
+//! | [`senal`] | el veredicto, al arbitro | — |
+//! | [`chipsec`] | la tabla de equivalencias con CHIPSEC, como dato y no como folleto | — |
+//!
+//! ## Lo que CHIPSEC hace y aqui no se hara nunca
+//!
+//! CHIPSEC es una herramienta que un experto ejecuta y que **puede escribir**: sus
+//! modulos de ataque (`smm_ptr`, `uefivar_fuzz`, `sinkhole`, `rogue_mmio_bar`)
+//! escriben en SMRAM, en variables y en BARs para confirmar un fallo, y para leer
+//! el controlador SPI oculto en los chipsets 100+ **escribe en el P2SB** para
+//! destaparlo. Aqui ninguna de esas vias existe: la escritura no se puede expresar
+//! (invariante de la fase), y un escaner no confirma un fallo explotandolo. Lo que
+//! esas vias verian se declara no aplicable con su motivo, en vez de comprarlo con
+//! el riesgo de dejar una placa inservible en cien mil maquinas.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 pub mod acpi;
+pub mod aml;
 pub mod anomalias;
+pub mod arranque;
+pub mod chipsec;
+pub mod comprobacion;
 pub mod linea_base;
+pub mod microcodigo;
+pub mod mitigaciones;
+pub mod msr;
+pub mod opcion_rom;
+pub mod pci;
+pub mod plataforma;
+pub mod registros;
+pub mod ruta_dispositivo;
+pub mod senal;
 pub mod solo_lectura;
 pub mod spi;
+pub mod tablas;
 pub mod uefi;
+pub mod variables;
 pub mod wpbt;
 
 pub use aegis_firmware::guid::Guid;
 pub use aegis_firmware::report::{Check, CheckState};
 pub use anomalias::{Anomalia, Severidad};
+pub use comprobacion::{Comprobacion, Naturaleza, Superficie};
+pub use plataforma::{auditar_plataforma, InformePlataforma, Raices};
 
 use linea_base::{LineaBase, Veredicto};
 
-/// Qué se puede auditar en esta máquina.
+/// Que se puede auditar en esta maquina.
 ///
 /// Se calcula y se reporta ANTES de auditar, para que el informe distinga «no hay
-/// anomalías» de «no se pudo mirar».
+/// anomalias» de «no se pudo mirar».
 #[derive(Debug, Clone, Default)]
 pub struct SoporteAuditoria {
     /// Tablas ACPI legibles.
@@ -85,12 +160,12 @@ pub struct SoporteAuditoria {
     pub dispositivos_mtd: Vec<spi::DispositivoMtd>,
     /// Si la ROM SPI es accesible de solo lectura.
     pub rom_accesible: bool,
-    /// Por qué no lo es, cuando no lo es.
+    /// Por que no lo es, cuando no lo es.
     pub motivo_sin_rom: String,
 }
 
 impl SoporteAuditoria {
-    /// Sondea la máquina.
+    /// Sondea la maquina.
     #[must_use]
     pub fn detectar() -> SoporteAuditoria {
         let tablas = acpi::leer_tablas_del_sistema();
@@ -113,27 +188,27 @@ impl SoporteAuditoria {
     }
 }
 
-/// El veredicto completo de una auditoría.
+/// El veredicto completo de una auditoria.
 #[derive(Debug, Clone, Default)]
 pub struct InformeAuditoria {
     /// Las comprobaciones, con su tri-estado.
     pub checks: Vec<Check>,
-    /// Las anomalías encontradas, de más grave a menos.
+    /// Las anomalias encontradas, de mas grave a menos.
     pub anomalias: Vec<Anomalia>,
     /// Tablas ACPI examinadas.
     pub tablas_vistas: usize,
-    /// Volúmenes de firmware examinados.
+    /// Volumenes de firmware examinados.
     pub volumenes_vistos: usize,
     /// Ficheros FFS examinados.
     pub ficheros_vistos: usize,
-    /// Ficheros cuyo GUID no está en la línea base.
+    /// Ficheros cuyo GUID no esta en la linea base.
     pub ficheros_desconocidos: Vec<(Guid, String)>,
-    /// Ficheros cuyo GUID está pero con otro hash: se reescribieron.
+    /// Ficheros cuyo GUID esta pero con otro hash: se reescribieron.
     pub ficheros_alterados: Vec<(Guid, String)>,
 }
 
 impl InformeAuditoria {
-    /// `true` si alguna comprobación falló.
+    /// `true` si alguna comprobacion fallo.
     #[must_use]
     pub fn comprometido(&self) -> bool {
         self.checks.iter().any(|c| c.estado.es_fallo())
@@ -152,16 +227,25 @@ impl InformeAuditoria {
     }
 }
 
-/// Audita las tablas ACPI de esta máquina.
+/// Audita las tablas ACPI de esta maquina.
 ///
-/// Es la parte que **siempre** se puede hacer: `/sys/firmware/acpi/tables` está
-/// en cualquier máquina con ACPI y no necesita más privilegio que leer.
+/// Es la parte que **siempre** se puede hacer: `/sys/firmware/acpi/tables` esta
+/// en cualquier maquina con ACPI y no necesita mas privilegio que leer.
 #[must_use]
 pub fn auditar_acpi() -> InformeAuditoria {
-    let tablas = acpi::leer_tablas_del_sistema();
+    auditar_acpi_de(&acpi::leer_tablas_del_sistema())
+}
+
+/// Audita un conjunto de tablas ACPI ya leido.
+///
+/// Existe aparte de [`auditar_acpi`] para que el informe de plataforma de la
+/// FASE 92 decida una sola vez con el mismo decisor, lea las tablas de donde las
+/// lea.
+#[must_use]
+pub fn auditar_acpi_de(tablas: &acpi::ConjuntoTablas) -> InformeAuditoria {
     let mut informe = InformeAuditoria {
         tablas_vistas: tablas.len(),
-        anomalias: anomalias::auditar_conjunto(&tablas),
+        anomalias: anomalias::auditar_conjunto(tablas),
         ..Default::default()
     };
 
@@ -228,10 +312,10 @@ pub fn auditar_acpi() -> InformeAuditoria {
     informe
 }
 
-/// Audita una imagen de ROM ya leída, contra una línea base.
+/// Audita una imagen de ROM ya leida, contra una linea base.
 ///
-/// Se toma la imagen en memoria y no una ruta a propósito: así la misma función
-/// sirve para la ROM viva de la máquina y para un volcado que el analista trae de
+/// Se toma la imagen en memoria y no una ruta a proposito: asi la misma funcion
+/// sirve para la ROM viva de la maquina y para un volcado que el analista trae de
 /// otro equipo, sin duplicar el decisor.
 #[must_use]
 pub fn auditar_rom(imagen: &[u8], base: &LineaBase) -> InformeAuditoria {
@@ -305,7 +389,7 @@ pub fn auditar_rom(imagen: &[u8], base: &LineaBase) -> InformeAuditoria {
         }
     }
 
-    let estado = if base.vacia() {
+    let estado = if !base.cubre_ffs() {
         CheckState::Indeterminado(
             "no hay linea base cargada: se puede recorrer el firmware pero no decir \
              si su contenido es el que deberia"
@@ -334,7 +418,7 @@ pub fn auditar_rom(imagen: &[u8], base: &LineaBase) -> InformeAuditoria {
     informe
 }
 
-/// La auditoría completa de esta máquina: ACPI siempre, y ROM SPI si la hay.
+/// La auditoria completa de esta maquina: ACPI siempre, y ROM SPI si la hay.
 #[must_use]
 pub fn auditar(base: &LineaBase) -> InformeAuditoria {
     let mut informe = auditar_acpi();

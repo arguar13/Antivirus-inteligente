@@ -965,6 +965,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "senuelos" ]; then
     fi
 fi
 
+# AegisFirmware+ (FASE 92): de dos superficies de firmware a la plataforma
+# entera —protecciones de la flash, SMM, bloqueos del chipset, MSR, IOMMU,
+# mitigaciones, microcodigo, todas las variables UEFI, el AML y la cadena de
+# arranque explicada—, con la escritura IMPOSIBLE de expresar. Lo primero que se
+# ejerce es, otra vez, la inocuidad: cada superficie nueva rechaza la escritura
+# en el kernel, y el tipo no la puede ni pedir. El AML real se coteja en la
+# propia puerta contra iasl y acpiexec, y la tabla de CHIPSEC contra el codigo.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "plataforma" ]; then
+    printf '%s==>%s AegisFirmware+ · auditoria de plataforma de grado CHIPSEC, sin poder escribir\n' "$GRIS" "$FIN"
+    if ./tools/verificar-plataforma.sh > $LOGS/aegis-plataforma-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-plataforma-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-plataforma-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
 # un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
 # que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la

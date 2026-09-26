@@ -1,4 +1,4 @@
-//! La garantía de solo lectura, **ejercida contra el kernel**.
+//! La garantia de solo lectura, **ejercida contra el kernel**.
 //!
 //! # Por que esta prueba vive fuera de la biblioteca
 //!
@@ -78,6 +78,159 @@ fn un_truncado_tambien_se_rechaza() {
         "el fichero conserva su tamano"
     );
     let _ = std::fs::remove_file(&ruta);
+}
+
+// ─── FASE 92: cada superficie nueva, contra el kernel real ────────────────────
+//
+// La FASE 92 lleva `LecturaSolo` a sitios mucho mas peligrosos que un fichero:
+// la configuracion PCI del chipset, `/proc`, los ficheros de microcodigo del
+// fabricante y `/dev/mem`. Se ejerce la garantia en CADA uno.
+//
+// DOS DECISIONES QUE HACEN SEGURA LA PRUEBA MISMA
+//
+// 1. Las escrituras son de CERO bytes y el truncado es al tamano ACTUAL. El
+//    kernel comprueba el modo del descriptor antes que la longitud
+//    (`vfs_write` empieza por `FMODE_WRITE`), asi que el rechazo se demuestra
+//    igual. Y si la garantia fallara algun dia, la prueba no podria hacer dano:
+//    ni en la memoria fisica, ni en el microcodigo del fabricante.
+// 2. Se afirma el errno que el kernel da DE VERDAD, que no es siempre EBADF:
+//    `write` da EBADF; `pwrite` da ESPIPE en los ficheros de /proc y sysfs
+//    (rechaza la escritura posicional antes de mirar el modo) y EBADF en el
+//    resto; `ftruncate` da EINVAL (el kernel exige fichero regular Y abierto
+//    para escribir, y agrupa los dos fallos en ese codigo). El enunciado de la
+//    fase pedia EBADF en los tres; se comprueba lo que el kernel hace, que es lo
+//    unico que se puede comprobar.
+
+/// Lo que devolvio el kernel en cada intento.
+struct Rechazo {
+    write: i32,
+    pwrite: i32,
+    ftruncate: i32,
+}
+
+fn errno() -> i32 {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+
+/// Intenta escribir por las tres vias sobre el descriptor que da `LecturaSolo`.
+/// Devuelve `None` si la superficie no existe en esta maquina.
+fn ejercer(ruta: &std::path::Path) -> Option<Rechazo> {
+    let lector = LecturaSolo::abrir(ruta).ok()?;
+    let fd = lector.as_fd().as_raw_fd();
+    let nada = [0u8; 0];
+    let tamano = std::fs::metadata(ruta).map(|m| m.len()).unwrap_or(0);
+    // SEGURIDAD: escrituras de CERO bytes y truncado al tamano ACTUAL sobre un
+    // descriptor propio abierto O_RDONLY; aunque la garantia fallara, no
+    // cambiarian nada.
+    let w = unsafe { libc::write(fd, nada.as_ptr().cast::<libc::c_void>(), 0) };
+    let ew = if w == -1 { errno() } else { 0 };
+    let pw = unsafe { libc::pwrite(fd, nada.as_ptr().cast::<libc::c_void>(), 0, 0) };
+    let epw = if pw == -1 { errno() } else { 0 };
+    let t = unsafe { libc::ftruncate(fd, libc::off_t::try_from(tamano).unwrap_or(0)) };
+    let et = if t == -1 { errno() } else { 0 };
+    Some(Rechazo {
+        write: ew,
+        pwrite: epw,
+        ftruncate: et,
+    })
+}
+
+fn nombre_errno(e: i32) -> &'static str {
+    match e {
+        0 => "PERMITIDO",
+        libc::EBADF => "EBADF",
+        libc::ESPIPE => "ESPIPE",
+        libc::EINVAL => "EINVAL",
+        libc::EACCES => "EACCES",
+        libc::EPERM => "EPERM",
+        _ => "otro",
+    }
+}
+
+/// El primer fichero de un directorio que cumpla un criterio.
+fn primero(dir: &str, sufijo: &str) -> Option<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        // `join("")` anadiria una barra final y la apertura daria ENOTDIR.
+        .map(|e| {
+            if sufijo.is_empty() {
+                e.path()
+            } else {
+                e.path().join(sufijo)
+            }
+        })
+        .filter(|p| p.exists())
+        .collect();
+    v.sort();
+    v.into_iter().next()
+}
+
+/// AUTOATAQUE: la auditoria como via de ladrillo, por cada superficie nueva.
+#[test]
+fn cada_superficie_nueva_rechaza_la_escritura_en_el_kernel() {
+    let superficies: Vec<(&str, Option<PathBuf>)> = vec![
+        (
+            "configuracion PCI (sysfs)",
+            primero("/sys/bus/pci/devices", "config"),
+        ),
+        (
+            "tabla ACPI (DSDT)",
+            Some(PathBuf::from("/sys/firmware/acpi/tables/DSDT")),
+        ),
+        ("/proc/cpuinfo", Some(PathBuf::from("/proc/cpuinfo"))),
+        (
+            "mitigaciones de CPU (sysfs)",
+            primero("/sys/devices/system/cpu/vulnerabilities", ""),
+        ),
+        (
+            "microcodigo del fabricante",
+            primero("/lib/firmware/intel-ucode", ""),
+        ),
+        (
+            "variables UEFI (efivarfs)",
+            primero("/sys/firmware/efi/efivars", ""),
+        ),
+        ("memoria fisica (/dev/mem)", Some(PathBuf::from("/dev/mem"))),
+        ("MSR de la CPU 0", Some(PathBuf::from("/dev/cpu/0/msr"))),
+    ];
+    let mut ejercidas = 0;
+    for (nombre, ruta) in superficies {
+        let Some(ruta) = ruta else {
+            eprintln!("  {nombre:<32} NO APLICABLE: no existe en esta maquina");
+            continue;
+        };
+        let Some(r) = ejercer(&ruta) else {
+            eprintln!(
+                "  {nombre:<32} NO APLICABLE: {} no se puede abrir aqui",
+                ruta.display()
+            );
+            continue;
+        };
+        eprintln!(
+            "  {nombre:<32} write={} pwrite={} ftruncate={}   ({})",
+            nombre_errno(r.write),
+            nombre_errno(r.pwrite),
+            nombre_errno(r.ftruncate),
+            ruta.display()
+        );
+        assert_eq!(r.write, libc::EBADF, "{nombre}: write tiene que dar EBADF");
+        assert!(
+            r.pwrite == libc::EBADF || r.pwrite == libc::ESPIPE,
+            "{nombre}: pwrite tiene que rechazarse (EBADF o ESPIPE), dio {}",
+            nombre_errno(r.pwrite)
+        );
+        assert!(
+            r.ftruncate == libc::EINVAL || r.ftruncate == libc::EBADF,
+            "{nombre}: ftruncate tiene que rechazarse, dio {}",
+            nombre_errno(r.ftruncate)
+        );
+        ejercidas += 1;
+    }
+    // Una prueba que no ejerce nada no demuestra nada: en esta maquina hay,
+    // como minimo, /proc/cpuinfo, las mitigaciones y la DSDT.
+    assert!(ejercidas >= 3, "solo se ejercieron {ejercidas} superficies");
+    eprintln!("  superficies ejercidas contra el kernel: {ejercidas}");
 }
 
 /// Y `pwrite`, que escribe en un desplazamiento sin mover el cursor: es la via

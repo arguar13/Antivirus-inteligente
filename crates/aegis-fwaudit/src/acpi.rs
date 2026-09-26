@@ -1,11 +1,11 @@
 //! Tablas ACPI: la cabecera comun, su checksum, y la lectura de las que el
-//! firmware de esta maquina le entregó al kernel.
+//! firmware de esta maquina le entrego al kernel.
 //!
 //! # Por que las tablas ACPI son una superficie de ataque
 //!
 //! El firmware le pasa al sistema operativo un conjunto de tablas que describen
 //! el hardware. El SO **se las cree**: son la palabra del firmware, que se
-//! ejecuta antes que él y por debajo de él. Una APT que controla la placa base no
+//! ejecuta antes que el y por debajo de el. Una APT que controla la placa base no
 //! necesita tocar el disco para persistir: le basta con que el firmware declare
 //! una tabla mas.
 //!
@@ -212,7 +212,7 @@ pub fn checksum_valido(tabla: &[u8]) -> bool {
 /// Esto importa mas de lo que parece: esa comprobacion emitia una anomalia de
 /// severidad **Critica** —«fue reescrita despues de que el firmware la generara»—
 /// sobre una tabla intacta, en cualquier maquina que exponga FACS. Un producto de
-/// seguridad que grita «firmware alterado» sin motivo enseña a desconfiar de sus
+/// seguridad que grita «firmware alterado» sin motivo ensena a desconfiar de sus
 /// propias alertas, que es peor que no tenerlas.
 #[must_use]
 pub fn lleva_checksum(firma: &[u8; 4]) -> bool {
@@ -324,7 +324,7 @@ pub fn analizar_tabla(ruta: &Path, bytes: Vec<u8>, dinamica: bool) -> Result<Tab
     })
 }
 
-/// El conjunto de tablas que el firmware entregó al kernel.
+/// El conjunto de tablas que el firmware entrego al kernel.
 #[derive(Debug, Default)]
 pub struct ConjuntoTablas {
     /// Las tablas que se pudieron leer y analizar.
@@ -363,9 +363,16 @@ impl ConjuntoTablas {
 /// contenedor, un ARM sin ACPI) es un «no aplicable», no un fallo.
 #[must_use]
 pub fn leer_tablas_del_sistema() -> ConjuntoTablas {
+    leer_tablas_de(Path::new(DIR_TABLAS))
+}
+
+/// Lee y analiza las tablas de un directorio con la forma de
+/// `/sys/firmware/acpi/tables` (las dinamicas, en su subdirectorio `dynamic`).
+#[must_use]
+pub fn leer_tablas_de(dir: &Path) -> ConjuntoTablas {
     let mut conjunto = ConjuntoTablas::default();
-    leer_directorio(Path::new(DIR_TABLAS), false, &mut conjunto);
-    leer_directorio(Path::new(DIR_TABLAS_DINAMICAS), true, &mut conjunto);
+    leer_directorio(dir, false, &mut conjunto);
+    leer_directorio(&dir.join("dynamic"), true, &mut conjunto);
     // Orden estable por firma y ruta: dos auditorias de la misma maquina tienen
     // que producir el mismo informe, o compararlas deja de ser trivial.
     conjunto.tablas.sort_by(|a, b| {

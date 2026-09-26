@@ -1,4 +1,4 @@
-//! **La garantía del módulo**: el único punto del crate donde se abre un fichero,
+//! **La garantia del modulo**: el unico punto del crate donde se abre un fichero,
 //! y se abre siempre de solo lectura.
 //!
 //! # Por que esto merece un modulo entero
@@ -27,6 +27,39 @@
 //! modulo **intenta escribir de verdad** sobre un descriptor abierto asi y exige
 //! que el kernel lo rechace. Afirmar "solo lectura" sin ejercerlo contra el
 //! kernel seria afirmarlo sobre el papel.
+//!
+//! # Lo que no compila (FASE 92)
+//!
+//! La FASE 92 lleva este tipo a superficies mucho mas peligrosas que un fichero:
+//! la configuracion PCI del chipset, `/dev/mem` y los MSR de la CPU. La garantia
+//! del punto 2 se comprueba por lo que FALTA, con el codigo de error atado para
+//! que una errata no la haga pasar:
+//!
+//! No hay operacion de escritura (`E0599`: el metodo no existe):
+//!
+//! ```compile_fail,E0599
+//! use aegis_fwaudit::solo_lectura::LecturaSolo;
+//! let l = LecturaSolo::abrir(std::path::Path::new("/dev/mem")).unwrap();
+//! l.escribir(0, &[0xFF]);
+//! ```
+//!
+//! No es un `io::Write` (`E0277`: no cumple el rasgo):
+//!
+//! ```compile_fail,E0277
+//! use aegis_fwaudit::solo_lectura::LecturaSolo;
+//! use std::io::Write;
+//! let mut l = LecturaSolo::abrir(std::path::Path::new("/dev/mem")).unwrap();
+//! l.write_all(&[0xFF]).unwrap();
+//! ```
+//!
+//! Y no se puede sacar el fichero de dentro para escribir por el (`E0616`: el
+//! campo es privado):
+//!
+//! ```compile_fail,E0616
+//! use aegis_fwaudit::solo_lectura::LecturaSolo;
+//! let l = LecturaSolo::abrir(std::path::Path::new("/dev/mem")).unwrap();
+//! let _f = &l.fichero;
+//! ```
 
 use std::path::{Path, PathBuf};
 

@@ -16,6 +16,10 @@ workspace = true
 # mismo subsistema harian que "no aplicable" y "fallo" se confundieran, que es
 # justo el falso positivo que ese enumerado existe para impedir.
 aegis-firmware = { path = "../aegis-firmware" }
+# El veredicto de plataforma entra al arbitro como una `Senal` sobre la entidad
+# maquina (FASE 92). Un enumerado de veredicto propio seria una regresion de la
+# FASE 79: el modelo de entidad es uno.
+aegis-entidad = { path = "../aegis-entidad" }
 # SHA-256 de cada fichero FFS, para cotejarlo con la linea base conocida.
 sha2 = "0.10"
 thiserror = "2"

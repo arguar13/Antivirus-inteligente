@@ -57,7 +57,9 @@ else
 fi
 
 echo "==> AegisFirmware+: la escritura no se puede EXPRESAR (compile_fail con codigo de error)"
-if cargo test -p aegis-fwaudit --quiet --doc >"$TMP/doc.log" 2>&1; then
+# Sin --quiet: con el, cargo imprime un punto por prueba y no se puede saber
+# cuales eran compile_fail.
+if cargo test -p aegis-fwaudit --doc >"$TMP/doc.log" 2>&1; then
     N=$(grep -c 'compile fail ... ok' "$TMP/doc.log")
     if [ "$N" -lt 5 ]; then
         fallo "se esperaban 5 pruebas compile_fail y pasaron $N" "$TMP/doc.log"

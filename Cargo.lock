@@ -273,6 +273,7 @@ dependencies = [
 name = "aegis-fwaudit"
 version = "0.1.0"
 dependencies = [
+ "aegis-entidad",
  "aegis-firmware",
  "libc",
  "sha2",

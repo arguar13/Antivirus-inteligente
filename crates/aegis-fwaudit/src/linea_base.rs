@@ -1,4 +1,4 @@
-//! La línea base: los hashes que **deberían** estar en el firmware.
+//! La linea base: los hashes que **deberian** estar en el firmware.
 //!
 //! # Por que una linea base y no firmas de malware
 //!
@@ -6,7 +6,7 @@
 //! escrito para esa placa. Buscar firmas de malware ahi encuentra lo que ya se
 //! encontro en otra maquina, que es justo lo que una APT no repite.
 //!
-//! Lo que si se puede afirmar es lo contrario: **qué debería haber**. El firmware
+//! Lo que si se puede afirmar es lo contrario: **que deberia haber**. El firmware
 //! de un modelo de placa con una version concreta tiene un conjunto fijo de
 //! ficheros FFS con hashes fijos. Un fichero que no esta en esa lista, o que esta
 //! con otro hash, es la deteccion — sin saber nada del implante.
@@ -34,7 +34,16 @@
 //! fv    8c8ce578-8a3d-4f1c-9935-896185c32dd3
 //! ffs   a1b2c3d4-...  <sha256 en hex>  nombre-legible
 //! revocado <sha256 en hex>  LoJax/SecDxe
+//! aml   \_SB.PCI0._INI  <sha256 del cuerpo>  placa-x v1.2
+//! oprom 8086:15f3  <sha256 de la imagen>  NIC integrada
+//! driver <sha256 Authenticode>  controlador de la GPU
 //! ```
+//!
+//! Las tres ultimas claves son de la FASE 92: los metodos AML que el sistema
+//! ejecuta solo, las imagenes de expansion PCI y los controladores que el
+//! firmware mide en el PCR 2. Siguen la misma regla que los ficheros FFS: un hash
+//! revocado gana siempre, y lo que no esta en la base es «desconocido», no
+//! «malicioso».
 
 use std::collections::BTreeMap;
 
@@ -81,6 +90,13 @@ pub struct LineaBase {
     pub ficheros: BTreeMap<Guid, Vec<Entrada>>,
     /// Hashes de implantes conocidos.
     pub revocados: BTreeMap<[u8; 32], String>,
+    /// Cuerpos conocidos de metodos AML, por ruta legible (`\_SB.PCI0._INI`).
+    pub metodos_aml: BTreeMap<String, Vec<Entrada>>,
+    /// Imagenes de expansion PCI conocidas, por `fabricante:dispositivo` en
+    /// minusculas.
+    pub opciones_rom: BTreeMap<String, Vec<Entrada>>,
+    /// Hashes Authenticode de controladores conocidos medidos en el PCR 2.
+    pub controladores: BTreeMap<[u8; 32], String>,
 }
 
 /// El veredicto sobre un fichero FFS.
@@ -107,7 +123,17 @@ impl LineaBase {
     /// `true` si la base no tiene ninguna entrada.
     #[must_use]
     pub fn vacia(&self) -> bool {
-        self.ficheros.is_empty() && self.revocados.is_empty()
+        self.ficheros.is_empty()
+            && self.revocados.is_empty()
+            && self.metodos_aml.is_empty()
+            && self.opciones_rom.is_empty()
+            && self.controladores.is_empty()
+    }
+
+    /// Si la base dice algo de los ficheros FFS de la ROM.
+    #[must_use]
+    pub fn cubre_ffs(&self) -> bool {
+        !self.ficheros.is_empty() || !self.revocados.is_empty()
     }
 
     /// Cuantos ficheros conocidos hay.
@@ -132,7 +158,9 @@ impl LineaBase {
         if let Some(nombre) = self.revocados.get(sha256) {
             return Veredicto::Revocado(nombre.clone());
         }
-        if self.vacia() {
+        // Sin entradas de FFS no se puede afirmar nada de un FFS, aunque la base
+        // traiga AML u option ROMs: son otra superficie.
+        if !self.cubre_ffs() {
             return Veredicto::SinBase;
         }
         match self.ficheros.get(guid) {
@@ -230,10 +258,65 @@ impl LineaBase {
                     let etiqueta = campos.collect::<Vec<_>>().join(" ");
                     base.revocados.insert(sha, etiqueta);
                 }
+                "aml" | "oprom" => {
+                    let (Some(objeto), Some(h)) = (campos.next(), campos.next()) else {
+                        return Err(ErrorBase::LineaMalformada {
+                            linea,
+                            motivo: "se esperaba: aml <ruta> <sha256> <etiqueta> u oprom <vvvv:dddd> <sha256> <etiqueta>",
+                        });
+                    };
+                    let objeto = if clave == "oprom" {
+                        if !es_id_pci(objeto) {
+                            return Err(ErrorBase::LineaMalformada {
+                                linea,
+                                motivo: "identificador PCI invalido (se esperaba vvvv:dddd en hex)",
+                            });
+                        }
+                        objeto.to_ascii_lowercase()
+                    } else {
+                        if !objeto.starts_with('\\') {
+                            return Err(ErrorBase::LineaMalformada {
+                                linea,
+                                motivo: "la ruta AML tiene que ser absoluta (empieza por \\)",
+                            });
+                        }
+                        objeto.to_string()
+                    };
+                    let sha256 = hash_de_texto(h).ok_or(ErrorBase::LineaMalformada {
+                        linea,
+                        motivo: "SHA-256 invalido (se esperaban 64 hex)",
+                    })?;
+                    let etiqueta = campos.collect::<Vec<_>>().join(" ");
+                    let destino = if clave == "aml" {
+                        &mut base.metodos_aml
+                    } else {
+                        &mut base.opciones_rom
+                    };
+                    destino.entry(objeto).or_default().push(Entrada {
+                        sha256,
+                        etiqueta: if etiqueta.is_empty() {
+                            "(sin etiqueta)".to_string()
+                        } else {
+                            etiqueta
+                        },
+                    });
+                }
+                "driver" => {
+                    let h = campos.next().ok_or(ErrorBase::LineaMalformada {
+                        linea,
+                        motivo: "falta el SHA-256",
+                    })?;
+                    let sha = hash_de_texto(h).ok_or(ErrorBase::LineaMalformada {
+                        linea,
+                        motivo: "SHA-256 invalido",
+                    })?;
+                    base.controladores
+                        .insert(sha, campos.collect::<Vec<_>>().join(" "));
+                }
                 _ => {
                     return Err(ErrorBase::LineaMalformada {
                         linea,
-                        motivo: "clave desconocida (se esperaba fv/ffs/revocado)",
+                        motivo: "clave desconocida (se esperaba fv/ffs/revocado/aml/oprom/driver)",
                     })
                 }
             }
@@ -290,6 +373,14 @@ pub fn guid_de_texto(s: &str) -> Option<Guid> {
         b[8 + i] = u8::from_str_radix(t, 16).ok()?;
     }
     Some(Guid(b))
+}
+
+/// `8086:15f3`: dos campos de cuatro digitos hexadecimales.
+#[must_use]
+pub fn es_id_pci(s: &str) -> bool {
+    s.split_once(':').is_some_and(|(v, d)| {
+        v.len() == 4 && d.len() == 4 && v.chars().chain(d.chars()).all(|c| c.is_ascii_hexdigit())
+    })
 }
 
 /// 64 caracteres hexadecimales -> 32 bytes.
@@ -453,6 +544,41 @@ mod pruebas {
             LineaBase::analizar("version 1\nvacuna algo\n"),
             Err(ErrorBase::LineaMalformada { .. })
         ));
+    }
+
+    #[test]
+    fn las_claves_de_la_fase_92_se_analizan_y_se_validan() {
+        let b = LineaBase::analizar(&format!(
+            "version 1\n\
+             aml \\_SB.PCI0._INI {HASH_A} placa x\n\
+             oprom 8086:15F3 {HASH_B} NIC\n\
+             driver {HASH_A} GPU\n"
+        ))
+        .expect("base");
+        assert_eq!(b.metodos_aml["\\_SB.PCI0._INI"].len(), 1);
+        assert!(
+            b.opciones_rom.contains_key("8086:15f3"),
+            "el id se normaliza a minusculas"
+        );
+        assert_eq!(b.controladores.len(), 1);
+        assert!(!b.vacia());
+        // Una base que solo trae AML no dice nada de los FFS.
+        assert!(!b.cubre_ffs());
+        assert_eq!(b.clasificar(&Guid([1; 16]), &[0; 32]), Veredicto::SinBase);
+        for mala in [
+            format!("version 1\noprom 8086-15f3 {HASH_A} x\n"),
+            format!("version 1\naml _SB.X {HASH_A} x\n"),
+            "version 1\naml \\X corto\n".to_string(),
+            "version 1\ndriver zz\n".to_string(),
+        ] {
+            assert!(
+                matches!(
+                    LineaBase::analizar(&mala),
+                    Err(ErrorBase::LineaMalformada { .. })
+                ),
+                "{mala}"
+            );
+        }
     }
 
     #[test]

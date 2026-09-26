@@ -20,7 +20,7 @@
 #
 # LAS TRECE, Y DE DONDE SALEN
 # ---------------------------
-# Ocho estructurales, una de autoataque con sus nueve capacidades, y cuatro doctrinales
+# Ocho estructurales, una de autoataque con una fila por capacidad, y cuatro doctrinales
 # que el producto ya sostiene y que aqui se comprueban mecanicamente en vez de
 # afirmarse.
 #
@@ -310,7 +310,7 @@ fi
 # es una comprobacion de robustez generica: cada una es el ataque concreto que
 # esa capacidad habilita, y tiene que fallar EN EL INTENTO.
 if toca 9; then
-    titulo 9 "AUTOATAQUE · nueve capacidades usadas contra el producto"
+    titulo 9 "AUTOATAQUE · cada capacidad, usada contra el producto"
     # Cada fila: <nombre del ataque> ; <ejecuciones separadas por «+»>, donde cada
     # ejecucion es <raiz|servidor>|<paquete>|<destino>|<filtro>.
     declare -a ATAQUES=(
@@ -332,6 +332,12 @@ if toca 9; then
         # a los tarros de miel clasicos, y aqui se para no teniendo nada que
         # encarcelar.
         "el senuelo como trampa vuelta del reves;raiz|aegis-deception|--test autoataque_senuelos|"
+        # La auditoria de plataforma (FASE 92) lee la configuracion del chipset,
+        # /dev/mem y los MSR. Vuelta del reves es un LADRILLO: una escritura en
+        # la flash, en SMRAM o en un MSR deja la placa inservible. Se intenta
+        # escribir por cada superficie contra el kernel, y ademas se comprueba
+        # que el tipo no pueda ni pedirlo (compile_fail con codigo de error).
+        "la auditoria de firmware como ladrillo;raiz|aegis-fwaudit|--test solo_lectura|+raiz|aegis-fwaudit|--doc|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
@@ -358,7 +364,7 @@ if toca 9; then
         fi
     done
     if [ ${#ROTOS[@]} -eq 0 ]; then
-        veredicto 9 "autoataque" si "las nueve capacidades resisten su propio ataque ($TOTAL_PRUEBAS pruebas)"
+        veredicto 9 "autoataque" si "las ${#ATAQUES[@]} capacidades resisten su propio ataque ($TOTAL_PRUEBAS pruebas)"
         porque "Cada capacidad que se añade a un producto de seguridad es una capacidad"
         porque "nueva para quien lo comprometa. El disector que lee todo el trafico es un"
         porque "amplificador; el IPS que corta flujos es un boton de denegacion de"
@@ -423,8 +429,29 @@ if toca 12; then
         | grep -qE "^    (Real|RedReal|Internet)" \
         && AUSENCIAS+=("aegis-detonate::frontera::Salida tiene una variante de red real")
     SALIDAS=$(grep -A 12 "pub enum Salida" server/crates/aegis-detonate/src/frontera.rs 2>/dev/null | grep -cE "^    (Ninguna|Simulada),")
+    # FASE 92: la auditoria de firmware no puede escribir. El unico tipo que abre
+    # ficheros no tiene operacion de escritura, el lector fisico no tiene wrmsr ni
+    # escritura de memoria, y en todo el crate no hay una sola apertura para
+    # escribir. Por lo que FALTA, como el resto de esta invariante.
+    if awk '/^impl LecturaSolo/,/^}/' crates/aegis-fwaudit/src/solo_lectura.rs 2>/dev/null \
+        | grep -qE 'fn +(escribir|write|truncar|set_len)'; then
+        AUSENCIAS+=("aegis-fwaudit::LecturaSolo tiene una operacion de escritura")
+    fi
+    if awk '/^pub trait LectorFisico/,/^}/' crates/aegis-fwaudit/src/msr.rs 2>/dev/null \
+        | grep -qE 'fn +(escribir|write|wrmsr)'; then
+        AUSENCIAS+=("aegis-fwaudit::LectorFisico tiene una operacion de escritura")
+    fi
+    # Solo el codigo de produccion: lo que va antes de `#[cfg(test)]`. Las
+    # pruebas SI crean ficheros temporales, y eso no es el producto.
+    for f in crates/aegis-fwaudit/src/*.rs; do
+        if awk '/#\[cfg\(test\)\]/{exit} {print}' "$f" \
+            | grep -vE '^\s*//' \
+            | grep -qE '\.(write|append|create|truncate)\(true\)|O_WRONLY|O_RDWR|fs::write\(|File::create\(|OpenOptions::new\(\)\.write'; then
+            AUSENCIAS+=("aegis-fwaudit abre algo para escribir en $(basename "$f")")
+        fi
+    done
     if [ ${#AUSENCIAS[@]} -eq 0 ] && [ "$SALIDAS" = "2" ]; then
-        veredicto 12 "la ausencia es la frontera" si "3 enumerados sin su variante peligrosa; la salida de la detonacion tiene 2 y ninguna es red real"
+        veredicto 12 "la ausencia es la frontera" si "4 tipos sin su variante peligrosa (la auditoria de firmware no puede escribir); la salida de la detonacion tiene 2 y ninguna es red real"
         porque "Es la unica clase de garantia que no depende de que el codigo de"
         porque "comprobacion este bien: si la variante no existe, no hay configuracion,"
         porque "error ni atacante que la produzca. Por eso se verifica por lo que FALTA."
