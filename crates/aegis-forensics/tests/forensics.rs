@@ -216,18 +216,33 @@ fn el_volcado_en_vivo_lee_la_memoria_real_del_proceso_sin_pararlo() {
     // reconocible; luego se vuelca la memoria del propio proceso y se comprueba
     // que el patron aparece en el volcado. Es exactamente el camino que sigue el
     // producto contra un proceso ajeno, sobre uno mismo por seguridad.
+    //
+    // LA REGION VA ENTRE DOS PAGINAS DE GUARDA, y no es un adorno. El kernel
+    // FUNDE mapeos anonimos contiguos con los mismos permisos en una sola region.
+    // Las demas pruebas de este binario corren en paralelo y reservan memoria, asi
+    // que a veces la region de la prueba acababa fundida con otra de varios
+    // megabytes. El volcado lee cada region desde su inicio hasta el tope de 2 MB
+    // que declara la politica (y la marca como parcial): si el marcador caia mas
+    // alla, no se leia. El producto hacia lo que su politica dice; la prueba
+    // suponia que su region quedaba aislada, y no lo garantizaba. Con una pagina
+    // PROT_NONE a cada lado, los permisos de los vecinos son distintos y el kernel
+    // no puede fundirla con nada.
+    let pagina = 4096;
     let len = 64 * 1024;
-    let addr = unsafe {
+    let base = unsafe {
         libc::mmap(
             std::ptr::null_mut(),
-            len,
-            libc::PROT_READ | libc::PROT_WRITE,
+            len + 2 * pagina,
+            libc::PROT_NONE,
             libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
             -1,
             0,
         )
     };
-    assert_ne!(addr, libc::MAP_FAILED, "mmap fallo");
+    assert_ne!(base, libc::MAP_FAILED, "mmap fallo");
+    let addr = unsafe { base.cast::<u8>().add(pagina).cast::<libc::c_void>() };
+    let r = unsafe { libc::mprotect(addr, len, libc::PROT_READ | libc::PROT_WRITE) };
+    assert_eq!(r, 0, "mprotect fallo");
     let marca = b"AEGIS-FORENSICS-MARCADOR-UNICO-9f3a";
     unsafe {
         std::ptr::copy_nonoverlapping(marca.as_ptr(), addr as *mut u8, marca.len());
@@ -248,7 +263,7 @@ fn el_volcado_en_vivo_lee_la_memoria_real_del_proceso_sin_pararlo() {
     );
 
     unsafe {
-        libc::munmap(addr, len);
+        libc::munmap(base, len + 2 * pagina);
     }
 }
 
