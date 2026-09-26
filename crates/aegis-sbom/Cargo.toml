@@ -1,0 +1,43 @@
+[package]
+name = "aegis-sbom"
+description = "AegisPosture: inventario de componentes (SBOM) de paquetes, bibliotecas, binarios, contenedores y dependencias de aplicacion, correlacion con OSV y alcanzabilidad en ejecucion — cargado, alcanzable y expuesto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# La base de datos de paquetes del sistema ya la lee `aegis-vuln`, con su
+# comparador de versiones de Debian. Un segundo lector de dpkg al lado seria el
+# primer paso para que el SBOM y el escaner de vulnerabilidades discreparan sobre
+# que hay instalado en la misma maquina.
+aegis-vuln = { path = "../aegis-vuln" }
+# El componente, el fichero y el proceso son entidades del modelo unico
+# (FASE 79): un hallazgo de alcanzabilidad habla del MISMO proceso que el resto
+# del producto, no de un pid suelto.
+aegis-entidad = { path = "../aegis-entidad" }
+# El grafo de llamadas de la FASE 85, para la pregunta «¿la ruta vulnerable es
+# alcanzable?». Se reutiliza el desensamblador del producto en vez de otro.
+aegis-disasm = { path = "../aegis-disasm" }
+# ELF: bibliotecas enlazadas, simbolos importados, secciones de metadatos de
+# compilacion. Ya esta en la linea base del agente.
+goblin = "0.9"
+# OSV es JSON, y el `package-lock.json` tambien. Ya esta en la linea base.
+serde_json = "1"
+# El identificador de un fichero en todo el producto es su SHA-256.
+sha2 = "0.10"
+# `cargo-auditable` guarda la lista de dependencias de un binario de Rust
+# comprimida con zlib, y las capas de una imagen de contenedor van en gzip. Es
+# Rust puro con `forbid(unsafe_code)`, y ya estaba en el arbol como dependencia de
+# `flate2`: se usa directamente para no traer `flate2` y su motor en C.
+miniz_oxide = "0.9"
+thiserror = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Los mapas de memoria y los sockets atribuidos a proceso: la telemetria que el
+# agente YA tiene, que es de donde salen las respuestas de alcanzabilidad.
+aegis-scal = { path = "../aegis-scal" }

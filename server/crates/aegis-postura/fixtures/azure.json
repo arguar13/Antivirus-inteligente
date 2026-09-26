@@ -1,0 +1,128 @@
+{
+  "records": [
+    {
+      "time": "2026-09-10T14:00:00.1234567Z",
+      "resourceId": "/SUBSCRIPTIONS/0B1F6471-1BF0-4DDA-AEC3-CB9272F09590/RESOURCEGROUPS/RG-PROD/PROVIDERS/MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/4F0A7C2E-9B1D-4E55-A6B1-7E0C3D2A1F10",
+      "operationName": "MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/WRITE",
+      "category": "Administrative",
+      "resultType": "Start",
+      "resultSignature": "Started.",
+      "durationMs": "0",
+      "callerIpAddress": "198.51.100.20",
+      "correlationId": "c0a1b2c3-0001-4d5e-8f90-a1b2c3d4e5f6",
+      "identity": {
+        "authorization": {"scope": "/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590/resourceGroups/rg-prod/providers/Microsoft.Authorization/roleAssignments/4f0a7c2e-9b1d-4e55-a6b1-7e0c3d2a1f10", "action": "Microsoft.Authorization/roleAssignments/write", "evidence": {"role": "Owner", "roleAssignmentScope": "/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590", "principalType": "User"}},
+        "claims": {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "operador@contoso.com", "http://schemas.microsoft.com/identity/claims/objectidentifier": "11111111-2222-3333-4444-555555555555", "appid": "c44b4083-3bb0-49c1-b47d-974e53cbdf3c"}
+      },
+      "level": "Information",
+      "location": "global",
+      "properties": {
+        "requestbody": "{\"Id\":\"4f0a7c2e-9b1d-4e55-a6b1-7e0c3d2a1f10\",\"Properties\":{\"PrincipalId\":\"9f8e7d6c-5b4a-4321-8765-0fedcba98765\",\"PrincipalType\":\"User\",\"RoleDefinitionId\":\"/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590/providers/Microsoft.Authorization/roleDefinitions/8e3af657-a8ff-443c-a75c-2fe8c4bcb635\",\"Scope\":\"/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590/resourceGroups/rg-prod\",\"Condition\":null,\"ConditionVersion\":null}}",
+        "eventCategory": "Administrative",
+        "entity": "/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590/resourceGroups/rg-prod/providers/Microsoft.Authorization/roleAssignments/4f0a7c2e-9b1d-4e55-a6b1-7e0c3d2a1f10",
+        "message": "Microsoft.Authorization/roleAssignments/write",
+        "hierarchy": "72f988bf-86f1-41af-91ab-2d7cd011db47/0b1f6471-1bf0-4dda-aec3-cb9272f09590"
+      }
+    },
+    {
+      "time": "2026-09-10T14:00:01.9876543Z",
+      "resourceId": "/SUBSCRIPTIONS/0B1F6471-1BF0-4DDA-AEC3-CB9272F09590/RESOURCEGROUPS/RG-PROD/PROVIDERS/MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/4F0A7C2E-9B1D-4E55-A6B1-7E0C3D2A1F10",
+      "operationName": "MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/WRITE",
+      "category": "Administrative",
+      "resultType": "Success",
+      "resultSignature": "Created",
+      "durationMs": "1864",
+      "callerIpAddress": "198.51.100.20",
+      "correlationId": "c0a1b2c3-0001-4d5e-8f90-a1b2c3d4e5f6",
+      "identity": {
+        "claims": {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "operador@contoso.com", "http://schemas.microsoft.com/identity/claims/objectidentifier": "11111111-2222-3333-4444-555555555555"}
+      },
+      "level": "Information",
+      "location": "global",
+      "properties": {
+        "statusCode": "Created",
+        "serviceRequestId": "e1f2a3b4-0001-4c5d-9e8f-001122334455",
+        "eventCategory": "Administrative",
+        "entity": "/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590/resourceGroups/rg-prod/providers/Microsoft.Authorization/roleAssignments/4f0a7c2e-9b1d-4e55-a6b1-7e0c3d2a1f10",
+        "message": "Microsoft.Authorization/roleAssignments/write",
+        "hierarchy": "72f988bf-86f1-41af-91ab-2d7cd011db47/0b1f6471-1bf0-4dda-aec3-cb9272f09590"
+      }
+    },
+    {
+      "time": "2026-09-11T09:00:00.0000000Z",
+      "resourceId": "/SUBSCRIPTIONS/0B1F6471-1BF0-4DDA-AEC3-CB9272F09590/RESOURCEGROUPS/RG-PROD/PROVIDERS/MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/77777777-0000-4000-8000-000000000077",
+      "operationName": "MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/WRITE",
+      "category": "Administrative",
+      "resultType": "Start",
+      "resultSignature": "Started.",
+      "callerIpAddress": "203.0.113.70",
+      "correlationId": "c0a1b2c3-0002-4d5e-8f90-a1b2c3d4e5f6",
+      "identity": {"claims": {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "invitado@contoso.com", "http://schemas.microsoft.com/identity/claims/objectidentifier": "22222222-3333-4444-5555-666666666666"}},
+      "level": "Information",
+      "location": "global",
+      "properties": {
+        "requestbody": "{\"Properties\":{\"PrincipalId\":\"22222222-3333-4444-5555-666666666666\",\"RoleDefinitionId\":\"/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590/providers/Microsoft.Authorization/roleDefinitions/b24988ac-6180-42a0-ab88-20f7382dd24c\",\"Scope\":\"/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590\"}}",
+        "eventCategory": "Administrative"
+      }
+    },
+    {
+      "time": "2026-09-11T09:00:01.0000000Z",
+      "resourceId": "/SUBSCRIPTIONS/0B1F6471-1BF0-4DDA-AEC3-CB9272F09590/RESOURCEGROUPS/RG-PROD/PROVIDERS/MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/77777777-0000-4000-8000-000000000077",
+      "operationName": "MICROSOFT.AUTHORIZATION/ROLEASSIGNMENTS/WRITE",
+      "category": "Administrative",
+      "resultType": "Failure",
+      "resultSignature": "Forbidden",
+      "callerIpAddress": "203.0.113.70",
+      "correlationId": "c0a1b2c3-0002-4d5e-8f90-a1b2c3d4e5f6",
+      "identity": {"claims": {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "invitado@contoso.com"}},
+      "level": "Error",
+      "location": "global",
+      "properties": {"statusCode": "Forbidden", "eventCategory": "Administrative"}
+    },
+    {
+      "time": "2026-09-12T16:30:00.0000000Z",
+      "resourceId": "/SUBSCRIPTIONS/0B1F6471-1BF0-4DDA-AEC3-CB9272F09590/RESOURCEGROUPS/RG-PROD/PROVIDERS/MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/NSG-WEB/SECURITYRULES/PERMITIR-RDP",
+      "operationName": "MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/SECURITYRULES/WRITE",
+      "category": "Administrative",
+      "resultType": "Start",
+      "resultSignature": "Started.",
+      "callerIpAddress": "198.51.100.20",
+      "correlationId": "c0a1b2c3-0003-4d5e-8f90-a1b2c3d4e5f6",
+      "identity": {"claims": {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "operador@contoso.com", "http://schemas.microsoft.com/identity/claims/objectidentifier": "11111111-2222-3333-4444-555555555555"}},
+      "level": "Information",
+      "location": "westeurope",
+      "properties": {
+        "requestbody": "{\"name\":\"permitir-rdp\",\"properties\":{\"protocol\":\"Tcp\",\"sourcePortRange\":\"*\",\"destinationPortRange\":\"3389\",\"sourceAddressPrefix\":\"*\",\"destinationAddressPrefix\":\"*\",\"access\":\"Allow\",\"priority\":100,\"direction\":\"Inbound\",\"sourcePortRanges\":[],\"destinationPortRanges\":[],\"sourceAddressPrefixes\":[],\"destinationAddressPrefixes\":[]}}",
+        "eventCategory": "Administrative"
+      }
+    },
+    {
+      "time": "2026-09-12T16:30:04.0000000Z",
+      "resourceId": "/SUBSCRIPTIONS/0B1F6471-1BF0-4DDA-AEC3-CB9272F09590/RESOURCEGROUPS/RG-PROD/PROVIDERS/MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/NSG-WEB/SECURITYRULES/PERMITIR-RDP",
+      "operationName": "MICROSOFT.NETWORK/NETWORKSECURITYGROUPS/SECURITYRULES/WRITE",
+      "category": "Administrative",
+      "resultType": "Success",
+      "resultSignature": "Succeeded.OK",
+      "callerIpAddress": "198.51.100.20",
+      "correlationId": "c0a1b2c3-0003-4d5e-8f90-a1b2c3d4e5f6",
+      "identity": {"claims": {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "operador@contoso.com", "http://schemas.microsoft.com/identity/claims/objectidentifier": "11111111-2222-3333-4444-555555555555"}},
+      "level": "Information",
+      "location": "westeurope",
+      "properties": {"statusCode": "OK", "eventCategory": "Administrative"}
+    },
+    {
+      "time": "2026-09-18T03:10:00.0000000Z",
+      "resourceId": "/SUBSCRIPTIONS/0B1F6471-1BF0-4DDA-AEC3-CB9272F09590/PROVIDERS/MICROSOFT.INSIGHTS/DIAGNOSTICSETTINGS/ENVIO-A-SIEM",
+      "operationName": "MICROSOFT.INSIGHTS/DIAGNOSTICSETTINGS/DELETE",
+      "category": "Administrative",
+      "resultType": "Success",
+      "resultSignature": "Succeeded.",
+      "callerIpAddress": "203.0.113.71",
+      "correlationId": "c0a1b2c3-0004-4d5e-8f90-a1b2c3d4e5f6",
+      "identity": {"claims": {"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name": "operador@contoso.com", "http://schemas.microsoft.com/identity/claims/objectidentifier": "11111111-2222-3333-4444-555555555555"}},
+      "level": "Information",
+      "location": "global",
+      "properties": {"statusCode": "OK", "eventCategory": "Administrative", "entity": "/subscriptions/0b1f6471-1bf0-4dda-aec3-cb9272f09590/providers/microsoft.insights/diagnosticSettings/envio-a-siem"}
+    }
+  ]
+}

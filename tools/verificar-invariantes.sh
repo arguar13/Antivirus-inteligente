@@ -344,6 +344,12 @@ if toca 9; then
         # puede construir para ellos, un perfil malo se retira solo, y el modo
         # obligatorio no se puede construir sin confirmacion.
         "el confinamiento como denegacion de servicio;raiz|aegis-confinar|--test confinamiento_real|el_motor_no_puede un_perfil_malo+raiz|aegis-confinar|--lib|despliegue objetivo+raiz|aegis-confinar|--doc|"
+        # El escaner de vulnerabilidades (FASE 94) produce el mapa que un
+        # atacante querria: que version de que biblioteca hay en que maquina. No
+        # sale sin pasar por el estrangulamiento: por ningun canal hacia fuera de
+        # la organizacion, nunca por el enjambre, y escribirlo por otro camino
+        # no compila.
+        "el escaner como reconocimiento;servidor|aegis-postura|--test autoataque_inventario|+servidor|aegis-postura|--doc|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
@@ -468,8 +474,28 @@ if toca 12; then
     if grep -qE 'impl Default for Confirmacion|derive\(.*Default.*\)\]\s*$' <(grep -B3 'pub struct Confirmacion' crates/aegis-confinar/src/modo.rs 2>/dev/null); then
         AUSENCIAS+=("aegis-confinar::Confirmacion tiene valor por defecto")
     fi
+    # FASE 94: el inventario de una maquina es el mapa que un atacante querria
+    # antes de elegir por donde entrar. En el agente NO sabe salir: sin
+    # serializador, sin CycloneDX ni SPDX, sin sockets y sin escribir ficheros.
+    # Los formatos de salida viven en el plano de control, detras del juez de
+    # difusion. Leer JSON si puede —OSV es JSON—; escribirlo, no.
+    for f in crates/aegis-sbom/src/*.rs; do
+        if awk '/#\[cfg\(test\)\]/{exit} {print}' "$f" \
+            | grep -vE '^\s*//' \
+            | grep -qE 'impl +(serde::)?Serialize|derive\([^)]*Serialize|serde_json::to_|to_writer|fn +[a-z_]*(cyclonedx|spdx)|TcpStream|UdpSocket|TcpListener|fs::write\(|File::create\(|\.write\(true\)'; then
+            AUSENCIAS+=("aegis-sbom puede sacar el inventario en $(basename "$f")")
+        fi
+    done
+    if grep -qE '^serde *=' crates/aegis-sbom/Cargo.toml 2>/dev/null; then
+        AUSENCIAS+=("aegis-sbom depende de serde: el inventario podria derivar un serializador")
+    fi
+    # Y en el plano de control, los formatos son privados: lo unico publico es
+    # `exportar`, que pasa por el juez de difusion.
+    if grep -qE 'pub(\([a-z]+\))? +fn +(cyclonedx|spdx)' server/crates/aegis-postura/src/salida.rs 2>/dev/null; then
+        AUSENCIAS+=("aegis-postura expone CycloneDX o SPDX sin pasar por el juez de difusion")
+    fi
     if [ ${#AUSENCIAS[@]} -eq 0 ] && [ "$SALIDAS" = "2" ]; then
-        veredicto 12 "la ausencia es la frontera" si "6 tipos sin su variante peligrosa (la auditoria de firmware no puede escribir; el confinamiento no nace obligatorio ni se confirma sin autor); la salida de la detonacion tiene 2 y ninguna es red real"
+        veredicto 12 "la ausencia es la frontera" si "7 tipos sin su variante peligrosa (la auditoria de firmware no puede escribir; el confinamiento no nace obligatorio ni se confirma sin autor; el inventario del agente no sabe salir de la maquina); la salida de la detonacion tiene 2 y ninguna es red real"
         porque "Es la unica clase de garantia que no depende de que el codigo de"
         porque "comprobacion este bien: si la variante no existe, no hay configuracion,"
         porque "error ni atacante que la produzca. Por eso se verifica por lo que FALTA."

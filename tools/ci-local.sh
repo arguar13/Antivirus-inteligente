@@ -1004,6 +1004,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "confinar" ]; then
     fi
 fi
 
+# AegisPosture (FASE 94): inventario de componentes (SBOM) con alcanzabilidad
+# EN EJECUCION —cargado, alcanzable, expuesto, cada una tri-estado y sacada de
+# la telemetria que el agente ya tiene— y postura de nube reconstruida de los
+# eventos. Lo primero, el autoataque: el inventario es el mapa que un atacante
+# querria, y no sale sin pasar por el juez de difusion. Despues, contra la
+# maquina real: dpkg-query, objcopy, procesos compilados en la prueba, el
+# presupuesto de memoria medido y un CycloneDX que lee otra herramienta.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "postura" ]; then
+    printf '%s==>%s AegisPosture · SBOM con alcanzabilidad en ejecucion y postura de nube\n' "$GRIS" "$FIN"
+    if ./tools/verificar-postura.sh > $LOGS/aegis-postura-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-postura-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-postura-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
 # un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
 # que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la

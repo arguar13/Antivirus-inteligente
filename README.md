@@ -238,7 +238,7 @@ drivers/linux/aegis-bpf/      Sondas eBPF CO-RE + filtro XDP (C, libbpf) — 2.7
 kernel/windows/aegis/         Minifilter + ObCallbacks + politica (C, WDK) — 887 lineas
 deploy/terraform/             Aprovisionamiento del plano de control
 fuzz/                         Objetivos de libFuzzer sobre los analizadores
-tools/                        40 puertas de verificacion + ABI check + CI local
+tools/                        41 puertas de verificacion + ABI check + CI local
 docs/                         Blueprint arquitectonico, una pagina por fase
 ```
 
@@ -269,7 +269,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 
 #### Workspace del agente (`crates/`) — corre en cada endpoint, con privilegios
 
-**65 crates · 2904 pruebas**
+**66 crates · 2980 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia | `forbid(unsafe)` |
 |---|---|---:|---|---|
@@ -325,6 +325,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-resp` | Motor de respuesta activa de AegisCore: terminacion, cuarentena y aislamiento | 22 | — | — |
 | `aegis-rollback` | Reversion de ransomware: copia-sombra cifrada y restauracion en milisegundos (FASE 50) | 6 | — | — |
 | `aegis-sandbox` | Aislamiento preventivo con Landlock y seccomp-bpf, y la supervision por notificacion de seccomp y los perfiles aprendidos (lista blanca, reglas de Landlock y conjunto limite de capacidades) sobre los que se construye el confinamiento | 30 | `verificar-confinar.sh` | — |
+| `aegis-sbom` | Inventario de componentes (SBOM) de paquetes, bibliotecas, binarios (`cargo-auditable`, Go), contenedores capa a capa y dependencias de aplicacion; correlacion con OSV y alcanzabilidad en ejecucion tri-estado —cargado, alcanzable por el grafo de llamadas, expuesto en red—; sin serializador: el inventario no sabe salir del agente | 72 | `verificar-postura.sh` | sí |
 | `aegis-scal` | Capa de abstraccion del nucleo del sistema (SCAL): telemetria y control independientes del sistema operativo | 52 | — | — |
 | `aegis-scan` | Motor de deteccion profunda de AegisCore: YARA sobre ficheros y memoria de procesos | 27 | `verificar-memscanner.sh` | sí |
 | `aegis-selfdefense` | Autodefensa legitima: OTP firmado del Control Plane, decision de tamper, clasificacion ELAM y requisitos PPL | 42 | — | sí |
@@ -335,13 +336,13 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-update` | Actualizacion firmada (hibrida Ed25519+ML-DSA-65) con rollback atomico | 18 | `verificar-resiliencia.sh` | sí |
 | `aegis-vmi` | Introspeccion de maquina virtual (VMI) DEFENSIVA: EPT y lectura de estructuras del kernel desde memoria fisica para detectar rootkits por debajo del SO |  29  | `verificar-vmi.sh` | — |
 | `aegis-volcado` | Forense de memoria: mapa de regiones, codigo sin respaldo de fichero, capacidades del codigo que solo existe en memoria, y vista cruzada de tres caminos para procesos ocultos. Sin ninguna operacion de escritura | 54 | `verificar-volcado.sh` | sí |
-| `aegis-vuln` | Escaner de postura y vulnerabilidades del host para AegisCore | 45 | — | sí |
+| `aegis-vuln` | Escaner de postura y vulnerabilidades del host para AegisCore, que cruza cada paquete por su nombre binario y por su paquete fuente (FASE 94) | 49 | `verificar-postura.sh` | sí |
 | `aegis-watchdog` | Watchdog de alta disponibilidad del agente y el driver | 8 | — | — |
 | `aegis-wire` | Diseccion semantica de protocolos: convierte trafico crudo en hechos, con reensamblado TCP resistente a evasion | 191 | `verificar-wire.sh` | sí |
 
 #### Workspace del plano de control (`server/crates/`)
 
-**14 crates · 986 pruebas**
+**15 crates · 1054 pruebas**
 
 | Crate | Qué hace | Pruebas | Puerta propia |
 |---|---|---:|---|
@@ -351,10 +352,11 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | `aegis-enrich` | Orquestacion de enriquecimiento con declaracion obligatoria de exposicion de datos y modo sin salida | 125 | `verificar-enrich.sh` |
 | `aegis-itdr` | Deteccion y respuesta a amenazas de identidad (ITDR): Kerberoasting, Golden/Silver Ticket y grafo de identidad con centralidad | 25 | `verificar-itdr.sh` |
 | `aegis-orchestrator` | Maquina de estados transaccional de remediacion de flota; ante una deteccion critica lanza en paralelo el playbook de respuesta, resiliente a fallos parciales e idempotente en el reintento | 6 | `verificar-orchestrator.sh` |
-| `aegis-pipeline` | Canalizacion de registros del plano de control: nubes, deduplicacion, orden por ocurrencia y cuotas por inquilino | 56 | `verificar-ingest.sh` |
+| `aegis-pipeline` | Canalizacion de registros del plano de control: nubes, deduplicacion, orden por ocurrencia y cuotas por inquilino | 58 | `verificar-ingest.sh` |
+| `aegis-postura` | Postura de nube reconstruida de los eventos del plano de control —privilegios excesivos, almacenamiento publico, claves sin rotar, registro apagado, red abierta— con evidencia por evento y entidad; y el unico camino por el que sale un SBOM (CycloneDX, SPDX), detras del juez de difusion | 65 | `verificar-postura.sh` |
 | `aegis-predict` | Caminos de ataque mas probables, radio de explosion y contencion preventiva acotada | 53 | `verificar-predict.sh` |
 | `aegis-ruleforge` | La fabrica de contenido: compila el corpus mundial de deteccion en artefactos firmados | 181 | `verificar-ruleforge.sh` |
-| `aegis-scale` | Plano de control para 100.000 agentes: particionado de flota, conexiones, base de datos y actualizacion progresiva | 61 | `verificar-scale.sh` |
+| `aegis-scale` | Plano de control para 100.000 agentes: particionado de flota, conexiones, base de datos y actualizacion progresiva | 62 | `verificar-scale.sh` |
 | `aegis-server` | Plano de control de AegisCore: ingesta de flota gRPC/mTLS y API de administracion | 122 | — |
 | `aegis-share` | Plataforma STIX/TAXII de inteligencia con difusion controlada, federacion y procedencia reversible | 120 | `verificar-share.sh` |
 | `aegis-tejido` | El tejido de AegisFabric: inventario de veredictos, traduccion a la escala unica y el circuito completo de extremo a extremo | 38 | `verificar-fabric.sh` |
@@ -448,6 +450,7 @@ escrita. No hay tercera opción, y `tools/verificar-invariantes.sh` lo comprueba
 | 83 | [AegisLure: red de señuelos atribuible](docs/83-senuelos-atribuibles.md) — diecinueve señuelos que conversan varios turnos sin nada que encarcelar, cero falsos positivos por construcción, amplificación acotada a x1 en UDP por el envoltorio, y un token distinto por señuelo y por destino: cuando una credencial aparece, el sitio del que salió está dentro de ella |
 | 84 | [AegisFirmware+: auditoría de plataforma de grado CHIPSEC, sin poder escribir](docs/84-auditoria-de-plataforma.md) — de dos superficies de firmware a **doce**: protecciones de la flash, SMM, chipset y MSR, IOMMU, mitigaciones, microcódigo frente al publicado por el fabricante, variables UEFI, AML y la cadena de arranque **explicada** medida a medida, con el texto de cada evento comprobado contra su resumen. La escritura es **imposible de expresar** —cinco `compile_fail` con código de error— y se ejerce contra el kernel en seis superficies reales, con el errno que el kernel da de verdad y no el que pedía el enunciado. Compromiso y exposición van separados en el tipo: al árbitro sólo llegan los compromisos. El AML real se coteja en cada `make ci` contra `iasl` (2457 métodos, idéntico) y `acpiexec` (7 cargados, idéntico); frente a CHIPSEC, 21 módulos cubiertos, 3 parciales, 6 no cubiertos —escritos como derrota— y 6 excluidos por escribir o atacar |
 | 85 | [AegisConfine: confinamiento que se aprende, se ensaya y se retira solo](docs/85-confinamiento-aprendido.md) — SELinux, AppArmor, gVisor y Kata saben confinar; lo que no resuelven es **de dónde sale la política** ni qué pasa cuando rompe algo. Aquí se **aprende** del programa real con la notificación de usuario de seccomp (sin perder ni una llamada y sin que el proceso lo note), se **ensaya** en permisivo dejando pasar todo y anotando lo que se habría bloqueado, se **impone** sólo con una confirmación con autor y motivo —el tipo no admite otra forma— y un **ensayo limpio**, y si rompe la producción **se retira solo**, de forma pegajosa. Contra el kernel real: lo aprendido funciona, el `socket` no aprendido lo bloquea seccomp y el fichero no aprendido Landlock, un proceso de root arranca sólo con sus cinco capacidades implícitas, y un perfil roto se retira a los tres fallos. Sobre `ls` real, el perfil cierra el **91,7 %** de la superficie de llamadas. El motor no puede ni construir el objetivo para el propio agente, `init` o un activo protegido |
+| 86 | [AegisPosture: vulnerabilidades que importan, SBOM y postura de nube](docs/86-postura-y-alcanzabilidad.md) — Trivy, Grype y Syft dicen que **hay** una vulnerabilidad; aquí se dice si **importa**: si el componente está **cargado** en un proceso vivo, si la función vulnerable es **alcanzable** por el grafo de llamadas desde las raíces del programa y si el servicio está **expuesto** en red, cada respuesta tri-estado y sacada de telemetría que el agente ya tenía. Medido en esta máquina: de las 15 899 vulnerabilidades de Trivy, 12 319 están en componentes que ningún proceso carga; el inventario completo cabe en 38 MiB frente a los 0,9–5,5 GB de las otras. El SBOM no sale del agente: se exporta solo desde el plano de control, detrás del juez de difusión, marcado `TLP:AMBER+STRICT`, y Trivy lo lee. Y la postura de nube, reconstruida de los eventos que ya se ingerían, sin credenciales de lectura en la nube del cliente. |
 | — | [Estado del CI remoto](docs/07-estado-ci.md) — diagnóstico del bloqueo de GitHub Actions |
 
 ## Desarrollo

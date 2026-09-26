@@ -563,6 +563,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-sbom"
+version = "0.1.0"
+dependencies = [
+ "aegis-disasm",
+ "aegis-entidad",
+ "aegis-scal",
+ "aegis-vuln",
+ "goblin",
+ "miniz_oxide",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-scal"
 version = "0.1.0"
 dependencies = [

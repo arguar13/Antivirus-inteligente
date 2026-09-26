@@ -1,0 +1,40 @@
+[package]
+name = "aegis-postura"
+description = "Postura de nube reconstruida de los eventos del plano de control: privilegios excesivos, almacenamiento publico, claves sin rotar, registro apagado y red abierta, cada hallazgo con su evento y su entidad"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# LA ENTRADA ES LA QUE YA HAY.
+#
+# Este crate no habla con ninguna API de nube: no tiene credenciales de lectura
+# en la cuenta del cliente ni las quiere. Lee los eventos que `aegis-pipeline`
+# ya normaliza desde CloudTrail, Azure Activity y GCP Audit. Depender de ese
+# crate —y no copiar su analizador— es lo que garantiza que el estado que se
+# reconstruye aqui sale de EXACTAMENTE los mismos eventos que ve el resto del
+# producto.
+aegis-pipeline = { path = "../aegis-pipeline" }
+# El esquema es uno solo (ver aegis-pipeline). Sin la caracteristica `endpoint`:
+# el plano de control no lleva el diario ni el presupuesto del agente.
+aegis-ingest = { path = "../../../crates/aegis-ingest", default-features = false }
+# Cada hallazgo sale sobre una entidad del modelo unico del producto (FASE 79):
+# una identidad es una `Cuenta`, un recurso de nube una `Ubicacion`. Un
+# identificador propio seria una regresion de esa fase.
+aegis-entidad = { path = "../../../crates/aegis-entidad" }
+# Los documentos de politica y los cuerpos de Azure llegan como texto JSON
+# dentro del evento; serde_json ya esta en este arbol por aegis-pipeline.
+serde_json = "1"
+# EL INVENTARIO DE COMPONENTES SOLO SALE DE AQUI (FASE 94). El agente lo
+# construye (`aegis-sbom`) y no sabe escribirlo; los formatos de salida,
+# CycloneDX y SPDX, viven en este crate, privados, detras del juez de difusion
+# de `aegis-share`: el unico estrangulamiento del producto.
+aegis-sbom = { path = "../../../crates/aegis-sbom" }
+aegis-share = { path = "../aegis-share" }
+# El identificador derivado del documento exportado.
+sha2 = "0.10"

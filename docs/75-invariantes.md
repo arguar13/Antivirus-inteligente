@@ -30,17 +30,17 @@ afirmarse.
 | # | Invariante | Cómo se comprueba |
 |---:|---|---|
 | 1 | **Presupuesto** | El agente arranca de verdad y se mide su RSS contra el reparto de su perfil y contra la línea base; y el kernel lo impone desde fuera (`MemoryHigh` 321 MiB, `MemoryMax` 482 MiB) |
-| 2 | **Seguridad de memoria** | Todo crate del agente **o** declara `#![forbid(unsafe_code)]` **o** está en `tools/lineabase-unsafe.txt` con su razón escrita — hoy **33 y 22** |
-| 3 | **Árbol de dependencias** | Las **39** dependencias directas del agente están en `tools/lineabase-agente.txt` con su justificación |
+| 2 | **Seguridad de memoria** | Todo crate del agente **o** declara `#![forbid(unsafe_code)]` **o** está en `tools/lineabase-unsafe.txt` con su razón escrita — hoy **44 y 22** |
+| 3 | **Árbol de dependencias** | Las **40** dependencias directas del agente están en `tools/lineabase-agente.txt` con su justificación |
 | 4 | **Determinismo** | El circuito completo repetido: mismo veredicto, mismo caso, misma propuesta de contención |
 | 5 | **Explicabilidad** | Se recorren **todas** las combinaciones del árbitro exigiendo frase no vacía |
 | 6 | **Tri-estado** | Los **siete** enumerados de veredicto tienen su variante de duda, y las pruebas que la ejercen pasan |
 | 7 | **Autonomía** | `tests/autonomia.rs`: **7** pruebas con el enlace cortado de verdad, y el producto entero sigue dando veredicto |
 | 8 | **Los cinco frenos** | Las pruebas de contención de `aegis-predict`, y otra vez sobre el grafo del circuito completo |
-| 9 | **Autoataque** | Siete capacidades usadas **contra** el producto, con **205** pruebas |
+| 9 | **Autoataque** | Doce capacidades usadas **contra** el producto, con **259** pruebas |
 | 10 | **Doctrina del enjambre** | La carga tiene dos variantes y **ninguna es una orden** |
 | 11 | **Un solo estrangulamiento** | Los cuatro canales de salida pasan por el mismo juez |
-| 12 | **La ausencia es la frontera** | Tres enumerados **sin** su variante peligrosa |
+| 12 | **La ausencia es la frontera** | Siete tipos **sin** su variante peligrosa (entre ellos: la auditoría de firmware no puede escribir, el confinamiento no nace obligatorio, el inventario del agente no sabe salir de la máquina) |
 | 13 | **El identificador único** | Once subsistemas, un identificador (FASE 79) |
 
 ## 1 · Presupuesto: por qué no son 46 080 KB
