@@ -59,19 +59,23 @@
 #![forbid(unsafe_code)]
 
 pub mod abi;
+pub mod clasificacion;
 pub mod elam;
 pub mod otp;
 pub mod ppl;
 pub mod replay;
 pub mod resiliencia;
 pub mod tamper;
+pub mod vigilancia;
 
+pub use clasificacion::{ClaseManipulacion, EvidenciaManipulacion};
 pub use elam::{ClasificacionElam, PoliticaElam};
 pub use otp::{OperacionProtegida, OrdenAutorizada, Otp};
 pub use ppl::{NivelProteccion, RequisitosPpl};
 pub use replay::RegistroOtp;
 pub use resiliencia::{AegisResilience, MotivoDetencion, ResultadoDetencion, SenalDetencion};
 pub use tamper::{decidir, ContextoTamper, Solicitante, Veredicto};
+pub use vigilancia::{Centinela, SenalMuerteAgente, VigilanciaMutua};
 
 use thiserror::Error;
 

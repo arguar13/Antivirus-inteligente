@@ -383,6 +383,12 @@ if toca 9; then
         # SinDatos (un anillo lleno no es «limpio»), y la degradacion por
         # presupuesto conserva lo de mas valor diciendo que apago.
         "el sensor: inundacion de eventos como ceguera;raiz|aegis-sensor|--test autoataque|"
+        # La integridad y la autodefensa (FASE 104) vueltas del reves: reescribir
+        # la linea base (no cuela: la firma no verifica), inundar de ruido (no
+        # cuela: se mira por significado), y manipular el agente —matar, borrar,
+        # cegar, desviar, degradar— (cada uno con su senal, y la desinstalacion
+        # autorizada del dueno sigue funcionando: invariante 10).
+        "la integridad y la autodefensa vueltas del reves;raiz|aegis-integridad|--test autoataque|+raiz|aegis-selfdefense|--test autoataque_manipulacion|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0

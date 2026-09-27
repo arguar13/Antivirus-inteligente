@@ -963,6 +963,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "sensor" ]; then
     fi
 fi
 
+# AegisIntegrity (FASE 104): integridad sin carrera y por significado, que
+# SUSTITUYE a aegis-fim. Lo distintivo, probado como logica pura: el cambio lleva
+# su AUTOR del gancho LSM (sin relectura de /proc, por ausencia), la configuracion
+# se mira por SIGNIFICADO (un comentario no es alerta), la linea base la FIRMA el
+# plano de control y se SELLA contra el TPM (root no basta), y la vigilancia mutua
+# a tres bandas protege la capacidad de avisar dejando intacta la desinstalacion
+# autorizada del dueno (invariante 10).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "integridad" ]; then
+    printf '%s==>%s AegisIntegrity · sin carrera y con autor, por significado, linea base firmada y sellada\n' "$GRIS" "$FIN"
+    if ./tools/verificar-integridad.sh > $LOGS/aegis-integridad-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-integridad-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-integridad-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemForensics (FASE 86): analisis forense de memoria.
 #
 # Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion

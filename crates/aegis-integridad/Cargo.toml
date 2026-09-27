@@ -1,0 +1,26 @@
+[package]
+name = "aegis-integridad"
+description = "Integridad sin carrera y por significado: cambios con autor del gancho LSM, linea base firmada y sellada contra el TPM, y cobertura mas alla del fichero"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# El modelo unico de entidad y de senal: un cambio de integridad habla el mismo
+# idioma que el resto del producto (Eid, Senal, Motor, Juicio...).
+aegis-entidad = { path = "../aegis-entidad" }
+# El evento capturado EN EL KERNEL en el gancho LSM (FASE 103): de ahi sale el
+# AUTOR del cambio sin relectura de /proc (invariante 9, sin carrera).
+aegis-sensor = { path = "../aegis-sensor" }
+# La linea base la FIRMA el plano de control con la firma HIBRIDA (Ed25519 +
+# ML-DSA-65): root puede reescribir la linea base, pero no puede volver a
+# firmarla. Solo la feature de firma.
+aegis-pqc = { path = "../aegis-pqc", default-features = false, features = ["sign"] }
+# Hash de contenido de la linea base (rapido, reproducible).
+blake3 = "1"

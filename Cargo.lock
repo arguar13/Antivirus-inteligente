@@ -240,16 +240,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aegis-fim"
-version = "0.1.0"
-dependencies = [
- "aegis-scal",
- "blake3",
- "libc",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "aegis-firehose"
 version = "0.1.0"
 dependencies = [
@@ -377,6 +367,17 @@ dependencies = [
  "aegis-disasm",
  "aegis-entidad",
  "goblin",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-integridad"
+version = "0.1.0"
+dependencies = [
+ "aegis-entidad",
+ "aegis-pqc",
+ "aegis-sensor",
+ "blake3",
  "thiserror 2.0.20",
 ]
 
