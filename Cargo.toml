@@ -39,6 +39,7 @@ members = [
     "crates/aegis-disasm",
     "crates/aegis-decompile",
     "crates/aegis-patron",
+    "crates/aegis-emular",
     "crates/aegis-instrumentar",
     "crates/aegis-sync",
     "crates/aegis-fim",

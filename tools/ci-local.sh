@@ -927,6 +927,24 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "patron" ]; then
     fi
 fi
 
+# AegisEmulate (FASE 102): emulacion con MMU de permisos reales, ejecucion
+# simbolica acotada sobre la IR de la FASE 100 y desempaquetado generico por
+# observacion. Lo distintivo: la ausencia es la frontera —el emulador no tiene
+# salida al sistema real, verificado por lo que FALTA en el codigo—, la cota de la
+# ejecucion simbolica es parte del tipo (angr no acota y explota), y un empaquetador
+# nuevo se desempaqueta sin regla nueva.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "emular" ]; then
+    printf '%s==>%s AegisEmulate · emulacion, ejecucion simbolica acotada y desempaquetado generico\n' "$GRIS" "$FIN"
+    if ./tools/verificar-emular.sh > $LOGS/aegis-emular-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-emular-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-emular-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemForensics (FASE 86): analisis forense de memoria.
 #
 # Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion

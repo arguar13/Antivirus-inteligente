@@ -1,0 +1,21 @@
+[package]
+name = "aegis-emular"
+description = "Emulacion con MMU de permisos reales, entorno sintetico sin salida al sistema (por tipo), ejecucion simbolica acotada sobre la IR de la FASE 100 y desempaquetado generico por observacion (FASE 102)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# Ya en la linea base del agente. Se reutiliza para decodificar x86-64 en el
+# interprete, el mismo decodificador que usan aegis-disasm y aegis-decompile.
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "instr_info", "intel"] }
+# LA MISMA IR QUE LA FASE 100. La ejecucion simbolica corre sobre
+# `aegis_decompile::ir`: una sola IR en el producto, no dos. Es la averia que la
+# invariante 10 del MEGAPROMPT 7 existe para impedir.
+aegis-decompile = { path = "../aegis-decompile" }

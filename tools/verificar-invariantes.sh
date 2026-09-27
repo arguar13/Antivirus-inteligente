@@ -372,6 +372,11 @@ if toca 9; then
         # cota no demostrable NO COMPILA; una entrada hostil no hace panico ni se
         # cuelga (sin retroceso, sin ReDoS por construccion).
         "el motor de patrones: reglas y entradas hostiles;raiz|aegis-patron|--test autoataque|"
+        # El emulador (FASE 102) corre codigo que elige el atacante. No corre sin
+        # fin (cota dura de instrucciones), no hace panico ante bytes arbitrarios, y
+        # no tiene salida al sistema real (verificado por ausencia en
+        # verificar-emular.sh; aqui se ejerce la cota y la robustez).
+        "el emulador: agotamiento y bytes hostiles;raiz|aegis-emular|--test autoataque|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
