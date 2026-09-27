@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# AegisProof (FASE 80): las quince invariantes, comprobadas sobre el producto
+# AegisProof (FASE 80): las dieciseis invariantes, comprobadas sobre el producto
 # COMPLETO y no sobre una fase.
 #
 # POR QUE ESTA PUERTA EXISTE APARTE DE LAS DEMAS
@@ -18,14 +18,14 @@
 # Una invariante que se relaja «solo esta vez» deja de ser una invariante y pasa a
 # ser una aspiracion.
 #
-# LAS QUINCE, Y DE DONDE SALEN
+# LAS DIECISEIS, Y DE DONDE SALEN
 # ---------------------------
 # Ocho estructurales, una de autoataque con una fila por capacidad, cuatro doctrinales
 # que el producto ya sostiene y que aqui se comprueban mecanicamente en vez de
-# afirmarse, y dos que anadio el MEGAPROMPT 10: el almacen historico (14) y la
-# automatizacion de respuesta (15).
+# afirmarse, y tres que anadio el MEGAPROMPT 10: el almacen historico (14), la
+# automatizacion de respuesta (15) y la emulacion sin residuo (16).
 #
-# Uso:  ./tools/verificar-invariantes.sh          (las quince)
+# Uso:  ./tools/verificar-invariantes.sh          (las dieciseis)
 #       ./tools/verificar-invariantes.sh 4        (solo la cuarta)
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -84,7 +84,7 @@ pasadas() {
         | grep -oE '[0-9]+' | paste -sd+ - | bc 2>/dev/null || echo 0
 }
 
-echo "AegisProof · las quince invariantes sobre el producto completo"
+echo "AegisProof · las dieciseis invariantes sobre el producto completo"
 
 # ── 01. PRESUPUESTO ────────────────────────────────────────────────────────────
 #
@@ -356,6 +356,12 @@ if toca 9; then
         # control por ningun canal hacia fuera, el enjambre no lo transporta, y
         # armar el documento sin pasar por el juez de difusion NO COMPILA.
         "el grafo del directorio como mapa;servidor|aegis-itdr|--test autoataque_directorio|+servidor|aegis-itdr|--doc|"
+        # El rango de emulacion (FASE 99) podria usarse para ejecutar tecnicas
+        # contra produccion. No puede: una tecnica no se ejecuta sin la
+        # PruebaDeRango, que solo acuna un rango declarado, y esa prueba no se
+        # puede fabricar (compile_fail). Ademas, una tecnica sin reversion NO
+        # COMPILA. Los dos se comprueban en los doctests del crate.
+        "el rango como via de ejecucion fuera del entorno;servidor|aegis-rango|--doc|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
@@ -585,9 +591,32 @@ if toca 15; then
     fi
 fi
 
+# ── 16. UNA EMULACION NO DEJA RESIDUO (MEGAPROMPT 10, FASE 99) ──────────────────
+if toca 16; then
+    titulo 16 "UNA EMULACION NO DEJA RESIDUO · reversion obligatoria por tipo, y ejercida"
+    # Por ESTRUCTURA: el rasgo Tecnica exige `revertir` SIN cuerpo por defecto, asi
+    # que una tecnica sin reversion no implementa el rasgo y no compila. Si alguien
+    # le pusiera un cuerpo por defecto, la garantia pasaria a depender de acordarse
+    # de sobreescribirlo.
+    SIN_DEFECTO=$(awk '/^pub trait Tecnica/,/^}$/' server/crates/aegis-rango/src/tecnica.rs 2>/dev/null \
+        | tr -d '\n' | grep -oE 'fn revertir\([^{;]*;' | wc -l)
+    if pruebas servidor aegis-rango "--test cobertura" "residuo aplicable" /tmp/inv-rango.log \
+        && ! grep -q 'OMITIDA' /tmp/inv-rango.log \
+        && [ "$SIN_DEFECTO" = "1" ]; then
+        veredicto 16 "una emulacion no deja residuo" si "tras medir el catalogo entero no queda ni un marcador, y una no aplicable jamas cuenta como detectada; reversion sin cuerpo por defecto en el rasgo"
+        porque "Una prueba de cobertura que ejecuta una tecnica y no la deshace deja una"
+        porque "puerta abierta: eso es un incidente, no una prueba. La reversion es parte"
+        porque "del TIPO —una tecnica sin ella no compila— y la medida revierte siempre y"
+        porque "comprueba, contra el estado real del rango, que no queda nada."
+    else
+        veredicto 16 "una emulacion no deja residuo" no "ver /tmp/inv-rango.log (revertir sin cuerpo: $SIN_DEFECTO)"
+        tail -25 /tmp/inv-rango.log | sed 's/^/     | /'
+    fi
+fi
+
 echo
 if [ "$FALLOS" -eq 0 ]; then
-    printf '%s==> Las quince invariantes siguen en pie%s\n' "$VERDE" "$FIN"
+    printf '%s==> Las dieciseis invariantes siguen en pie%s\n' "$VERDE" "$FIN"
 else
     printf '%s==> %s invariante(s) ROTAS%s\n' "$ROJO" "$FALLOS" "$FIN"
     for r in "${ROTAS[@]}"; do

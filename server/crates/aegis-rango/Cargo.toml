@@ -1,0 +1,20 @@
+[package]
+name = "aegis-rango"
+description = "AegisRange (FASE 99): emulacion de adversario benigna y reversible, solo en un rango declarado, con medida automatica y reproducible de la cobertura de deteccion del arbitro y huecos declarados por tecnica"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Errores nombrados, igual que el resto del plano de control.
+thiserror = "2"
+# EL ARBITRO Y EL MODELO DE ENTIDAD UNICO. La cobertura se mide preguntando al
+# arbitro real (`aegis_entidad::arbitrar`) por la entidad afectada: la DECISION de
+# detectada/hueco la toma el arbitro, no el rango. Y cada tecnica nombra su entidad
+# con `Eid`, del modelo unico (FASE 79).
+aegis-entidad = { path = "../../../crates/aegis-entidad" }

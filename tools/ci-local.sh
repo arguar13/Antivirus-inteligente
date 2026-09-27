@@ -1096,6 +1096,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "conocimiento" ]; then
     fi
 fi
 
+# AegisRange (FASE 99): emulacion de adversario y medida de cobertura de deteccion.
+# Contra Caldera y Atomic Red Team, que ejecutan la tecnica y dejan que TU mires;
+# aqui el ciclo se cierra automatico: se ejecuta una emulacion BENIGNA y REVERSIBLE
+# en un rango declarado, se pregunta al arbitro real por la entidad afectada, y si
+# no hubo veredicto se DICE como hueco de cobertura con el nombre de la tecnica.
+# Solo en el rango y reversion obligatoria son garantias POR TIPO (compile_fail); el
+# informe tiene tres estados y no infla una «no aplicable» como detectada.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "rango" ]; then
+    printf '%s==>%s AegisRange · emulacion de adversario y cobertura de deteccion medida\n' "$GRIS" "$FIN"
+    if ./tools/verificar-rango.sh > $LOGS/aegis-rango-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-rango-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-rango-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # El tejido que convierte nueve subsistemas en un producto (AegisFabric, FASE 79):
 # un solo modelo de entidad, una sola escala, un solo arbitro y un solo linaje. Lo
 # que se comprueba aqui es lo que NINGUNA puerta de subsistema puede comprobar: la
