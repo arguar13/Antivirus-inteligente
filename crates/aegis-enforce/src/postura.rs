@@ -253,11 +253,28 @@ fn sondear_aislamiento(c: Capacidad) -> Estado {
 /// pueden pararla. Confundirlos es exactamente el error que este crate existe
 /// para impedir: un producto que dice bloquear con kprobes esta alertando.
 fn sondear_bpf_lsm() -> Estado {
-    // El kernel lo publica en la lista de LSM activos. Sin fichero, el kernel no
-    // trae el framework: no es que este apagado, es que no esta.
-    let Ok(lista) = std::fs::read_to_string("/sys/kernel/security/lsm") else {
+    // El kernel publica la lista de LSM activos en securityfs. La LECTURA vive
+    // aqui; la DECISION vive en `clasificar_lsm`, que es pura y comprobable sin
+    // depender de que securityfs este montado en el entorno de la prueba.
+    clasificar_lsm(
+        std::fs::read_to_string("/sys/kernel/security/lsm")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// Clasifica BPF LSM a partir de la lista de LSM activos del kernel.
+///
+/// Puro, sin E/S: por eso se puede probar de forma determinista con la entrada
+/// inyectada, sin que el resultado dependa de que securityfs este montado —que es
+/// una condicion del entorno, no una propiedad del producto, y lo que hace flaky a
+/// un test que lee el fichero real—. `None` es «no se pudo leer»: securityfs sin
+/// montar, o el kernel sin el framework LSM.
+fn clasificar_lsm(lista: Option<&str>) -> Estado {
+    let Some(lista) = lista else {
         return Estado::Ausente {
-            motivo: "este kernel no publica /sys/kernel/security/lsm: no trae el framework LSM"
+            motivo: "no se puede leer /sys/kernel/security/lsm (securityfs sin montar o el \
+                     kernel sin el framework LSM): no se puede afirmar que niegue"
                 .into(),
         };
     };
@@ -314,18 +331,28 @@ mod pruebas {
     }
 
     #[test]
-    fn bpf_lsm_no_esta_en_este_kernel_y_se_dice_con_su_motivo() {
-        // El kernel de integracion no trae BPF LSM. Lo que importa no es que
-        // falte: es que la postura lo DIGA en vez de callarlo, porque un
-        // producto que dice bloquear con kprobes esta alertando.
-        let p = Postura::medida();
-        let e = &p.capacidades[&Capacidad::BpfLsm];
-        assert!(!e.aplica(), "no puede negar en este kernel");
-        let falta = p.lo_que_no_se_puede_imponer();
-        assert!(
-            falta.iter().any(|f| f.contains("BPF LSM")),
-            "tiene que salir en lo que no se puede imponer: {falta:?}"
+    fn la_clasificacion_de_bpf_lsm_es_determinista_y_no_depende_del_entorno() {
+        // La distincion que este crate existe para hacer —NEGAR con BPF LSM vs.
+        // solo VER con kprobes— se prueba con la entrada inyectada, sin leer el
+        // sistema. Asi es determinista y no depende de que securityfs este
+        // montado (que es lo que hacia flaky a un test que leia el fichero real).
+        //
+        // «bpf» en la lista => puede NEGAR: aplica.
+        assert_eq!(
+            clasificar_lsm(Some("capability,landlock,yama,safesetid,selinux,bpf")),
+            Estado::Aplica
         );
+        // Lista SIN «bpf» => ve con kprobes y no niega: SoloObserva, y NO aplica.
+        // Es el estado que impide el informe tranquilizador de una maquina que en
+        // realidad solo observa.
+        let solo = clasificar_lsm(Some("capability,landlock,yama"));
+        assert!(matches!(solo, Estado::SoloObserva { .. }), "{solo:?}");
+        assert!(!solo.aplica(), "observar no es negar");
+        // Sin fichero (securityfs sin montar, o kernel sin el framework) =>
+        // Ausente, y se DICE con su motivo, en vez de afirmar que niega.
+        let aus = clasificar_lsm(None);
+        assert!(matches!(aus, Estado::Ausente { .. }), "{aus:?}");
+        assert!(!aus.aplica());
     }
 
     #[test]

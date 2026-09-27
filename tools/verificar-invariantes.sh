@@ -377,6 +377,12 @@ if toca 9; then
         # no tiene salida al sistema real (verificado por ausencia en
         # verificar-emular.sh; aqui se ejerce la cota y la robustez).
         "el emulador: agotamiento y bytes hostiles;raiz|aegis-emular|--test autoataque|"
+        # El sensor (FASE 103) es la fuente de todo lo demas: cegarlo ciega al
+        # producto. El ataque es la INUNDACION —llenar el anillo para tapar la
+        # accion real—. No cuela: la perdida se cuenta POR FAMILIA y se dice como
+        # SinDatos (un anillo lleno no es «limpio»), y la degradacion por
+        # presupuesto conserva lo de mas valor diciendo que apago.
+        "el sensor: inundacion de eventos como ceguera;raiz|aegis-sensor|--test autoataque|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0

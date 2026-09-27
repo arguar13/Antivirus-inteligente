@@ -945,6 +945,24 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "emular" ]; then
     fi
 fi
 
+# AegisSensor (FASE 103): telemetria de kernel sin perdida silenciosa y sin
+# carreras. Lo distintivo, probado como logica pura: la perdida se cuenta POR
+# FAMILIA y se dice como SinDatos (un anillo lleno no es «limpio»), la degradacion
+# por presupuesto apaga por valor ascendente diciendolo, y el evento lleva lo
+# capturado en el kernel —sin relectura de /proc, verificado por ausencia—. Sobre
+# este entorno BPF LSM esta activo, habilitador de los ganchos LSM.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "sensor" ]; then
+    printf '%s==>%s AegisSensor · perdida declarada por familia, degradacion visible y sin carreras\n' "$GRIS" "$FIN"
+    if ./tools/verificar-sensor.sh > $LOGS/aegis-sensor-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-sensor-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-sensor-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemForensics (FASE 86): analisis forense de memoria.
 #
 # Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion
@@ -1372,7 +1390,7 @@ fi
 # fase anterior. Una invariante que se relaja «solo esta vez» deja de ser una
 # invariante y pasa a ser una aspiracion.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "invariantes" ]; then
-    printf '%s==>%s AegisProof · las quince invariantes sobre el producto completo\n' "$GRIS" "$FIN"
+    printf '%s==>%s AegisProof · las dieciseis invariantes sobre el producto completo\n' "$GRIS" "$FIN"
     if ./tools/verificar-invariantes.sh > $LOGS/aegis-invariantes-ci.log 2>&1; then
         sed 's/^/    | /' $LOGS/aegis-invariantes-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"

@@ -1,0 +1,18 @@
+[package]
+name = "aegis-sensor"
+description = "Telemetria de kernel sin carreras y con perdida declarada por familia (FASE 103): un sensor que pierde, lo dice y lo cuenta, degrada por presupuesto diciendolo, y no decide sobre datos que pudieron cambiar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# MODELO DE ENTIDAD UNICO (FASE 79). La perdida de una familia se expresa como una
+# `Senal` NoConcluyente del motor que consume esa familia: un anillo lleno produce
+# un SinDatos con su cuenta, jamas un hueco silencioso.
+aegis-entidad = { path = "../aegis-entidad" }

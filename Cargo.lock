@@ -634,6 +634,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-sensor"
+version = "0.1.0"
+dependencies = [
+ "aegis-entidad",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-swarm"
 version = "0.1.0"
 dependencies = [
