@@ -96,6 +96,7 @@
 pub mod caminos;
 pub mod contencion;
 pub mod criticidad;
+pub mod directorio;
 pub mod error;
 pub mod grafo;
 pub mod radio;
@@ -103,6 +104,7 @@ pub mod radio;
 pub use caminos::{camino_mas_probable, caminos_a_las_joyas, CaminoAtaque};
 pub use contencion::{decidir, ConfigContencion, Motivo, Veredicto};
 pub use criticidad::{propagar, Criticidades};
+pub use directorio::desde_directorio;
 pub use error::ErrorPrediccion;
 pub use grafo::{Activo, ClaseActivo, Evidencia, GrafoAtaque, Paso, Via};
 pub use radio::{radio_de_explosion, RadioExplosion};

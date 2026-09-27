@@ -351,6 +351,11 @@ if toca 9; then
         # la organizacion, nunca por el enjambre, y escribirlo por otro camino
         # no compila.
         "el escaner como reconocimiento;servidor|aegis-postura|--test autoataque_inventario|+servidor|aegis-postura|--doc|"
+        # El grafo del directorio (FASE 95) es el mapa que un atacante querria:
+        # quien puede sobre quien en toda la organizacion. No sale del plano de
+        # control por ningun canal hacia fuera, el enjambre no lo transporta, y
+        # armar el documento sin pasar por el juez de difusion NO COMPILA.
+        "el grafo del directorio como mapa;servidor|aegis-itdr|--test autoataque_directorio|+servidor|aegis-itdr|--doc|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0

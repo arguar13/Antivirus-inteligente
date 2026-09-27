@@ -593,6 +593,28 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "predict" ]; then
     fi
 fi
 
+# AegisDirectory (FASE 95): el grafo completo del directorio, para exponer y
+# remediar. Modela lo que BloodHound —pertenencia anidada, ACL del
+# ntSecurityDescriptor byte a byte, delegacion, derechos de ejecucion, GPO,
+# confianzas y plantillas de certificado ESC— MAS la caducidad de la sesion en
+# cada arista y el alcance por red, que BloodHound no tiene. Lo primero, el
+# autoataque: el grafo es el mapa que un atacante querria y no sale del plano de
+# control por ningun canal. Despues, el nucleo puro (descriptor real byte a byte,
+# grupos anidados con ciclos, exposiciones con remediacion) y el puente a la
+# prediccion, donde la caducidad de la sesion cambia el camino. Muro declarado: la
+# captura en vivo por LDAP necesita un Active Directory real.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "directorio" ]; then
+    printf '%s==>%s AegisDirectory · grafo del directorio con caducidad de sesion y alcance por red\n' "$GRIS" "$FIN"
+    if ./tools/verificar-directorio.sh > $LOGS/aegis-directorio-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-directorio-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-directorio-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Diseccion semantica de protocolos (AegisWire, FASE 70): convierte bytes que
 # escribe el ATACANTE, sin autenticacion previa y a velocidad de linea, en hechos
 # con significado. Es la superficie de ataque mas expuesta del producto. El motor

@@ -22,6 +22,14 @@
 //!    cual (tokens de acceso en Windows, `euid` en Linux) y detecta **escaladas
 //!    de privilegio anomalas** por alcanzabilidad y por **centralidad de
 //!    intermediacion** (algoritmo de Brandes, implementado aqui).
+//! 3. **Grafo completo del directorio** ([`directorio`], FASE 95): el modelo de
+//!    exposicion de identidad al nivel de BloodHound —pertenencia anidada, ACL del
+//!    `ntSecurityDescriptor`, delegacion, derechos de ejecucion, GPO, confianzas y
+//!    plantillas de certificado— **mas la caducidad de la sesion en cada arista y
+//!    el alcance por red**, que BloodHound no tiene. Se lee en solo lectura, se
+//!    entrega como inventario de exposiciones con su remediacion, y alimenta la
+//!    prediccion de `aegis-predict` sin que el grafo completo salga del plano de
+//!    control.
 //!
 //! ## Honestidad de validacion: el nucleo se prueba, la captura en vivo se declara
 //!
@@ -47,6 +55,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod directorio;
 pub mod forjados;
 pub mod grafo;
 pub mod kerberoasting;

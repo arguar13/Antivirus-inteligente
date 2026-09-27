@@ -25,6 +25,10 @@ thiserror = "2"
 # colector comprometido no puede convertir un lote en una via de agotamiento de
 # memoria del plano de control.
 serde = { version = "1", features = ["derive"] }
+# El documento de EXPORTACION del grafo se arma en JSON, y solo sale por el juez
+# de difusion (ver `directorio::salida`). serde_json ya esta en el arbol del
+# servidor por aegis-pipeline y aegis-postura.
+serde_json = "1"
 # Grafo de identidad en memoria (motor del Control Plane, item 2 de la FASE 58).
 # petgraph es Rust puro y estable. Se fija en la 0.7 A PROPOSITO: `prost-build`
 # (build-dependency de aegis-server via tonic-build) YA arrastra petgraph 0.7.1,
@@ -36,3 +40,38 @@ serde = { version = "1", features = ["derive"] }
 # alcanzabilidad de escalada las implementamos nosotros en `grafo.rs`, con un KAT
 # verificable a mano, en vez de depender de un algoritmo externo.
 petgraph = { version = "0.7", default-features = false }
+# MODELO DE ENTIDAD UNICO (FASE 79). Cada principal del directorio —usuario,
+# equipo, grupo, gMSA— nombra su identidad con `aegis_entidad::Eid` de clase
+# `Cuenta`, derivada de su SID: la misma cuenta que ve la postura de nube y el
+# resto del producto. Un identificador propio del directorio seria una regresion
+# de esa fase. No se extiende la lista de clases (tiene pruebas que la fijan): un
+# objeto que no es un principal de seguridad —una GPO, una plantilla de
+# certificado, una OU— es un nodo estructural del grafo y no finge ser una cuenta.
+aegis-entidad = { path = "../../../crates/aegis-entidad" }
+# EL GRAFO COMPLETO DEL DIRECTORIO NO SALE DEL PLANO DE CONTROL. Es el mapa que
+# un atacante querria: quien puede sobre quien, en toda la organizacion. La unica
+# salida pasa por el juez de difusion de `aegis-share` —el unico estrangulamiento
+# del producto (FASE 73)—, con el mismo patron que el inventario de la FASE 94.
+aegis-share = { path = "../aegis-share" }
+
+[features]
+# La CAPTURA EN VIVO del directorio por LDAP es la frontera walled de esta fase,
+# igual que la captura de eventos 4769 lo es del nucleo Kerberos: necesita un
+# Active Directory real al que ligarse. El nucleo que MODELA y DECIDE —parsear el
+# descriptor de seguridad byte a byte, resolver los grupos anidados, derivar las
+# aristas y las exposiciones— no la necesita y se prueba entero sin red. Por eso
+# el lector LDAP vive detras de una caracteristica opcional: el arbol por defecto
+# no arrastra un cliente LDAP asincrono, y la puerta de calidad comprueba aparte
+# que el lector COMPILA y, si hay un directorio local, que lee de verdad.
+default = []
+live-ldap = ["dep:ldap3"]
+
+[dependencies.ldap3]
+# Cliente LDAP en Rust puro (sin OpenSSL del sistema: usa rustls, que el arbol
+# del servidor ya trae). Solo con la caracteristica `live-ldap`, y solo su API
+# sincrona (`LdapConn`), para no meter tokio en este crate. Es SOLO LECTURA: el
+# colector se liga, busca y desliga; no escribe en el directorio.
+version = "0.11"
+default-features = false
+features = ["sync", "tls-rustls"]
+optional = true
