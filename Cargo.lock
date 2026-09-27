@@ -487,6 +487,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-patron"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "yara-x",
+]
+
+[[package]]
 name = "aegis-pe"
 version = "0.1.0"
 dependencies = [
@@ -599,11 +607,11 @@ dependencies = [
 name = "aegis-scan"
 version = "0.1.0"
 dependencies = [
+ "aegis-patron",
  "aegis-scal",
  "arc-swap",
  "libc",
  "thiserror 2.0.20",
- "yara-x",
 ]
 
 [[package]]

@@ -367,6 +367,11 @@ if toca 9; then
         # se cuelga ni reserva sin cota con entrada hostil: entra un &[u8], sale una
         # estructura de datos.
         "el decompilador como via de ejecucion y agotamiento;raiz|aegis-decompile||no_ejecuta_ni_entra_en_panico"
+        # El motor de patrones (FASE 101) tiene dos superficies: el compilador, que
+        # lee reglas de terceros, y el motor, que lee bytes hostiles. Una regla con
+        # cota no demostrable NO COMPILA; una entrada hostil no hace panico ni se
+        # cuelga (sin retroceso, sin ReDoS por construccion).
+        "el motor de patrones: reglas y entradas hostiles;raiz|aegis-patron|--test autoataque|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0

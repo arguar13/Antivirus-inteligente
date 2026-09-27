@@ -1,0 +1,27 @@
+[package]
+name = "aegis-patron"
+description = "Motor de patrones propio (FASE 101): compatible con la sintaxis YARA, de coste acotado por tipo, tri-estado, determinista y sin retroceso. Sustituye a yara-x en el arbol del agente"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Errores nombrados. NADA MAS: el motor que come entrada hostil es Rust puro, sin
+# dependencias de terceros en el camino de datos. Es la diferencia con los motores
+# en C que han sangrado CVE de corrupcion de memoria durante veinte anos, y con
+# depender de yara-x —un producto no puede superar a su propia dependencia—.
+thiserror = "2"
+
+[dev-dependencies]
+# SOLO para el barrido diferencial: se compara, sobre el mismo corpus, que este
+# motor da las MISMAS coincidencias que yara-x. Es una dependencia de PRUEBA, no
+# del camino de decision: no entra en el arbol de produccion del agente, y por eso
+# la fila de yara-x desaparece de `tools/lineabase-agente.txt` (invariante 8 del
+# MEGAPROMPT 11). La comparacion contra el motor que se sustituye es como se
+# demuestra la paridad sin someterse a el.
+yara-x = "0.8"

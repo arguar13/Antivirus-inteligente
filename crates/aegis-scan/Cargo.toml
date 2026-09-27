@@ -12,7 +12,11 @@ workspace = true
 
 [dependencies]
 aegis-scal = { path = "../aegis-scal" }
+# EL MOTOR DE PATRONES ES PROPIO (FASE 101). Sustituye a yara-x: coste acotado por
+# tipo, tri-estado, determinista y sin retroceso, sin superficie de terceros en el
+# camino que come entrada hostil. La paridad con yara-x sobre el conjunto base se
+# comprueba en aegis-patron, donde yara-x es solo una dependencia de PRUEBA.
+aegis-patron = { path = "../aegis-patron" }
 thiserror = "2"
 libc = "0.2"
 arc-swap = "1"
-yara-x = "0.8"

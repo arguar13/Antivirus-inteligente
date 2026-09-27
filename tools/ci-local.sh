@@ -909,6 +909,24 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "decompile" ]; then
     fi
 fi
 
+# AegisPattern (FASE 101): el motor de patrones deja de ser prestado. Sustituye a
+# yara-x en el arbol del agente con un motor propio de coste acotado por tipo,
+# tri-estado, determinista y SIN RETROCESO (Pike VM: sin ReDoS por construccion).
+# La prueba de que la fase termino es que la fila de yara-x desaparece del arbol
+# del agente, y aqui se comprueba, junto con la paridad con yara-x sobre las 14
+# reglas base y el autoataque del compilador y del motor.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "patron" ]; then
+    printf '%s==>%s AegisPattern · motor de patrones propio, acotado y sin retroceso (sustituye a yara-x)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-patron.sh > $LOGS/aegis-patron-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-patron-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-patron-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemForensics (FASE 86): analisis forense de memoria.
 #
 # Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion

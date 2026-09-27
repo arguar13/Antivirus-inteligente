@@ -60,7 +60,6 @@ rcgen              red           Generacion de la CSR de matriculacion en el pro
 pem                red           Codificacion PEM de la CSR
 
 # ── Analisis: lo que mira contenido hostil ──────────────────────────────────────
-yara-x             analisis      Motor YARA en Rust; la alternativa —libyara en C— procesa ficheros hostiles en el proceso privilegiado
 goblin             analisis      Analisis de PE/ELF en Rust puro, sin `unsafe` en el camino de datos
 iced-x86           analisis      Desensamblador x86-64 para Intel PT; escribirlo en casa seria un proyecto propio
 tract-onnx         analisis      Inferencia ONNX sin `onnxruntime`, que es C++ y arrastraria un arbol que no cabe
