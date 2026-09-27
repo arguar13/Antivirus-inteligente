@@ -97,6 +97,7 @@
 pub mod confianza;
 pub mod decisor;
 pub mod error;
+pub mod latencia;
 pub mod limitador;
 pub mod modo;
 pub mod protegidos;
@@ -109,6 +110,7 @@ pub mod plano;
 pub use confianza::Confianza;
 pub use decisor::{ConfigDecisor, ContadoresDecisor, Decisor, VIGENCIA_US};
 pub use error::ErrorIps;
+pub use latencia::MedidorLatencia;
 pub use limitador::{Limitador, Permiso, TOPE_POR_VENTANA, VENTANA_US};
 pub use modo::Modo;
 pub use protegidos::{MotivoProteccion, Protegidos};

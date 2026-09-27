@@ -1001,6 +1001,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "atestacion" ]; then
     fi
 fi
 
+# AegisInline (FASE 106): reensamblado y corte resistentes a evasion. Lo
+# distintivo, probado como logica pura: el perfil de reensamblado se elige por el
+# SISTEMA REAL del destino (que AegisCore SABE, no adivina como Suricata), la
+# ambiguedad se resuelve PREGUNTANDO AL ENDPOINT (nadie sin agente puede), la
+# latencia anadida del corte se publica como p50/p99 (no la media), y el
+# reensamblado no se agota (cotas duras). La semantica de protocolos no se duplica:
+# vive en aegis-wire (FASE 70).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "inline" ]; then
+    printf '%s==>%s AegisInline · perfil por destino, desambiguacion por endpoint, latencia p50/p99\n' "$GRIS" "$FIN"
+    if ./tools/verificar-inline.sh > $LOGS/aegis-inline-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-inline-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-inline-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemForensics (FASE 86): analisis forense de memoria.
 #
 # Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion

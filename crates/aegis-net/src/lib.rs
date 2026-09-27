@@ -20,6 +20,7 @@
 
 pub mod error;
 pub mod packet;
+pub mod perfil_reensamblado;
 pub mod scan;
 
 #[cfg(all(target_os = "linux", feature = "xdp"))]
@@ -27,6 +28,10 @@ pub mod xdp;
 
 pub use error::NetError;
 pub use packet::{Packet, PacketBuilder, ParseError, TcpFlags, Transport};
+pub use perfil_reensamblado::{
+    reensamblar_con, ErrorReensamblado, PerfilReensamblado, PoliticaSolape, ReensambladorPerfil,
+    Segmento,
+};
 pub use scan::{ScanConfig, ScanDetector, ScanKind, ScanVerdict};
 
 /// Micro-segmentacion Zero-Trust: cuarentena de enjambre en el endpoint.

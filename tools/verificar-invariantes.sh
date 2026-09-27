@@ -394,6 +394,11 @@ if toca 9; then
         # autoridad —un nodo no atestado no manda en la malla—; y como politica
         # desincronizada —una politica de PCR contradictoria no llega a existir—.
         "la atestacion como denegacion de servicio y lavado de autoridad;raiz|aegis-attest|--test autoataque|"
+        # El reensamblado (FASE 106) vuelto del reves: la EVASION —un flujo ambiguo
+        # que el IDS interpreta distinto que el destino— no cuela porque el perfil
+        # es el del destino real y, si hay duda, se pregunta al endpoint; y el
+        # AGOTAMIENTO —millones de segmentos a medio abrir— no cuela por las cotas.
+        "el reensamblador: evasion por ambiguedad y agotamiento;raiz|aegis-net|--test autoataque|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
