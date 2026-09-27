@@ -1,0 +1,30 @@
+[package]
+name = "aegis-decompile"
+description = "Decompilador determinista a pseudo-C (FASE 100): elevacion a IR SSA, reconstruccion de tipos y pseudo-C con evidencia, sobre el grafo de aegis-disasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = "2"
+# EL GRAFO DE LA FASE 85 ES LA ENTRADA. Se consume tal cual (CFG con predecesores,
+# bloques con instrucciones, grafo de llamadas); no se reconstruye. Lo unico que
+# este crate anade es la semantica de operandos que el modelo de capacidades no
+# necesitaba exponer.
+aegis-disasm = { path = "../aegis-disasm" }
+# Ya en la linea base del agente (justificado para aegis-disasm/aegis-ptguard). Se
+# reutiliza para la ELEVACION: la semantica de operandos —registros, memoria,
+# codigo de operacion— sale del mismo decodificador que ya usa el desensamblador,
+# en vez de duplicarla. Cero dependencias transitivas, Rust puro.
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "instr_info", "intel"] }
+
+[dev-dependencies]
+# Solo para el REDONDEO SEMANTICO: lee el objeto que compila el corpus de prueba
+# para sacar los bytes y la direccion de cada funcion. Ya esta en la linea base
+# del agente (lo usa aegis-disasm). No entra en el arbol de produccion del crate.
+goblin = "0.9"

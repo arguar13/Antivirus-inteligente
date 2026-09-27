@@ -889,6 +889,26 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "disasm" ]; then
     fi
 fi
 
+# AegisDecompile (FASE 100): decompilador determinista a pseudo-C sobre el grafo de
+# la FASE 85. Gana a Ghidra en determinismo (nombres por contenido, no por orden),
+# en evidencia (cada sentencia cita sus direcciones), en calidad declarada como
+# parte de la salida, y en que NO EJECUTA NADA (por tipo). La cifra de la fase es el
+# redondeo semantico: se compila un corpus, se decompila, se recompila el pseudo-C
+# y se comprueba equivalencia de comportamiento. Alcance honesto: el subconjunto de
+# registros (aritmetica entera, -O2) se verifica; la pila de -O0, la destruccion de
+# phi y ARM64 son incrementos siguientes y se declaran.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "decompile" ]; then
+    printf '%s==>%s AegisDecompile · de bytes a pseudo-C, determinista y con evidencia\n' "$GRIS" "$FIN"
+    if ./tools/verificar-decompile.sh > $LOGS/aegis-decompile-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-decompile-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-decompile-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemForensics (FASE 86): analisis forense de memoria.
 #
 # Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion

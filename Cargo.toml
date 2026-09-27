@@ -37,6 +37,7 @@ members = [
     "crates/aegis-macho",
     "crates/aegis-enforce",
     "crates/aegis-disasm",
+    "crates/aegis-decompile",
     "crates/aegis-instrumentar",
     "crates/aegis-sync",
     "crates/aegis-fim",

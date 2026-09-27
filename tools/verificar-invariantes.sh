@@ -362,6 +362,11 @@ if toca 9; then
         # puede fabricar (compile_fail). Ademas, una tecnica sin reversion NO
         # COMPILA. Los dos se comprueban en los doctests del crate.
         "el rango como via de ejecucion fuera del entorno;servidor|aegis-rango|--doc|"
+        # El decompilador (FASE 100) come bytes que elige el atacante. No los
+        # ejecuta —lo prohibe el tipo y el forbid(unsafe)— y no entra en panico ni
+        # se cuelga ni reserva sin cota con entrada hostil: entra un &[u8], sale una
+        # estructura de datos.
+        "el decompilador como via de ejecucion y agotamiento;raiz|aegis-decompile||no_ejecuta_ni_entra_en_panico"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
