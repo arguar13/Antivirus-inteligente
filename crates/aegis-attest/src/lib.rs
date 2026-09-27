@@ -42,15 +42,25 @@
 mod codec;
 
 pub mod attest;
+pub mod cadena;
 pub mod identidad;
+pub mod ima;
+pub mod malla;
 pub mod nonce;
+pub mod politica;
 pub mod quote;
+pub mod revocacion;
 pub mod verificador;
 
 #[cfg(feature = "tpm-hardware")]
 pub mod emisor;
 
 pub use attest::{Attest, QuoteInfo, SeleccionPcr, TPM_GENERATED_VALUE, TPM_ST_ATTEST_QUOTE};
+pub use cadena::{CadenaAtestacion, Eslabon, Nivel};
 pub use identidad::{ClavePublicaAk, IdentidadError};
+pub use ima::{casar, sin_procedencia, InventarioProcedencia, MedidaIma, Procedencia};
+pub use malla::Par;
 pub use nonce::{Nonce, RegistroNonces};
+pub use politica::{ErrorPolitica, ExigenciaPcr, PoliticaPcr};
+pub use revocacion::{ErrorRevocacion, EstadoNodo, LimitadorRevocacion};
 pub use verificador::{Veredicto, VerificadorError};

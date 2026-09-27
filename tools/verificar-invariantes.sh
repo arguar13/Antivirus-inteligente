@@ -389,6 +389,11 @@ if toca 9; then
         # cegar, desviar, degradar— (cada uno con su senal, y la desinstalacion
         # autorizada del dueno sigue funcionando: invariante 10).
         "la integridad y la autodefensa vueltas del reves;raiz|aegis-integridad|--test autoataque|+raiz|aegis-selfdefense|--test autoataque_manipulacion|"
+        # La atestacion (FASE 105) vuelta del reves: como DENEGACION DE SERVICIO
+        # —revocar media flota—, que la degradacion pegajosa corta; como lavado de
+        # autoridad —un nodo no atestado no manda en la malla—; y como politica
+        # desincronizada —una politica de PCR contradictoria no llega a existir—.
+        "la atestacion como denegacion de servicio y lavado de autoridad;raiz|aegis-attest|--test autoataque|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0

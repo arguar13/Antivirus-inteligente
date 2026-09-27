@@ -982,6 +982,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "integridad" ]; then
     fi
 fi
 
+# AegisAttest (FASE 105): atestacion continua que supera a Keylime. Lo distintivo,
+# probado como logica pura: la politica de PCR es un TIPO (una contradiccion no
+# llega a existir), la medida de IMA se une a la PROCEDENCIA (una medida que ningun
+# paquete ni la linea base avala es SinProcedencia), la revocacion HACE algo (baja
+# autoridad y tope de confianza) y la revocacion masiva la corta la degradacion
+# pegajosa, la cadena de linaje es UNA (un hueco es eslabon roto), y un par no
+# acepta autoridad de un nodo no atestado. La fontaneria del chip esta gated.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "atestacion" ]; then
+    printf '%s==>%s AegisAttest · politica como tipo, IMA con procedencia, revocacion que actua\n' "$GRIS" "$FIN"
+    if ./tools/verificar-attest.sh > $LOGS/aegis-attest-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-attest-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-attest-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemForensics (FASE 86): analisis forense de memoria.
 #
 # Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion

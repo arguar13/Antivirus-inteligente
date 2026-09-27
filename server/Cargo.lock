@@ -45,6 +45,7 @@ dependencies = [
 name = "aegis-attest"
 version = "0.1.0"
 dependencies = [
+ "aegis-entidad",
  "aegis-firmware",
  "ecdsa",
  "ed25519-dalek",

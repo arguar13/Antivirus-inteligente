@@ -18,6 +18,10 @@ tpm-hardware = ["dep:libc"]
 
 [dependencies]
 aegis-firmware = { path = "../aegis-firmware" }
+# El modelo unico: la cadena de linaje (firmware -> arranque -> kernel -> agente ->
+# proceso) lleva un Eid por eslabon, y la revocacion baja el TOPE DE CONFIANZA del
+# nodo en la misma escala que usa el arbitro.
+aegis-entidad = { path = "../aegis-entidad" }
 thiserror = "2"
 sha2 = { version = "0.10", features = ["oid"] }
 # Verificacion de la firma del quote, despachada por algoritmo de la AK. El TPM
