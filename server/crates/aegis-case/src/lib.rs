@@ -34,15 +34,19 @@
 #![forbid(unsafe_code)]
 
 pub mod auditoria;
+pub mod colaboracion;
 pub mod cronologia;
 pub mod fusion;
+pub mod informe;
 pub mod metricas;
 pub mod modelo;
 pub mod plantillas;
 
 pub use auditoria::{Accion, Rastro, Rotura};
+pub use colaboracion::{tiempo_en_estados, ContextoTraspaso, Traspaso};
 pub use cronologia::Cronologia;
 pub use fusion::{Fusionador, Motivo};
+pub use informe::{generar as generar_informe, Hueco, Informe};
 pub use metricas::{calcular, Resumen};
 pub use modelo::{Alerta, Caso, Estado, Observable, Severidad, Veredicto};
 pub use plantillas::{proponer, Clase, Plantilla};

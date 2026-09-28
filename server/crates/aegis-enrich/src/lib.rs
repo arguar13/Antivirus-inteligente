@@ -67,6 +67,7 @@ pub mod fusion;
 pub mod locales;
 pub mod observable;
 pub mod orquesta;
+pub mod presupuesto_caso;
 pub mod salida;
 pub mod tasa;
 
@@ -77,5 +78,6 @@ pub use fusion::{fusionar, Fusion, Veredicto};
 pub use locales::{Dga, Listas};
 pub use observable::{MotivoRetencion, Observable, Tipo};
 pub use orquesta::{Informe, Orquestador, Resultado};
+pub use presupuesto_caso::{costo as costo_exposicion, PresupuestoCaso};
 pub use salida::{Modo, Peticion, Salida};
 pub use tasa::{Cuota, Limitador};
