@@ -93,6 +93,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-consola"
+version = "0.1.0"
+dependencies = [
+ "aegis-share",
+]
+
+[[package]]
 name = "aegis-detonate"
 version = "0.1.0"
 dependencies = [

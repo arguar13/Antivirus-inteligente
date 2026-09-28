@@ -1,0 +1,16 @@
+[package]
+name = "aegis-consola"
+description = "El lado servidor de la consola del SOC: RBAC, aislamiento multi-inquilino, coste de consulta antes de ejecutar, y el estrangulamiento de exportacion por el juez de difusion (FASE 78). CONSULTA y GUARDA; no decide veredictos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# El juez de difusion de la FASE 78: TODO lo que la consola exporta pasa por aqui
+# (invariante 8). No se reimplementa el criterio.
+aegis-share = { path = "../aegis-share" }

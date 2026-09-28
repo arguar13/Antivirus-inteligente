@@ -411,6 +411,11 @@ if toca 9; then
         # rota o no reproducible -> rechazado y registrado), y un registro de
         # transparencia reescrito se detecta por la prueba de consistencia.
         "la actualizacion como via de ejecucion del atacante;raiz|aegis-procedencia|--test autoataque|"
+        # La consola (FASE 110) es una superficie nueva: un camino de salida para lo
+        # retenido, una via para que un rol haga lo que no le toca, y una fuga entre
+        # inquilinos. No cuela: la exportacion pasa por el juez de difusion (FASE 78),
+        # RBAC deniega por rol, y el aislamiento multi-inquilino no deja ver lo ajeno.
+        "la consola como camino de salida y abuso de rol;servidor|aegis-consola|--test autoataque|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0
