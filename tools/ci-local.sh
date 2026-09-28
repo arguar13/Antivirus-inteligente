@@ -710,6 +710,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "scale" ]; then
     fi
 fi
 
+# AegisReal (FASE 111): la escala MEDIDA de verdad contra PostgreSQL real, no
+# simulada en memoria. Perdida CERO contada en los dos extremos (lo que se envio,
+# lo que la base guarda, y el contador del servidor), latencia de ingesta p50/p95/
+# p99, aislamiento por inquilino, y la purga de la FASE 75 como metadato (DETACH+
+# DROP, no un DELETE que bloquee). Sin PostgreSQL se OMITE con honestidad.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "escala-real" ]; then
+    printf '%s==>%s AegisReal · escala medida de verdad contra PostgreSQL (perdida cero, latencia, purga)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-escala-real.sh > $LOGS/aegis-escala-real-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-escala-real-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-escala-real-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Ingesta de registros a escala (FASE 74): tragarse lo que ya escribe el resto de
 # la casa —syslog, journald, EVTX, ficheros planos y los planos de control de las
 # nubes— y correlacionarlo con lo propio. Es la superficie MAS ANCHA del
