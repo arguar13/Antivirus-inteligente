@@ -1,0 +1,19 @@
+[package]
+name = "aegis-procedencia"
+description = "Procedencia del propio producto: construccion reproducible, atestacion verificada en el endpoint antes de aplicar, y registro de transparencia propio verificable sin conexion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Hash del arbol de Merkle del registro de transparencia y de las huellas de
+# construccion. Rapido y reproducible.
+blake3 = "1"
+# El modelo unico: la cadena de procedencia lleva un Eid por eslabon, la misma
+# cadena de linaje que usa la atestacion (FASE 105).
+aegis-entidad = { path = "../aegis-entidad" }

@@ -1020,6 +1020,25 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "inline" ]; then
     fi
 fi
 
+# AegisProvenance (FASE 108): la procedencia del propio producto —la unica fase que
+# audita al proyecto—. Lo distintivo, probado como logica pura: construccion
+# REPRODUCIBLE bit a bit (dos builds, mismo binario), atestacion verificada EN EL
+# ENDPOINT antes de aplicar (aegis-update no aplica lo que no casa con el SBOM),
+# una sola cadena de linaje fuente->...->TPM, y un registro de transparencia Merkle
+# de solo apendice, verificable SIN conexion, donde un fork se detecta por la
+# prueba de consistencia (RFC 6962).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "procedencia" ]; then
+    printf '%s==>%s AegisProvenance · reproducible, atestacion verificada antes de aplicar, transparencia sin conexion\n' "$GRIS" "$FIN"
+    if ./tools/verificar-procedencia.sh > $LOGS/aegis-procedencia-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-procedencia-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-procedencia-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # AegisMemForensics (FASE 86): analisis forense de memoria.
 #
 # Un adquiridor de memoria que pudiera escribir seria una primitiva de inyeccion

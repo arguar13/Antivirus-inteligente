@@ -535,6 +535,14 @@ name = "aegis-presupuesto"
 version = "0.1.0"
 
 [[package]]
+name = "aegis-procedencia"
+version = "0.1.0"
+dependencies = [
+ "aegis-entidad",
+ "blake3",
+]
+
+[[package]]
 name = "aegis-ptguard"
 version = "0.1.0"
 dependencies = [
@@ -688,6 +696,7 @@ name = "aegis-update"
 version = "0.1.0"
 dependencies = [
  "aegis-pqc",
+ "aegis-procedencia",
  "ed25519-dalek",
  "rand_core 0.6.4",
  "sha2",

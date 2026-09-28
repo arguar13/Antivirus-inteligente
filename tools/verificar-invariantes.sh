@@ -399,6 +399,18 @@ if toca 9; then
         # es el del destino real y, si hay duda, se pregunta al endpoint; y el
         # AGOTAMIENTO —millones de segmentos a medio abrir— no cuela por las cotas.
         "el reensamblador: evasion por ambiguedad y agotamiento;raiz|aegis-net|--test autoataque|"
+        # El cazador de TLS en claro (FASE 107) es la mayor fuga potencial: ve
+        # contrasenas y tokens. Vuelto del reves: la redaccion es obligatoria en el
+        # tipo (no hay texto sin redactar) y la difusion tiene presupuesto (FASE
+        # 78); un binario despojado da NoConcluyente, no basura; un gancho no
+        # verificado no se usa.
+        "los uprobes de TLS como via de fuga de secretos;raiz|aegis-l7hunter|--test autoataque|"
+        # El canal de actualizacion (FASE 108) es el sueno de un atacante: aplicar
+        # SU binario ejecuta codigo en toda la flota. No cuela: la atestacion se
+        # verifica antes de aplicar (artefacto cambiado, firma invalida, cadena
+        # rota o no reproducible -> rechazado y registrado), y un registro de
+        # transparencia reescrito se detecta por la prueba de consistencia.
+        "la actualizacion como via de ejecucion del atacante;raiz|aegis-procedencia|--test autoataque|"
     )
     ROTOS=()
     TOTAL_PRUEBAS=0

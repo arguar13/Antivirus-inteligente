@@ -17,6 +17,9 @@ sha2 = "0.10"
 # Firma hibrida post-cuantica (FASE 59). Solo la feature `sign`: el canal de
 # updates verifica firmas, no intercambia claves.
 aegis-pqc = { path = "../aegis-pqc", default-features = false, features = ["sign"] }
+# La procedencia se verifica ANTES de aplicar (FASE 108): la atestacion tiene que
+# casar con el SBOM del endpoint y cumplir la politica, o no se aplica.
+aegis-procedencia = { path = "../aegis-procedencia" }
 
 [dev-dependencies]
 ed25519-dalek = { version = "2", features = ["rand_core"] }

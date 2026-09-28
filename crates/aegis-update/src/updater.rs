@@ -26,6 +26,9 @@ use std::path::{Path, PathBuf};
 use crate::artifact::Artifact;
 use crate::signature::{ClaveActualizacion, SignatureError, UpdateKey};
 use aegis_pqc::firma_hibrida::ClaveVerificacionHibrida;
+use aegis_procedencia::{
+    verificar_antes_de_aplicar, Atestacion, Decision, PoliticaAplicacion, Sbom,
+};
 
 /// Error del proceso de actualizacion.
 #[derive(Debug, thiserror::Error)]
@@ -42,6 +45,10 @@ pub enum UpdateError {
     /// No hay version previa que restaurar.
     #[error("no hay respaldo que restaurar para {0}")]
     NoBackup(String),
+    /// La procedencia no se verifico antes de aplicar (FASE 108): la atestacion no
+    /// casa con el SBOM del endpoint o no cumple la politica. NO se aplico nada.
+    #[error("procedencia rechazada, no se aplica: {0}")]
+    ProcedenciaRechazada(String),
 }
 
 /// Resultado de aplicar una actualizacion.
@@ -193,6 +200,28 @@ impl Updater {
             Ok(ApplyOutcome::RolledBack {
                 rejected: artifact.version.clone(),
             })
+        }
+    }
+
+    /// Aplica un artefacto SOLO si su PROCEDENCIA se verifica antes (FASE 108).
+    ///
+    /// Es el camino de produccion: antes de tocar nada, la atestacion tiene que
+    /// casar con el SBOM del endpoint y cumplir la politica de aplicacion. Si la
+    /// puerta rechaza, no se aplica y se devuelve el motivo —la verificacion de
+    /// procedencia esta en el camino critico, no en un informe que se lee despues—.
+    /// Si la puerta acepta, se sigue por el camino con comprobacion de salud y
+    /// rollback de [`Updater::apply_checked`].
+    pub fn aplicar_con_procedencia<H: HealthCheck>(
+        &self,
+        artifact: &Artifact,
+        atestacion: &Atestacion,
+        sbom: &Sbom,
+        politica: PoliticaAplicacion,
+        health: &H,
+    ) -> Result<ApplyOutcome, UpdateError> {
+        match verificar_antes_de_aplicar(atestacion, sbom, politica) {
+            Decision::Aplicar => self.apply_checked(artifact, health),
+            Decision::Rechazar { motivo } => Err(UpdateError::ProcedenciaRechazada(motivo)),
         }
     }
 

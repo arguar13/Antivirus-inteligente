@@ -42,6 +42,7 @@ members = [
     "crates/aegis-emular",
     "crates/aegis-sensor",
     "crates/aegis-integridad",
+    "crates/aegis-procedencia",
     "crates/aegis-instrumentar",
     "crates/aegis-sync",
     "crates/aegis-watchdog",
