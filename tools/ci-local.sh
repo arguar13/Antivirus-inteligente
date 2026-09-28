@@ -1482,6 +1482,23 @@ fi
 # raiz antes de dar el trabajo por terminado, aunque obligue a volver sobre una
 # fase anterior. Una invariante que se relaja «solo esta vez» deja de ser una
 # invariante y pasa a ser una aspiracion.
+# AegisSupremacy (FASE 112): la demostracion sobre las 63 categorias, con veto
+# sobre el PROYECTO ENTERO. Comprueba que la tabla de docs/107 tiene las 63 y que
+# ninguna pierde o empata sin una razon escrita —y las unicas razones aceptadas son
+# las que escapan al desarrollo: el certificado de Microsoft y el entitlement de
+# Apple—. Va justo antes de las invariantes, que cierran.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "supremacia" ]; then
+    printf '%s==>%s AegisSupremacy · la demostracion sobre las 63 categorias\n' "$GRIS" "$FIN"
+    if ./tools/verificar-supremacia.sh > $LOGS/aegis-supremacia-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-supremacia-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-supremacia-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "invariantes" ]; then
     printf '%s==>%s AegisProof · las dieciseis invariantes sobre el producto completo\n' "$GRIS" "$FIN"
     if ./tools/verificar-invariantes.sh > $LOGS/aegis-invariantes-ci.log 2>&1; then
