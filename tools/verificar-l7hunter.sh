@@ -65,6 +65,20 @@ else
     exit 1
 fi
 
+echo "==> AegisL7Hunter: desplazamientos derivados (no adivinados), verificacion y redaccion (FASE 107)"
+if cargo test -p aegis-l7hunter --quiet -- desplazamiento:: verificacion:: privacidad:: bibliotecas:: >/tmp/aegis-l7-107.log 2>&1 \
+    && cargo test -p aegis-l7hunter --test autoataque --quiet >>/tmp/aegis-l7-107.log 2>&1; then
+    echo "    ${VERDE}OK${FIN} (el offset se DERIVA de la tabla/DWARF/BTF o del analisis del binario"
+    echo "    ${VERDE}  ${FIN} —el producto se usa a si mismo—, y si no se puede es NoConcluyente, jamas"
+    echo "    ${VERDE}  ${FIN} una lectura a ciegas; un gancho no verificado en caliente no se usa; y la"
+    echo "    ${VERDE}  ${FIN} redaccion es OBLIGATORIA en el tipo —no hay texto sin redactar— con su"
+    echo "    ${VERDE}  ${FIN} presupuesto de difusion (FASE 78). Cobertura declarada de 13 pilas TLS)"
+else
+    echo "    ${ROJO}FALLO${FIN}: la derivacion de offsets, la verificacion o la redaccion no pasan"
+    sed 's/^/    | /' /tmp/aegis-l7-107.log | tail -30
+    exit 1
+fi
+
 echo "==> AegisL7Hunter: ABI del evento, cotejado C <-> Rust"
 fallo_abi=0
 for compilador in gcc clang; do

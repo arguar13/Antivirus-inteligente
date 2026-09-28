@@ -17,10 +17,19 @@
 
 pub mod abi;
 pub mod baliza;
+pub mod bibliotecas;
+pub mod desplazamiento;
 pub mod elf;
 pub mod l7;
 pub mod modelo;
 pub mod objetivo;
+pub mod privacidad;
+pub mod verificacion;
+
+pub use bibliotecas::{cobertura_de, Biblioteca, Cobertura, EstrategiaEnganche, COBERTURA};
+pub use desplazamiento::{derivar, Desplazamiento, Fuente, FuenteOffset};
+pub use privacidad::{CapturaEnClaro, ClaseSecreto, PoliticaRedaccion, PresupuestoDifusion};
+pub use verificacion::{verificar_canario, EstadoGancho};
 
 /// El clasificador de canales C2 empotrado en el binario del agente.
 ///
