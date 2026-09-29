@@ -44,11 +44,21 @@ fn main() -> std::process::ExitCode {
              \n\
              USO: aegis-agent [--stats-interval SEGUNDOS] [--harden] \n\
              \x20    [--control-socket RUTA]\n\
+             \x20    aegis-agent --capacidades [--maquina]\n\
+             \n\
+             --capacidades  informa de lo que ofrece este kernel (BTF, tracefs,\n\
+             \x20              ringbuf, BPF LSM, cgroup, SELinux/AppArmor, lockdown)\n\
+             \x20              y de lo que se degrada; sale con 3 si no habria\n\
+             \x20              telemetria de kernel. Con --maquina, lineas AEGIS-CAP/DEG.\n\
              \n\
              Requiere CAP_BPF y CAP_PERFMON (o root) para cargar las sondas,\n\
              y un kernel con CONFIG_DEBUG_INFO_BTF=y."
         );
         return std::process::ExitCode::SUCCESS;
+    }
+
+    if args.iter().any(|a| a == "--capacidades") {
+        return informar_capacidades(args.iter().any(|a| a == "--maquina"));
     }
 
     let intervalo = args
@@ -66,6 +76,41 @@ fn main() -> std::process::ExitCode {
         .map(|w| w[1].clone());
 
     ejecutar(intervalo, control_socket)
+}
+
+/// Capacidades del kernel, con el sondeo directo por `bpf()` si se compilo con
+/// la caracteristica `bpf`.
+fn capacidades() -> aegis_agent::capacidades::Capacidades {
+    #[cfg(all(target_os = "linux", feature = "bpf"))]
+    {
+        aegis_agent::bpf::capacidades()
+    }
+    #[cfg(not(all(target_os = "linux", feature = "bpf")))]
+    {
+        use aegis_agent::capacidades::{detectar_en, SondeoBpf};
+        detectar_en(
+            std::path::Path::new("/"),
+            SondeoBpf::no_realizado("agente compilado sin la caracteristica bpf"),
+        )
+    }
+}
+
+/// `--capacidades`: el informe, y un codigo de salida que un script puede usar
+/// sin leerlo (3 = no habria telemetria de kernel).
+fn informar_capacidades(maquina: bool) -> std::process::ExitCode {
+    use aegis_agent::capacidades::{informe, plan_degradacion, salida_maquina};
+    let caps = capacidades();
+    let plan = plan_degradacion(&caps);
+    if maquina {
+        print!("{}", salida_maquina(&caps, &plan));
+    } else {
+        print!("{}", informe(&caps, &plan));
+    }
+    if plan.iter().any(|d| d.bloquea_telemetria) {
+        std::process::ExitCode::from(3)
+    } else {
+        std::process::ExitCode::SUCCESS
+    }
 }
 
 /// Fuente de estado para el canal de control, respaldada por el pipeline.
@@ -147,6 +192,16 @@ fn ejecutar(intervalo: Duration, control_socket: Option<String>) -> std::process
     use aegis_agent::bpf;
 
     instalar_manejadores();
+
+    // Lo que este kernel ofrece y lo que se degrada, SIEMPRE al arrancar: una
+    // degradacion que solo se ve pidiendola es una degradacion silenciosa.
+    {
+        let caps = capacidades();
+        let plan = aegis_agent::capacidades::plan_degradacion(&caps);
+        for linea in aegis_agent::capacidades::informe(&caps, &plan).lines() {
+            eprintln!("aegis-agent: {linea}");
+        }
+    }
 
     let pipeline = Arc::new(Pipeline::new(
         GraphConfig::default(),

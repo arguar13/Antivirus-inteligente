@@ -15,6 +15,7 @@
 #![deny(missing_docs)]
 
 pub mod behavior;
+pub mod capacidades;
 pub mod decode;
 pub mod edge_ml;
 pub mod error;

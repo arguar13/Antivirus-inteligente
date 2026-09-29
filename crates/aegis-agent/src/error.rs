@@ -66,15 +66,24 @@ pub enum TelemetryError {
     )]
     TracefsUnavailable(PathBuf),
 
-    /// El kernel no expone un tracepoint que AegisCore necesita.
+    /// El kernel no tiene `BPF_MAP_TYPE_RINGBUF` y el agente no implementa el
+    /// camino por perf buffer.
     #[error(
-        "el kernel no expone el tracepoint '{name}'. Requiere CONFIG_FTRACE_SYSCALLS=y \
-         y CONFIG_TRACEPOINTS=y"
+        "el kernel no admite BPF_MAP_TYPE_RINGBUF (5.8+); el agente no implementa el \
+         camino por perf buffer, asi que no hay telemetria de kernel"
     )]
-    TracepointMissing {
-        /// Nombre del tracepoint, en la forma `categoria/evento`.
-        name: &'static str,
-    },
+    NoRingbuf,
+
+    /// Ninguna sonda del objeto tiene su tracepoint en este kernel.
+    ///
+    /// Que falte UN tracepoint ya no es un error: esa sonda se omite y su familia
+    /// se declara degradada (ver `bpf::planificar`). Solo es un error que no quede
+    /// ninguna, porque entonces el agente correria sin ver nada.
+    #[error(
+        "ningun tracepoint de las sondas existe en este kernel; requiere \
+         CONFIG_FTRACE_SYSCALLS=y y CONFIG_TRACEPOINTS=y"
+    )]
+    NoProbes,
 
     /// El proceso no tiene privilegios para cargar programas eBPF.
     #[error(

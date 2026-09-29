@@ -12,6 +12,8 @@ use std::time::Duration;
 
 use libbpf_rs::{Link, MapCore, MapFlags, ObjectBuilder, RingBufferBuilder};
 
+use crate::capacidades::{self, Capacidades, SondeoBpf, Tri};
+pub use crate::capacidades::{planificar, PlanSondas, SondaOmitida};
 use crate::error::TelemetryError;
 
 /// Objeto eBPF empotrado en el binario en tiempo de compilacion.
@@ -61,50 +63,51 @@ fn descifrar_hex(s: &str) -> Option<Vec<u8>> {
 /// Ruta del BTF del kernel. Sin el, CO-RE no puede reubicar los accesos.
 const KERNEL_BTF: &str = "/sys/kernel/btf/vmlinux";
 
-/// Punto de montaje de tracefs. libbpf resuelve ahi el identificador de perf de
-/// cada tracepoint antes de poder engancharlo.
-const TRACEFS: &str = "/sys/kernel/tracing";
-
-/// Tracepoints que las sondas necesitan, en la forma `categoria/evento`.
-///
-/// La lista se comprueba ANTES de intentar el enganche. Sin esta comprobacion,
-/// un kernel sin `CONFIG_FTRACE_SYSCALLS` o un contenedor sin tracefs montado
-/// producen un `-ENOENT` de libbpf que no dice que falta ni como arreglarlo.
-const TRACEPOINTS_REQUERIDOS: [&str; 9] = [
-    "syscalls/sys_enter_execve",
-    "syscalls/sys_enter_openat",
-    "syscalls/sys_exit_openat",
-    "syscalls/sys_enter_ptrace",
-    "syscalls/sys_enter_write",
-    "syscalls/sys_enter_rename",
-    "syscalls/sys_enter_renameat2",
-    "sched/sched_process_exit",
-    "sock/inet_sock_set_state",
-];
-
-/// Verifica que el entorno puede sostener las sondas.
-///
-/// Se ejecuta antes de cargar nada. Diagnosticar aqui, con el remedio concreto
-/// en el mensaje, evita que un despliegue falle en produccion con un errno.
-pub fn preflight() -> Result<(), TelemetryError> {
-    let btf = Path::new(KERNEL_BTF);
-    if !btf.exists() {
-        return Err(TelemetryError::NoKernelBtf(PathBuf::from(KERNEL_BTF)));
-    }
-
-    let tracefs = Path::new(TRACEFS);
-    if !tracefs.join("events").is_dir() {
-        return Err(TelemetryError::TracefsUnavailable(PathBuf::from(TRACEFS)));
-    }
-
-    for tp in TRACEPOINTS_REQUERIDOS {
-        // libbpf lee este fichero para obtener el id de perf del tracepoint.
-        if !tracefs.join("events").join(tp).join("id").is_file() {
-            return Err(TelemetryError::TracepointMissing { name: tp });
+/// Pregunta directamente al kernel, por `bpf()`, que tipos de mapa y de programa
+/// admite. Necesita privilegios; sin ellos cada respuesta es `Desconocido` con el
+/// errno, que es la verdad: no se pudo preguntar.
+pub fn sondear() -> SondeoBpf {
+    fn tri(r: libbpf_rs::Result<bool>) -> Tri {
+        match r {
+            Ok(true) => Tri::Si,
+            Ok(false) => Tri::No,
+            Err(e) => Tri::Desconocido(e.to_string()),
         }
     }
+    SondeoBpf {
+        ringbuf: tri(libbpf_rs::MapType::RingBuf.is_supported()),
+        tracepoint: tri(libbpf_rs::ProgramType::Tracepoint.is_supported()),
+        xdp: tri(libbpf_rs::ProgramType::Xdp.is_supported()),
+        lsm: tri(libbpf_rs::ProgramType::Lsm.is_supported()),
+    }
+}
 
-    Ok(())
+/// Las capacidades del kernel en el que corre el agente: lectura de `/sys` y
+/// `/proc` mas el sondeo directo por `bpf()`.
+pub fn capacidades() -> Capacidades {
+    capacidades::detectar_en(Path::new("/"), sondear())
+}
+
+/// Verifica que el entorno puede sostener la telemetria de kernel.
+///
+/// Solo falla ante lo que la BLOQUEA entera (sin BTF, sin tracefs, sin
+/// ringbuf); lo que solo quita una familia no es un fallo, es una degradacion,
+/// y la resuelve [`planificar`] sonda a sonda. Devuelve las capacidades para que
+/// quien llama las declare.
+pub fn preflight() -> Result<Capacidades, TelemetryError> {
+    let caps = capacidades();
+    if !caps.btf {
+        return Err(TelemetryError::NoKernelBtf(PathBuf::from(KERNEL_BTF)));
+    }
+    if caps.tracefs.is_none() {
+        return Err(TelemetryError::TracefsUnavailable(PathBuf::from(
+            "/sys/kernel/tracing",
+        )));
+    }
+    if caps.sondeo.ringbuf == Tri::No {
+        return Err(TelemetryError::NoRingbuf);
+    }
+    Ok(caps)
 }
 
 /// Espejo de `struct aegis_bpf_config` de `aegis_bpf_common.h`.
@@ -190,8 +193,9 @@ impl Default for SourceConfig {
     }
 }
 
-/// Contadores leidos del kernel tras una sesion de consumo.
-#[derive(Debug, Default, Clone, Copy)]
+/// Contadores leidos del kernel tras una sesion de consumo, y el plan de sondas
+/// con el que se consumio.
+#[derive(Debug, Default, Clone)]
 pub struct KernelStats {
     /// Eventos emitidos.
     pub emitted: u64,
@@ -201,6 +205,8 @@ pub struct KernelStats {
     pub filtered: u64,
     /// Cadenas truncadas.
     pub truncated: u64,
+    /// Que sondas estuvieron vivas y que familias quedaron sin datos.
+    pub plan: PlanSondas,
 }
 
 fn map_err(e: libbpf_rs::Error) -> TelemetryError {
@@ -246,10 +252,55 @@ where
     // y no tiene sentido comprobar el entorno para un binario ya sospechoso.
     verificar_integridad_bytecode()?;
 
-    preflight()?;
+    let caps = preflight()?;
+    let tracefs = caps
+        .tracefs
+        .clone()
+        .ok_or_else(|| TelemetryError::TracefsUnavailable(PathBuf::from("/sys/kernel/tracing")))?;
 
     let mut builder_obj = ObjectBuilder::default();
-    let open = builder_obj.open_memory(BPF_OBJECT).map_err(map_err)?;
+    let mut open = builder_obj.open_memory(BPF_OBJECT).map_err(map_err)?;
+
+    // El plan sale de las secciones ELF del objeto REAL: si manana se anade una
+    // sonda, entra en el plan sin tocar ninguna lista.
+    let secciones: Vec<(String, String)> = open
+        .progs()
+        .map(|p| {
+            (
+                p.name().to_string_lossy().into_owned(),
+                p.section().to_string_lossy().into_owned(),
+            )
+        })
+        .collect();
+    let plan = planificar(
+        secciones.iter().map(|(n, s)| (n.as_str(), s.as_str())),
+        // libbpf lee este fichero para obtener el id de perf del tracepoint.
+        |tp| tracefs.join("events").join(tp).join("id").is_file(),
+    );
+    if plan.activos.is_empty() {
+        return Err(TelemetryError::NoProbes);
+    }
+    // Nunca en silencio: cada sonda que no se engancha y cada familia que se
+    // queda ciega se dicen ANTES de empezar a consumir, no al terminar.
+    for o in &plan.omitidos {
+        eprintln!(
+            "aegis-agent: DEGRADADO sonda={} tracepoint={} (no existe en este kernel)",
+            o.programa, o.tracepoint
+        );
+    }
+    for f in &plan.familias_sin_datos {
+        eprintln!(
+            "aegis-agent: DEGRADADO familia={} sin sondas vivas: su telemetria es SinDatos",
+            f.nombre()
+        );
+    }
+    for mut prog in open.progs_mut() {
+        let vivo = plan.activos.iter().any(|a| OsStr::new(a) == prog.name());
+        if !vivo {
+            prog.set_autoload(false);
+        }
+    }
+
     let obj = open.load().map_err(|e| {
         // EPERM al cargar casi siempre es falta de capacidades, no un programa
         // invalido: el verificador ya paso en tiempo de compilacion.
@@ -296,6 +347,9 @@ where
     // programa, porque enganchar modifica el estado del objeto BPF.
     for prog in obj.progs_mut() {
         let nombre = prog.name().to_string_lossy().into_owned();
+        if !plan.activos.contains(&nombre) {
+            continue;
+        }
         let link = prog
             .attach()
             .map_err(|e: libbpf_rs::Error| TelemetryError::ProbeAttach {
@@ -346,5 +400,37 @@ where
         dropped_full: read_percpu_sum(&stats_map, BpfStat::DroppedFull as u32),
         filtered: read_percpu_sum(&stats_map, BpfStat::Filtered as u32),
         truncated: read_percpu_sum(&stats_map, BpfStat::Truncated as u32),
+        plan,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// La puerta que impide que una sonda nueva se degrade en silencio: se abre el
+    /// objeto REAL empotrado (abrir no carga nada, no hace falta kernel ni
+    /// privilegios) y todo programa tiene que tener familia. Si no la tuviera, al
+    /// faltar su tracepoint no habria familia que declarar como `SinDatos`.
+    #[test]
+    fn todo_programa_del_objeto_real_tiene_familia_y_es_tracepoint() {
+        let mut b = ObjectBuilder::default();
+        let open = b
+            .open_memory(BPF_OBJECT)
+            .expect("el objeto empotrado se abre sin kernel");
+        let mut n = 0;
+        for p in open.progs() {
+            n += 1;
+            let nombre = p.name().to_string_lossy().into_owned();
+            assert!(
+                capacidades::familia_de_programa(&nombre).is_some(),
+                "la sonda {nombre} no tiene familia: su degradacion no podria declararse"
+            );
+            assert!(
+                p.section().to_string_lossy().starts_with("tracepoint/"),
+                "{nombre}: el plan solo sabe comprobar tracepoints"
+            );
+        }
+        assert!(n > 0, "el objeto empotrado no tiene programas");
+    }
 }
