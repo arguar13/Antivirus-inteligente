@@ -1,5 +1,10 @@
 # Estado del CI remoto
 
+> **Superado (FASE 0 del MP-15).** El CI remoto ya no depende de GitHub Actions:
+> corre en Forgejo Actions con un runner propio con KVM, que además ejecuta la
+> matriz de kernels. Ver [ci-remoto.md](ci-remoto.md). Lo de abajo se conserva
+> como registro del diagnóstico del bloqueo de GitHub, que sigue vigente.
+
 > **Resumen: GitHub Actions está bloqueado a nivel de repositorio o cuenta.
 > No es un defecto del workflow, y no se puede arreglar desde el código.**
 > Mientras dure, la puerta de calidad del proyecto es `make ci`.

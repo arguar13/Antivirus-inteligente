@@ -1,0 +1,55 @@
+# CI de AegisCore en Forgejo Actions, con runner PROPIO y KVM.
+#
+# Por que Forgejo y no GitHub Actions: Actions esta bloqueado a nivel de cuenta
+# (docs/07-estado-ci.md: falla hasta un workflow de cinco lineas sin acciones
+# externas), y la matriz de kernels necesita KVM, que los runners alojados no
+# dan. Forgejo es software libre, autoalojable, y entiende la misma sintaxis.
+#
+# El runner se aprovisiona con deploy/ci/instalar-runner.sh y se registra con la
+# etiqueta `kvm`. Corre en modo host y como root: las pruebas cargan programas
+# eBPF, inspeccionan memoria ajena y arrancan microVM. Por eso tiene que ser una
+# maquina DEDICADA al CI, no la de un desarrollador. Ver docs/ci-remoto.md.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Un push nuevo a la misma rama cancela la tanda anterior: el veredicto que
+# importa es el del ultimo arbol.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  make-ci:
+    name: make ci (matriz de kernels incluida)
+    runs-on: kvm
+    # La tanda completa ronda las dos horas con la matriz de kernels; el plazo es
+    # un detector de cuelgues, no un objetivo.
+    timeout-minutes: 360
+    steps:
+      - name: Codigo
+        uses: actions/checkout@v4
+
+      - name: Comprobar el runner
+        run: ./deploy/ci/instalar-runner.sh --comprobar
+
+      - name: Servicios de las pruebas de integracion
+        run: |
+          pg_ctlcluster --skip-systemctl-redirect "$(pg_lsclusters -h | awk 'NR==1{print $1}')" main start || true
+          redis-server --daemonize yes || true
+
+      - name: make ci
+        env:
+          CARGO_TARGET_DIR: /var/cache/aegis-ci/target
+          AEGIS_MATRIZ_CACHE: /var/cache/aegis-ci/matriz
+          AEGIS_MUSL_SYSROOT: /opt/aegis/musl-sysroot
+        run: make ci
+
+      - name: Resumen de la matriz de kernels
+        if: always()
+        run: cat /var/cache/aegis-ci/target/matriz-kernels/resumen.md 2>/dev/null || true
