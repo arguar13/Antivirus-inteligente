@@ -32,21 +32,33 @@ SYSROOT="${AEGIS_MUSL_SYSROOT:-/opt/aegis/musl-sysroot}"
 CCWRAP="$SYSROOT/bin/aegis-musl-gcc"
 DIST="$RAIZ/dist-hermetico"
 
-# Binarios que se publican. Cada uno con las caracteristicas que necesita para
-# ser el artefacto REAL, no una version recortada para que compile.
-PUBLICADOS=(
-    "aegis-agent:aegis-agent:hermetico"
-    "aegis-ctl:aegisctl:"
-    "aegis-watchdog:aegis-watchdog:"
-    "aegis-fleet:aegis-fleet:"
-)
+# Binarios que se publican, con las caracteristicas que necesita cada uno para
+# ser el artefacto REAL. La lista NO se escribe aqui: sale de
+# tools/config/instalables.toml, la unica del proyecto, en la forma
+# `paquete:binario:features`. Antes habia una copia aqui y otra en
+# artifacts.sh, y dos listas de lo mismo acaban diciendo cosas distintas.
+mapfile -t PUBLICADOS < <(cargo xtask instalables --hermetico)
+if [ "${#PUBLICADOS[@]}" -eq 0 ]; then
+    fallo "cargo xtask instalables no devolvio ningun binario hermetico"
+    exit 1
+fi
+
+# Donde deja cargo los artefactos: respeta CARGO_TARGET_DIR. Suponer `target/`
+# hacia que, con el directorio de compilacion fuera del arbol (lo normal en CI),
+# un binario construido bien se diera por AUSENTE.
+DIR_TARGET="${CARGO_TARGET_DIR:-$RAIZ/target}"
 
 # --- El sysroot -------------------------------------------------------------
 paso "sysroot musl"
 if [ ! -x "$CCWRAP" ]; then
-    omitido "no hay sysroot en $SYSROOT"
+    # Un FALLO, no una omision. Durante meses esto salia con codigo 0 y la
+    # tanda entera decia «verde» sin haber construido ni un artefacto
+    # hermetico: una puerta que se salta a si misma cuando le falta una pieza
+    # no es una puerta. La matriz de kernels arranca estos binarios en cada
+    # distribucion, asi que sin ellos no hay nada que probar.
+    fallo "no hay sysroot en $SYSROOT"
     echo "      | construyelo con: tools/toolchain/preparar_musl.sh"
-    exit 0
+    exit 1
 fi
 ok "$SYSROOT"
 
@@ -98,7 +110,7 @@ for entrada in "${PUBLICADOS[@]}"; do
     args=(build --release --locked --target "$TRIPLE" -p "$paquete" --bin "$binario")
     [ -n "$extras" ] && args+=(--features "$extras")
     if cargo "${args[@]}" > "$log" 2>&1; then
-        ruta="target/$TRIPLE/release/$binario"
+        ruta="$DIR_TARGET/$TRIPLE/release/$binario"
         if [ -x "$ruta" ]; then
             cp "$ruta" "$DIST/$binario"
             ok "$(du -h "$DIST/$binario" | cut -f1)"

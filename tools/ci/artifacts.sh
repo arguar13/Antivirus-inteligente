@@ -43,11 +43,10 @@ echo "      | artefactos universales (sin dependencia de la libc): tools/ci/herm
 # --- Binarios que se publican ----------------------------------------------
 # paquete:binario. Son los que un cliente despliega; el resto son utilidades
 # internas y no forman parte del lanzamiento.
-PUBLICADOS=(
-    "aegis-agent:aegis-agent"       # el agente EDR
-    "aegis-ctl:aegisctl"            # CLI de administracion local
-    "aegis-watchdog:aegis-watchdog" # supervisor de auto-defensa
-    "aegis-fleet:aegis-fleet"       # cliente de flota (mTLS)
+# La lista sale de tools/config/instalables.toml (la unica del proyecto): los
+# binarios del workspace del agente, como `paquete:binario:features`.
+mapfile -t PUBLICADOS < <(cargo xtask instalables --workspace agente)
+DIR_TARGET="${CARGO_TARGET_DIR:-$RAIZ/target}"
 )
 
 rm -rf "$DIST"; mkdir -p "$DIST"
@@ -55,12 +54,13 @@ FALLOS=0
 CONSTRUIDOS=()
 
 for entrada in "${PUBLICADOS[@]}"; do
-    paquete="${entrada%%:*}"; binario="${entrada##*:}"
+    IFS=':' read -r paquete binario extras <<< "$entrada"
     log="$(mktemp)"
     paso "compilar $binario ($paquete)"
-    if cargo build --release --locked --target "$OBJETIVO" -p "$paquete" --bin "$binario" \
-        > "$log" 2>&1; then
-        ruta="target/$OBJETIVO/release/$binario"
+    args=(build --release --locked --target "$OBJETIVO" -p "$paquete" --bin "$binario")
+    [ -n "$extras" ] && args+=(--features "$extras")
+    if cargo "${args[@]}" > "$log" 2>&1; then
+        ruta="$DIR_TARGET/$OBJETIVO/release/$binario"
         if [ -x "$ruta" ]; then
             cp "$ruta" "$DIST/$binario"
             # `strip` reduce el tamano y elimina simbolos de depuracion, que en

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 #
-# Ejecuta localmente EXACTAMENTE las mismas comprobaciones que .github/workflows/ci.yml.
+# La puerta de calidad de AegisCore: `make ci` ejecuta esto.
 #
-# Existe por una razon concreta: GitHub Actions esta bloqueado a nivel de
-# repositorio o cuenta en este proyecto (ver docs/07-estado-ci.md), asi que el
-# pipeline remoto no corre. Las comprobaciones no dejan de ser obligatorias por
-# eso: se ejecutan aqui, y este script es la referencia normativa mientras el
-# CI remoto no arranque.
+# Es la UNICA definicion de la tanda. El CI remoto (.forgejo/workflows/ci.yml,
+# runner propio con KVM, docs/ci-remoto.md) no copia sus pasos: ejecuta
+# `make ci`, asi que local y remoto son el mismo conjunto por construccion y no
+# pueden divergir. Antes el remoto era un workflow de GitHub con los pasos
+# duplicados, y la copia local se quedo sin la cadena de suministro y sin los
+# artefactos hermeticos sin que nadie lo notara (FASE 0 del MP-15).
 #
 # Uso:  ./tools/ci-local.sh            (todo, de una tacada)
 #       ./tools/ci-local.sh rust       (solo un grupo)
@@ -256,13 +257,20 @@ if [ "$SOLO" = "--reanudar" ]; then
         # desde fuera eso es indistinguible de estar trabajando: se mira el log, no
         # se mueve, y no se sabe si va lento o si esta muerto. Aqui un cuelgue se
         # convierte en un FALLO con nombre, que es lo unico que se puede arreglar.
-        timeout "$PLAZO_POR_GRUPO" "$0" "$g"
+        #
+        # La matriz de kernels es la unica excepcion, y medida: arranca cada
+        # distribucion en una microVM, y las de aarch64 van en emulacion completa
+        # (cada una tiene su propio plazo de 40 minutos en tools/config/kernels.toml).
+        # Con el plazo general se la daria por colgada estando sana.
+        plazo="$PLAZO_POR_GRUPO"
+        [ "$g" = "kernels" ] && plazo="${PLAZO_KERNELS:-150m}"
+        timeout "$plazo" "$0" "$g"
         SALIDA=$?
         if [ "$SALIDA" -eq 0 ]; then
             echo "verde $g" >> "$APUNTE"
         elif [ "$SALIDA" -eq 124 ]; then
             printf '%s==> %s se ha COLGADO: mas de %s sin terminar.%s\n' \
-                "$ROJO" "$g" "$PLAZO_POR_GRUPO" "$FIN"
+                "$ROJO" "$g" "$plazo" "$FIN"
             printf '    No es lentitud: el plazo es varias veces lo que tarda el grupo\n'
             printf '    mas lento. Mira que espera (`ps`, el log del grupo) y arreglalo;\n'
             printf '    el apunte se conserva y `--reanudar` vuelve por aqui.\n'
@@ -1482,6 +1490,43 @@ fi
 # raiz antes de dar el trabajo por terminado, aunque obligue a volver sobre una
 # fase anterior. Una invariante que se relaja «solo esta vez» deja de ser una
 # invariante y pasa a ser una aspiracion.
+# ─────────────────────────────────────────────────────────────────────────────
+# FASE 0 del MP-15: verdad, cadena de suministro y matriz de kernels
+#
+# Cinco puertas que existian en el workflow de GitHub —que no arranca— o que no
+# existian en absoluto. Este script decia ejecutar «exactamente» lo mismo que el
+# workflow y no era cierto: la cadena de suministro y los artefactos hermeticos
+# no estaban aqui, y por eso no se habian ejecutado nunca.
+#
+#   arquitectura   capas sin ciclos, idioma unico de nombres, modelo de amenazas
+#   cadena         cargo-deny, cargo-audit y cargo-vet en los cuatro workspaces
+#   hermetico      binarios estaticos musl de los instalables (FALLA sin sysroot)
+#   kernels        cada distribucion de tools/config/kernels.toml en su microVM:
+#                  capacidades, verificador eBPF y pruebas e2e. OBLIGATORIA: sin
+#                  KVM no hay veredicto, y no hay verde
+#   documentacion  README y matriz de capacidades coinciden con el codigo
+# ─────────────────────────────────────────────────────────────────────────────
+paso finales "Finales de linea · ningun fichero del arbol con CRLF" \
+    bash -c 'crlf="$(git ls-files --eol | grep "w/crlf" || true)"; \
+             [ -z "$crlf" ] || { echo "ficheros con CRLF (bash los lee mal):"; echo "$crlf"; exit 1; }'
+paso arquitectura "Arquitectura · capas, idioma de los nombres y modelo de amenazas" \
+    cargo xtask arquitectura
+paso cadena "Cadena de suministro · deny, audit y vet en los cuatro workspaces" \
+    ./tools/ci/supply_chain.sh
+paso hermetico "Artefactos hermeticos · binarios estaticos de los instalables" \
+    ./tools/ci/hermetico.sh
+# La matriz CONSTRUYE lo que prueba: las sondas y el verificador de x86-64, y los
+# artefactos cruzados de aarch64 (sondas, verificador y agente). Usar artefactos
+# que ya estuvieran en disco probaria un arbol que no es este, y en un runner
+# limpio no existirian. El agente hermetico de x86-64 lo deja el grupo anterior.
+paso kernels "Matriz de kernels · cada distribucion real en su microVM" \
+    bash -c 'make -C drivers/linux/aegis-bpf build verify-estatico \
+             && cargo xtask kernels traer \
+             && tools/matriz-kernels/construir-cruzado.sh aarch64 \
+             && cargo xtask kernels ejecutar'
+paso documentacion "Documentacion generada · README y matriz coinciden con el codigo" \
+    cargo xtask docs --comprobar
+
 # AegisSupremacy (FASE 112): la demostracion sobre las 63 categorias, con veto
 # sobre el PROYECTO ENTERO. Comprueba que la tabla de docs/107 tiene las 63 y que
 # ninguna pierde o empata sin una razon escrita —y las unicas razones aceptadas son

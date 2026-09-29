@@ -49,8 +49,11 @@ crates/aegis-syscallguard/tests/fixtures/syscall_stub
 # CA de proxy corporativo para la imagen hermetica: son de cada organizacion.
 tools/toolchain/imagen/ca/*.crt
 
-# Artefactos de la construccion hermetica (FASE 42).
+# Artefactos de la construccion hermetica (FASE 42) y de la cruzada para la
+# matriz de kernels (tools/matriz-kernels/construir-cruzado.sh).
 dist-hermetico/
+dist-hermetico-aarch64/
+drivers/linux/aegis-bpf/out-aarch64/
 
 # Artefactos de compilacion del transporte del enjambre (workspace aparte).
 /swarm-net/target/

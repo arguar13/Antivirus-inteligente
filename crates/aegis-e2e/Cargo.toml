@@ -11,6 +11,13 @@ publish = false
 [lints]
 workspace = true
 
+# Las mismas variantes de enlace que el agente publicado, para que las pruebas
+# e2e se puedan llevar ESTATICAS a las microVM de la matriz de kernels
+# (tools/config/kernels.toml): musl hermetico en x86-64, glibc estatica en aarch64.
+[features]
+hermetico = ["aegis-agent/hermetico"]
+estatico-sistema = ["aegis-agent/estatico-sistema"]
+
 [dependencies]
 aegis-agent = { path = "../aegis-agent" }
 aegis-net = { path = "../aegis-net" }
