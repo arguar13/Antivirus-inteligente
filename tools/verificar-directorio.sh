@@ -59,8 +59,12 @@ else
     exit 1
 fi
 
-echo "==> AegisDirectory: el lector LDAP en vivo compila"
-if (cd server && cargo build -q -p aegis-itdr --features live-ldap) >/tmp/aegis-directorio-live.log 2>&1; then
+echo "==> AegisDirectory: el lector LDAP en vivo compila y pasa clippy"
+# Clippy y no solo `build`: el codigo tras una caracteristica opcional no lo ve
+# el clippy de la tanda general, y aqui se acumulo un aviso sin que nadie lo
+# viera hasta subir ldap3 (FASE 0 del MP-15).
+if (cd server && cargo clippy -q -p aegis-itdr --features live-ldap --all-targets -- -D warnings) \
+    >/tmp/aegis-directorio-live.log 2>&1; then
     echo "    ${VERDE}OK${FIN} (el colector de solo lectura sobre ldap3 compila con su cadena TLS)"
 else
     echo "    ${ROJO}FALLO${FIN}: el lector en vivo no compila"

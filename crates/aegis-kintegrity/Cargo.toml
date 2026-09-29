@@ -2,6 +2,7 @@
 name = "aegis-kintegrity"
 description = "Verificacion cruzada de la integridad del kernel: deteccion de rootkits DKOM y procesos ocultos"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

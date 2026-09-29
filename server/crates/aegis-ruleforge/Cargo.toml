@@ -2,6 +2,7 @@
 name = "aegis-ruleforge"
 description = "La fabrica de contenido: compila el corpus mundial de deteccion en artefactos firmados"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

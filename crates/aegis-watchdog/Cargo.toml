@@ -2,6 +2,7 @@
 name = "aegis-watchdog"
 description = "Watchdog de alta disponibilidad del agente y el driver"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

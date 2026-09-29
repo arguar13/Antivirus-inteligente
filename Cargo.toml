@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-exclude = ["fuzz", "swarm-net"]
+exclude = ["fuzz", "swarm-net", "xtask"]
 members = [
     "crates/aegis-entidad",
     "crates/aegis-estado",
@@ -76,6 +76,10 @@ members = [
 ]
 
 [workspace.package]
+# Ningun crate del proyecto se publica en un registro. Ademas de ser la verdad,
+# es lo que permite a cargo-deny aceptar las dependencias internas por `path`
+# sin version (allow-wildcard-paths en deny.toml).
+publish = false
 version = "0.1.0"
 edition = "2021"
 # MSRV real, no aspiracional. Se subio de 1.77 a 1.82 cuando entro tract-onnx, y
@@ -128,3 +132,16 @@ debug = false
 # Sin nombres de simbolo, los mensajes de panico que incrustan rutas de fichero
 # son de lo poco que queda legible en el binario; se recortan.
 overflow-checks = true
+
+# Perfil de la MATRIZ DE CAPACIDADES (`cargo xtask docs`). Es el de release —el
+# mismo LTO, el mismo codegen unit, las mismas optimizaciones— sin el `strip`:
+# los simbolos que sobreviven al LTO son la prueba de que un crate se EJECUTA en
+# el binario, y no solo de que esta enlazado. No se publica nunca.
+[profile.matriz]
+inherits = "release"
+strip = false
+# Informacion de funciones (sin variables ni tipos): cada funcion INLINEADA deja
+# su espacio de nombres en DWARF. Sin esto, un crate cuyo codigo el LTO inlinea
+# entero —aegis-kguard, llamado de verdad antes de cargar cada sonda— saldria
+# como «enlazado sin invocar», que seria mentir por el lado contrario.
+debug = "limited"

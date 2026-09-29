@@ -2,6 +2,7 @@
 name = "aegis-disasm"
 description = "Desensamblado multiarquitectura, grafo de flujo de control y deduccion de capacidades con evidencia"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

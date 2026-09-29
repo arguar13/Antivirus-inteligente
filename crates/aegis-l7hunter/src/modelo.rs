@@ -409,7 +409,8 @@ fn normalizar_log(x: f64, min: f64, max: f64) -> f64 {
     (x / min).ln() / (max / min).ln()
 }
 
-type Plan = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
+// Plan ejecutable de tract (>= 0.22 lo entrega compartido en un Arc).
+type Plan = std::sync::Arc<TypedRunnableModel>;
 
 /// El veredicto accionable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -500,7 +501,7 @@ impl ModeloC2 {
             .run(tvec!(tensor.into()))
             .map_err(|e| ModeloError::Inferencia(e.to_string()))?;
         salida[0]
-            .to_array_view::<f32>()
+            .to_plain_array_view::<f32>()
             .map_err(|e| ModeloError::Inferencia(e.to_string()))?
             .iter()
             .next()

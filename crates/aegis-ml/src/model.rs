@@ -136,7 +136,8 @@ pub struct Prediction {
     pub verdict: Verdict,
 }
 
-type Plan = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
+// Plan ejecutable de tract (>= 0.22 lo entrega compartido en un Arc).
+type Plan = std::sync::Arc<TypedRunnableModel>;
 
 /// Modelo de clasificacion cargado y listo para inferir.
 pub struct MalwareModel {
@@ -226,7 +227,7 @@ impl MalwareModel {
             .map_err(|e| ModelError::Inference(e.to_string()))?;
 
         let vista = salida[0]
-            .to_array_view::<f32>()
+            .to_plain_array_view::<f32>()
             .map_err(|e| ModelError::BadOutput(e.to_string()))?;
         let score = vista
             .iter()

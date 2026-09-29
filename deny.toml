@@ -1,20 +1,73 @@
-# Politica de cadena de suministro.
+# ─────────────────────────────────────────────────────────────────────────────
+#  Política de cadena de suministro (cargo-deny)
+# ─────────────────────────────────────────────────────────────────────────────
 #
-# Cada dependencia de terceros es superficie de ataque en un producto de
-# seguridad: si se compromete un crate que acaba dentro del agente, se ha
-# comprometido el propio EDR. La lista se mantiene deliberadamente corta.
+#  Cada dependencia de terceros es superficie de ataque en un producto de
+#  seguridad: si se compromete un crate que acaba dentro del agente, se ha
+#  comprometido el propio EDR.
+#
+#  Se aplica a los cuatro espacios de trabajo (raíz, server/, swarm-net/, xtask/)
+#  en el grupo `cadena` de make ci (tools/ci/supply_chain.sh), junto a
+#  cargo-audit y cargo-vet. Hasta la FASE 0 del MP-15 esta puerta NO se ejecutaba
+#  en make ci —solo la llamaba el workflow de GitHub, que nunca arranca— y cuando
+#  se ejecutó por primera vez encontró vulnerabilidades reales. Se corrigieron de
+#  raíz; lo que queda abajo como excepción lleva su motivo comprobable.
+
+[graph]
+# La puerta gobierna lo que SE DISTRIBUYE. Las dependencias de desarrollo
+# (yara-x como oráculo de paridad del motor de patrones, rcgen para certificados
+# de prueba) solo corren en el CI, sobre entradas propias, y no llegan a ningún
+# binario. Se siguen auditando con cargo-audit sobre el Cargo.lock completo.
+exclude-dev = true
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # rsa — «Marvin Attack» (fuga por tiempos en operaciones con CLAVE PRIVADA:
+    # descifrado y firma PKCS#1 v1.5). No hay versión corregida. AegisCore usa
+    # rsa exclusivamente para VERIFICAR la firma del quote TPM con la clave
+    # pública del chip (crates/aegis-attest/src/verificador.rs: RsaPublicKey +
+    # pkcs1v15::VerifyingKey). Verificar no maneja secretos, así que el ataque
+    # no aplica. tools/ci/supply_chain.sh FALLA si aparece en el código
+    # cualquier uso de clave privada RSA: esta excepción se sostiene solo
+    # mientras eso sea cierto.
+    { id = "RUSTSEC-2023-0071", reason = "rsa solo verifica con clave pública (quote TPM); Marvin exige clave privada. Comprobado por supply_chain.sh" },
+    # proc-macro-error2 — sin mantenimiento. Llega por hax-lib-macros, una macro
+    # procedural de libcrux-ml-kem (ML-KEM-768 de Cryspen) que solo se ejecuta
+    # al COMPILAR y no deja código en el binario. libcrux-ml-kem 0.0.10 es la
+    # última versión publicada; se retira al actualizarla.
+    { id = "RUSTSEC-2026-0173", reason = "macro procedural de compilación vía libcrux-ml-kem (última versión); sin código en el binario" },
+    # paste — sin mantenimiento. Macro procedural de compilación que usan
+    # tract-core y tract-linalg (inferencia ONNX); no deja código en el binario.
+    { id = "RUSTSEC-2024-0436", reason = "macro procedural de compilación vía tract; sin código en el binario" },
+]
 
 [bans]
-# Dos versiones del mismo crate en el arbol suelen significar que una no se
-# actualiza. En un producto de seguridad eso es una vulnerabilidad latente.
+# Dos versiones del mismo crate en el árbol suelen significar que una no se
+# actualiza. Se avisa; no se bloquea, porque en el servidor lo imponen tokio y
+# axum aguas arriba.
 multiple-versions = "warn"
 wildcards = "deny"
+# Las dependencias internas por `path` no llevan versión y son comodines para
+# cargo-deny. Se permiten SOLO porque ningún crate del proyecto se publica
+# (`publish = false` en todos): un comodín en un crate publicado sería una
+# dependencia sin fijar en el registro.
+allow-wildcard-paths = true
 
 [licenses]
-allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0"]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    # foldhash (tabla hash de hashbrown): permisiva, aprobada por OSI y la FSF.
+    "Zlib",
+    # webpki-roots: es la lista de autoridades de Mozilla, DATOS y no código;
+    # CDLA-Permissive-2.0 es la licencia permisiva de la Linux Foundation para datos.
+    "CDLA-Permissive-2.0",
+]
 
 [sources]
 unknown-registry = "deny"

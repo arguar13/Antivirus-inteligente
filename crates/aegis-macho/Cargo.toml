@@ -2,6 +2,7 @@
 name = "aegis-macho"
 description = "Lector de binarios de macOS (Mach-O y universales), endurecido contra entrada hostil"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

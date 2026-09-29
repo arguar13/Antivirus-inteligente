@@ -2,6 +2,7 @@
 name = "aegis-presupuesto"
 description = "Presupuesto de memoria del agente: reparto por host, regimenes y obligacion desde el kernel"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

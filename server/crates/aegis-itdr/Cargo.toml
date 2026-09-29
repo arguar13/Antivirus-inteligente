@@ -2,6 +2,7 @@
 name = "aegis-itdr"
 description = "Deteccion y respuesta a amenazas de identidad (ITDR): Kerberoasting, Golden/Silver Ticket y grafo de identidad con centralidad"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -71,7 +72,10 @@ live-ldap = ["dep:ldap3"]
 # del servidor ya trae). Solo con la caracteristica `live-ldap`, y solo su API
 # sincrona (`LdapConn`), para no meter tokio en este crate. Es SOLO LECTURA: el
 # colector se liga, busca y desliga; no escribe en el directorio.
-version = "0.11"
+# 0.12: sobre rustls 0.23. La 0.11 arrastraba rustls 0.21, rustls-webpki 0.101
+# (tres fallos de validacion de certificados, RUSTSEC-2026-0098/0099/0104) y
+# ring 0.16 sin mantenimiento; nadie lo vio porque la auditoria no corria.
+version = "0.12"
 default-features = false
-features = ["sync", "tls-rustls"]
+features = ["sync", "tls-rustls-ring"]
 optional = true

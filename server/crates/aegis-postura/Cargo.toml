@@ -2,6 +2,7 @@
 name = "aegis-postura"
 description = "Postura de nube reconstruida de los eventos del plano de control: privilegios excesivos, almacenamiento publico, claves sin rotar, registro apagado y red abierta, cada hallazgo con su evento y su entidad"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

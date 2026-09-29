@@ -2,6 +2,7 @@
 name = "aegis-sync"
 description = "Sincronizacion diferencial de indicadores de compromiso con arboles de Merkle"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

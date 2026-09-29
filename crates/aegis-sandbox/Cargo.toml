@@ -2,6 +2,7 @@
 name = "aegis-sandbox"
 description = "Aislamiento preventivo de procesos con Landlock y seccomp-bpf"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

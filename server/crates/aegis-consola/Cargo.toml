@@ -2,6 +2,7 @@
 name = "aegis-consola"
 description = "El lado servidor de la consola del SOC: RBAC, aislamiento multi-inquilino, coste de consulta antes de ejecutar, y el estrangulamiento de exportacion por el juez de difusion (FASE 78). CONSULTA y GUARDA; no decide veredictos"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

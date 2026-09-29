@@ -11,6 +11,9 @@ use std::io::Read;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+
 use aegis_firehose::bomba::Bomba;
 use aegis_firehose::diario::{Config, Diario, MAX_REGISTRO};
 use aegis_firehose::reintento::Politica;
@@ -87,12 +90,10 @@ fn levantar_colector() -> (String, Vec<u8>, Arc<Colector>) {
     let pem_cert = cert.cert.pem();
     let pem_clave = cert.key_pair.serialize_pem();
 
-    let certs: Vec<_> = rustls_pemfile::certs(&mut pem_cert.as_bytes())
+    let certs: Vec<_> = CertificateDer::pem_slice_iter(pem_cert.as_bytes())
         .map(|c| c.unwrap())
         .collect();
-    let clave = rustls_pemfile::private_key(&mut pem_clave.as_bytes())
-        .unwrap()
-        .unwrap();
+    let clave = PrivateKeyDer::from_pem_slice(pem_clave.as_bytes()).unwrap();
     let cfg = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, clave)

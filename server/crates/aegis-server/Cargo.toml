@@ -2,6 +2,7 @@
 name = "aegis-server"
 description = "Plano de control de AegisCore: ingesta de flota gRPC/mTLS y API de administracion"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -94,7 +95,6 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 tonic-build = "0.13"
 
 [dev-dependencies]
-rustls-pemfile = "2"
 # Certificado real para el colector syslog de las pruebas de auditoria.
 rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

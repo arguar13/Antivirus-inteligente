@@ -32,7 +32,8 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::sync::Arc;
 
-use rustls::pki_types::ServerName;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConnection, StreamOwned};
 
 use crate::destino::Destino;
@@ -70,9 +71,11 @@ impl DestinoSyslog {
     /// esta es un EDR que amplifica la averia en vez de contenerla.
     pub fn nuevo(cfg: ConfigSyslog) -> Resultado<DestinoSyslog> {
         let mut raiz = rustls::RootCertStore::empty();
-        let mut pem = std::io::Cursor::new(&cfg.ca_pem);
         let mut anadidos = 0;
-        for cert in rustls_pemfile::certs(&mut pem) {
+        // El analizador PEM de rustls-pki-types, el que los propios mantenedores
+        // de rustls recomiendan: rustls-pemfile esta sin mantenimiento
+        // (RUSTSEC-2025-0134) y dejo de ser dependencia.
+        for cert in CertificateDer::pem_slice_iter(&cfg.ca_pem) {
             let cert = cert.map_err(|e| {
                 ErrorFirehose::Config(format!("la CA del colector no es PEM valido: {e}"))
             })?;

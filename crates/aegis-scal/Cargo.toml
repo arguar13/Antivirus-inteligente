@@ -2,6 +2,7 @@
 name = "aegis-scal"
 description = "Capa de abstraccion del nucleo del sistema (SCAL): telemetria y control independientes del sistema operativo"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

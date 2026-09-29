@@ -2,6 +2,7 @@
 name = "aegis-scale"
 description = "Plano de control para 100.000 agentes: particionado de flota, conexiones, base de datos y actualizacion progresiva"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

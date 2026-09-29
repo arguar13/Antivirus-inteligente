@@ -286,13 +286,11 @@ mod vivo {
             let mut ldap = LdapConn::new(&self.url).map_err(|e| {
                 ItdrError::IdentidadDesconocida(format!("no se pudo conectar: {e}"))
             })?;
-            match &self.credenciales {
-                Some((dn, clave)) => {
-                    ldap.simple_bind(dn, clave)
-                        .and_then(ldap3::LdapResult::success)
-                        .map_err(|e| ItdrError::IdentidadDesconocida(format!("enlace: {e}")))?;
-                }
-                None => {}
+            // Sin credenciales, enlace anonimo (lo que el directorio permita leer).
+            if let Some((dn, clave)) = &self.credenciales {
+                ldap.simple_bind(dn, clave)
+                    .and_then(ldap3::LdapResult::success)
+                    .map_err(|e| ItdrError::IdentidadDesconocida(format!("enlace: {e}")))?;
             }
             // Los atributos que el analisis necesita. El descriptor de seguridad
             // exige el control de servidor para que se devuelva la DACL.

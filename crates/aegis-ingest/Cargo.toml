@@ -2,6 +2,7 @@
 name = "aegis-ingest"
 description = "Ingesta y normalizacion de registros de cualquier origen, con contrapresion y punto de control durable"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

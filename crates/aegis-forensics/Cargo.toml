@@ -2,6 +2,7 @@
 name = "aegis-forensics"
 description = "Introspeccion de memoria en vivo y deteccion de exploits de corrupcion"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

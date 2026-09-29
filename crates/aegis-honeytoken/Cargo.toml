@@ -2,6 +2,7 @@
 name = "aegis-honeytoken"
 description = "Honey-tokens dinamicos y decepcion activa: credenciales senuelo atribuibles (FASE 52)"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

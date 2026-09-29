@@ -29,13 +29,14 @@ name = "aegis-swarm-net"
 description = "Transporte libp2p (gossipsub) para el enjambre AegisSwarm: mueve bytes, no toma decisiones"
 version = "0.1.0"
 edition = "2021"
+publish = false
 rust-version = "1.85"
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 repository = "https://github.com/arguar13/Antivirus-inteligente"
 
 [dependencies]
 aegis-swarm = { path = "../crates/aegis-swarm" }
-libp2p = { version = "0.56", default-features = false, features = [
+libp2p = { version = "0.57", default-features = false, features = [
     "gossipsub",
     "identify",
     "macros",

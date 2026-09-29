@@ -2,6 +2,7 @@
 name = "aegis-sbom"
 description = "AegisPosture: inventario de componentes (SBOM) de paquetes, bibliotecas, binarios, contenedores y dependencias de aplicacion, correlacion con OSV y alcanzabilidad en ejecucion — cargado, alcanzable y expuesto"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

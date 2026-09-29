@@ -2,6 +2,7 @@
 name = "aegis-resp"
 description = "Motor de respuesta activa de AegisCore: terminacion, cuarentena y aislamiento"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

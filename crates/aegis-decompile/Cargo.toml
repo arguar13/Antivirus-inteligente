@@ -2,6 +2,7 @@
 name = "aegis-decompile"
 description = "Decompilador determinista a pseudo-C (FASE 100): elevacion a IR SSA, reconstruccion de tipos y pseudo-C con evidencia, sobre el grafo de aegis-disasm"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

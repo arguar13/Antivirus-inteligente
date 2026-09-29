@@ -2,6 +2,7 @@
 name = "aegis-scan"
 description = "Motor de deteccion profunda de AegisCore: YARA sobre ficheros y memoria de procesos"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

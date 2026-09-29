@@ -2,6 +2,7 @@
 name = "aegis-conocimiento"
 description = "AegisKnowledge: el grafo de conocimiento STIX 2.1 completo, unido a las entidades observadas, con inferencia acotada y explicable"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

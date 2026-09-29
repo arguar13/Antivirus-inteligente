@@ -2,6 +2,7 @@
 name = "aegis-pe"
 description = "Lector de ejecutables de Windows (PE/COFF) y del huella Authenticode, endurecido contra entrada hostil"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

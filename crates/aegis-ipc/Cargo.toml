@@ -2,6 +2,7 @@
 name = "aegis-ipc"
 description = "Contrato ABI y consumidor del ring buffer compartido Ring 0 <-> Ring 3 de AegisCore"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

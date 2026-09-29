@@ -2,6 +2,7 @@
 name = "aegis-patron"
 description = "Motor de patrones propio (FASE 101): compatible con la sintaxis YARA, de coste acotado por tipo, tri-estado, determinista y sin retroceso. Sustituye a yara-x en el arbol del agente"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -24,4 +25,4 @@ thiserror = "2"
 # la fila de yara-x desaparece de `tools/lineabase-agente.txt` (invariante 8 del
 # MEGAPROMPT 11). La comparacion contra el motor que se sustituye es como se
 # demuestra la paridad sin someterse a el.
-yara-x = "0.8"
+yara-x = "1"

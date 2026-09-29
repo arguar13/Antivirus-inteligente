@@ -2,6 +2,7 @@
 name = "aegis-hunt"
 description = "AegisQLRunner: ejecucion de consultas AegisQL contra el estado real del endpoint"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

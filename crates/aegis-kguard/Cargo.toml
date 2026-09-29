@@ -2,6 +2,7 @@
 name = "aegis-kguard"
 description = "Integridad del bytecode eBPF y bloqueo de permisos de mapas"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

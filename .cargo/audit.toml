@@ -21,53 +21,31 @@
 # las vulnerabilidades si.
 informational_warnings = ["unmaintained", "unsound", "notice"]
 
+# Revisada en la FASE 0 del MP-15, la primera vez que esta auditoria corrio de
+# verdad en make ci (grupo `cadena`, tools/ci/supply_chain.sh). Se CORRIGIERON de
+# raiz: rustls (0.23.45), time (0.3.55, al subir tract a 0.23), hickory-proto
+# (0.26, al subir libp2p a 0.57), la pila TLS antigua de ldap3 (rustls 0.21,
+# rustls-webpki 0.101, ring 0.16, al subir ldap3 a 0.12), rustls-pemfile
+# (sustituido por rustls-pki-types) y quince avisos de wasmtime (al subir el
+# oraculo yara-x a 1.21). Lo que queda:
 ignore = [
-    # --- Subarbol de `yara-x 0.8` -> `wasmtime 22` ---------------------------
-    # yara-x compila las reglas YARA a WebAssembly y las ejecuta en wasmtime. El
-    # WASM que corre es el que GENERA yara-x a partir de NUESTRAS reglas de
-    # confianza, no un modulo WASM de un atacante. Los avisos de wasmtime tratan
-    # de escapes del sandbox del INVITADO, de WASI con rutas no confiables y del
-    # modelo de componentes: superficies que exigen un invitado o una entrada
-    # hostil que AegisCore nunca carga. wasmtime 22 esta fijado por yara-x 0.8;
-    # el arreglo llega con un salto mayor de yara-x, que se hara por separado por
-    # su impacto en el motor de escaneo (del que dependen cinco crates).
-    "RUSTSEC-2024-0438", # wasmtime: sandbox del invitado
-    "RUSTSEC-2025-0046", # wasmtime: panico con fd_renumber (WASIp1)
-    "RUSTSEC-2025-0118", # wasmtime: API unsound sobre memoria lineal compartida
-    "RUSTSEC-2026-0020", # wasmtime: agotamiento de recursos del invitado (WASI)
-    "RUSTSEC-2026-0021", # wasmtime: panico en wasi:http/types.fields
-    "RUSTSEC-2026-0085", # wasmtime: panico al elevar `flags` del modelo de comp.
-    "RUSTSEC-2026-0086", # wasmtime: modelo de componentes
-    "RUSTSEC-2026-0087", # wasmtime: f64x2.splat en Cranelift x86-64
-    "RUSTSEC-2026-0088", # wasmtime: modelo de componentes
-    "RUSTSEC-2026-0089", # wasmtime: modelo de componentes
-    "RUSTSEC-2026-0091", # wasmtime: OOB al transcodificar cadenas del modelo comp
-    "RUSTSEC-2026-0092", # wasmtime: panico transcodificando UTF-16 desalineado
-    "RUSTSEC-2026-0093", # wasmtime: OOB en transcodificacion UTF-16
-    "RUSTSEC-2026-0094", # wasmtime: table.grow con backend Winch
-    "RUSTSEC-2026-0095", # wasmtime: escape del sandbox con backend Winch
-    "RUSTSEC-2026-0096", # wasmtime: miscompilacion de acceso al heap en aarch64
-    "RUSTSEC-2026-0222", # wasmtime: mezcla de indices de tipo entre engines
-    "RUSTSEC-2026-0269", # wasmtime: escape del sandbox con rutas con barra final
-
-    # `time` (RUSTSEC-2026-0009): DoS por agotamiento de pila en el PARSEO de
-    # fechas/horas de texto. AegisCore no parsea fechas de texto: usa `time`
-    # (via rcgen) solo para construir la validez de certificados con marcas Unix
-    # (`from_unix_timestamp`), que no toca las funciones afectadas. Ademas queda
-    # fijado a < 0.3.42 por el subarbol de wasmtime.
-    "RUSTSEC-2026-0009",
-
-    # `rsa` (RUSTSEC-2023-0071, "Marvin Attack"): canal lateral de tiempo en el
-    # descifrado RSA. Transitivo por yara-x. SIN version parcheada publicada
-    # (patched = []). AegisCore no descifra RSA ni atiende operaciones RSA
-    # remotas sensibles al tiempo: yara-x lo arrastra para verificar firmas de
-    # modulos PE en analisis local. Se retira en cuanto `rsa` publique el arreglo.
+    # `rsa` (RUSTSEC-2023-0071, «Marvin Attack»): fuga por tiempos en operaciones
+    # con CLAVE PRIVADA. Sin version corregida. AegisCore usa rsa solo para
+    # VERIFICAR (el quote TPM en aegis-attest; yara-x, firmas de PE en pruebas).
+    # tools/ci/supply_chain.sh FALLA si aparece un uso de clave privada RSA.
     "RUSTSEC-2023-0071",
 
-    # `bincode` (RUSTSEC-2025-0141) y `paste` (RUSTSEC-2024-0436): avisos de
-    # "no mantenido", no vulnerabilidades explotables. `paste` es una macro de
-    # tiempo de compilacion sin superficie en ejecucion; `bincode` lo arrastra
-    # yara-x. Se sustituyen cuando el arbol aguas arriba migre.
-    "RUSTSEC-2025-0141",
-    "RUSTSEC-2024-0436",
+    # wasmtime 45 (via yara-x 1.21, DEPENDENCIA DE PRUEBAS: el oraculo de paridad
+    # del motor de patrones). Los tres avisos tratan de modulos WASM de un
+    # invitado hostil y de WASI con rutas no confiables; el WASM que corre aqui lo
+    # genera yara-x desde reglas propias, en el CI, y nunca llega a un binario.
+    # No hay version de wasmtime compatible con yara-x 1.21 que los corrija.
+    "RUSTSEC-2026-0269", # rutas con barra final en el sandbox de ficheros WASI
+    "RUSTSEC-2026-0316", # fuel de llamadas al anfitrion con registros dinamicos
+    "RUSTSEC-2026-0222", # mezcla de indices de tipo entre engines
+
+    # Avisos de «sin mantenimiento», no vulnerabilidades:
+    "RUSTSEC-2025-0141", # bincode: via yara-x, solo pruebas
+    "RUSTSEC-2026-0173", # proc-macro-error2: macro de compilacion de libcrux (ML-KEM), sin codigo en el binario
+    "RUSTSEC-2024-0436", # paste: macro de compilacion (libp2p, en swarm-net), sin codigo en el binario
 ]

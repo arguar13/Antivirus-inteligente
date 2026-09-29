@@ -2,6 +2,7 @@
 name = "aegis-firehose"
 description = "Entrega sin perdida de auditoria hacia SIEM y SOAR: WAL en disco, Kafka y Syslog sobre TLS"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -14,7 +15,6 @@ workspace = true
 thiserror = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
 rustls-pki-types = "1"
-rustls-pemfile = "2"
 # Kafka con la biblioteca de referencia, enlazada contra la librdkafka del
 # sistema. POR QUE NO SE COMPILA LA VENDIDA: el productor vive en el PLANO DE
 # CONTROL, que se despliega como servicio con sus dependencias gestionadas, no

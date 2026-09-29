@@ -2,6 +2,7 @@
 name = "aegis-ctl"
 description = "Protocolo de control por socket Unix y CLI de administracion aegisctl"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

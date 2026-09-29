@@ -47,7 +47,8 @@ pub struct Prediccion {
     pub veredicto: Veredicto,
 }
 
-type Plan = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
+// Plan ejecutable de tract (>= 0.22 lo entrega compartido en un Arc).
+type Plan = std::sync::Arc<TypedRunnableModel>;
 
 /// El modelo de comportamiento cargado y listo para inferir en el borde.
 pub struct ModeloComportamiento {
@@ -106,7 +107,7 @@ impl ModeloComportamiento {
             .run(tvec!(tensor.into()))
             .map_err(|e| ModeloError::Inferencia(e.to_string()))?;
         let score = salida[0]
-            .to_array_view::<f32>()
+            .to_plain_array_view::<f32>()
             .map_err(|e| ModeloError::Inferencia(e.to_string()))?
             .iter()
             .next()

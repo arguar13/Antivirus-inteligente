@@ -2,6 +2,7 @@
 name = "aegis-edgeml"
 description = "Inferencia TinyML en el borde: deteccion de zero-day por comportamiento, sin nube (FASE 53)"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -13,5 +14,5 @@ workspace = true
 [dependencies]
 # El mismo motor de inferencia ONNX que ya usa aegis-ml para el modelo estatico:
 # Rust puro, sin libs nativas de C, corre en el borde sin conexion.
-tract-onnx = "0.21"
+tract-onnx = "0.23"
 thiserror = "2"

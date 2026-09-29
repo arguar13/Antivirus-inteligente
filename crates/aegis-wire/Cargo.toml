@@ -2,6 +2,7 @@
 name = "aegis-wire"
 description = "Diseccion semantica de protocolos: convierte trafico crudo en hechos, con reensamblado TCP resistente a evasion"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

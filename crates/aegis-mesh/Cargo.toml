@@ -2,6 +2,7 @@
 name = "aegis-mesh"
 description = "Malla P2P de la red local: propagacion cifrada y autenticada de vacunas entre agentes"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

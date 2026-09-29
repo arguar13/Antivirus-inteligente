@@ -2,6 +2,7 @@
 name = "aegis-captura"
 description = "Captura de trafico indexada por entidad con retencion selectiva por veredicto y reproduccion determinista"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -2,6 +2,7 @@
 name = "aegis-ransom"
 description = "Motor de deteccion y contencion de ransomware en tiempo real"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

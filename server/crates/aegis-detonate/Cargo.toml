@@ -2,6 +2,7 @@
 name = "aegis-detonate"
 description = "Detonacion de muestras en microVM con invitado hostil e informe de comportamiento determinista"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

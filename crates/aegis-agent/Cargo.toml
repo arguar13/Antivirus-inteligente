@@ -2,6 +2,7 @@
 name = "aegis-agent"
 description = "Agente de deteccion de AegisCore: consumidor de telemetria, grafo de linaje y triaje"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -30,6 +31,12 @@ bpf = ["dep:libbpf-rs", "dep:libc"]
 # No entra por defecto porque compilar elfutils y zlib en cada `cargo build` de
 # desarrollo cuesta minutos y no aporta nada en local.
 hermetico = ["bpf", "libbpf-rs/vendored"]
+# Enlace ESTATICO contra la libelf y la zlib del sistema (libbpf sigue saliendo
+# de su fuente). Es la via del agente cruzado de aarch64 para la matriz de
+# kernels: no hay toolchain musl cruzado empaquetado, pero si las bibliotecas
+# arm64 de la distribucion por multiarquitectura, y con `+crt-static` el binario
+# no depende de la libc del destino (tools/matriz-kernels/construir-cruzado.sh).
+estatico-sistema = ["bpf", "libbpf-rs/static"]
 
 [dependencies]
 aegis-edgeml = { path = "../aegis-edgeml" }

@@ -2,6 +2,7 @@
 name = "aegis-orchestrator"
 description = "AegisOrchestrator (AI-RO): maquina de estados transaccional de remediacion de flota; ante una deteccion critica lanza en paralelo el playbook de respuesta, resiliente a fallos parciales e idempotente en el reintento"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

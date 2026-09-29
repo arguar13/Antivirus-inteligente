@@ -2,6 +2,7 @@
 name = "aegis-almacen-pcap"
 description = "Almacen de captura de red: una particion es un fichero PCAP, se busca por entidad y se purga con un unlink"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

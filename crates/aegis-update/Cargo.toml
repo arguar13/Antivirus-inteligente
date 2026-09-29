@@ -2,6 +2,7 @@
 name = "aegis-update"
 description = "Actualizacion firmada (hibrida Ed25519+ML-DSA-65) con rollback atomico"
 version.workspace = true
+publish.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
