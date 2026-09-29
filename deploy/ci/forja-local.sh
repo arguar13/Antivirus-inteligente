@@ -56,10 +56,15 @@ if [ ! -f "$CONF" ]; then
     interno="$(forgejo generate secret INTERNAL_TOKEN)"
     jwt="$(forgejo generate secret JWT_SECRET)"
     lfs="$(forgejo generate secret LFS_JWT_SECRET)"
+    # WORK_PATH tambien, por la misma razon: sin el, Forgejo intenta escribirlo
+    # al arrancar, no puede, y el proceso `forgejo hook` que lanza git en cada
+    # push no encuentra su directorio de trabajo y rechaza TODOS los push
+    # («pre-receive hook declined»).
     cat > "$CONF" <<CONF
 APP_NAME = AegisCore
 RUN_USER = forgejo
 RUN_MODE = prod
+WORK_PATH = $DATOS
 
 [server]
 HTTP_ADDR = 127.0.0.1

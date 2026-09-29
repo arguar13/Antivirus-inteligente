@@ -1509,6 +1509,14 @@ fi
 paso finales "Finales de linea · ningun fichero del arbol con CRLF" \
     bash -c 'crlf="$(git ls-files --eol | grep "w/crlf" || true)"; \
              [ -z "$crlf" ] || { echo "ficheros con CRLF (bash los lee mal):"; echo "$crlf"; exit 1; }'
+# El bit de ejecucion lo guarda git, no el disco. Editando desde Windows el
+# fichero SE VE ejecutable (NTFS bajo WSL) y en git queda 100644: el primer
+# clon en Linux —el runner de CI— falla con «Permission denied». Paso con
+# veintiun scripts, dieciseis de ellos verificadores, en la FASE 0 del MP-15.
+paso permisos "Permisos · todo script versionado es ejecutable en git" \
+    bash -c 'malos="$(git ls-files -s -- "*.sh" | awk "\$1 != \"100755\" {print \$4}")"; \
+             [ -z "$malos" ] || { echo "scripts sin bit de ejecucion en git:"; echo "$malos"; \
+             echo "arreglo: git update-index --chmod=+x <fichero>"; exit 1; }'
 paso arquitectura "Arquitectura · capas, idioma de los nombres y modelo de amenazas" \
     cargo xtask arquitectura
 paso cadena "Cadena de suministro · deny, audit y vet en los cuatro workspaces" \
