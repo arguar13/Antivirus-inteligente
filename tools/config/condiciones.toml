@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Capacidades condicionales
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Un crate es «Condicional» en la matriz de capacidades cuando:
+#
+#    1. lo INVOCA un ejecutable instalable (sobreviven símbolos suyos en el
+#       binario release), y
+#    2. depende de hardware o de un certificado que no toda máquina tiene
+#       (Intel PT, PMU, TPM, VT-x, firma de Microsoft…), y
+#    3. lo detecta en TIEMPO DE EJECUCIÓN y declara la degradación en vez de
+#       fallar o callarse.
+#
+#  Aquí se declara el punto 2 y dónde está la detección del punto 3. La matriz
+#  comprueba el punto 1 y que la evidencia de la detección exista en el código:
+#  un crate que ningún instalable invoca sigue siendo «Biblioteca» aunque esté
+#  en esta lista, y declararlo aquí no lo sube de estado.
+#
+#  Formato:
+#
+#    [[condicional]]
+#    crate = "aegis-ptguard"
+#    requisito = "CPU Intel con Processor Trace y perf_event_paranoid <= 1"
+#    deteccion = { fichero = "crates/aegis-ptguard/src/lib.rs", contiene = "fn soportado" }
+#    degradacion = "sin Intel PT la detección ROP/JOP por traza queda SinDatos"
+#
+#  Hoy no hay ninguna entrada: ningún crate dependiente de hardware lo invoca
+#  todavía un instalable (ver docs/matriz-capacidades.md).

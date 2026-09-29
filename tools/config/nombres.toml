@@ -1,0 +1,210 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Idioma de los nombres: español
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Un solo idioma para nombres de crates y de módulos: el ESPAÑOL, que es el de
+#  los identificadores, los comentarios y toda la documentación. Se admiten tal
+#  cual las siglas (ipc, pqc, sbom, itdr…) y los nombres propios de formatos
+#  (pe, macho).
+#
+#  El renombrado es PLANIFICADO, no de golpe: renombrar un crate toca todos los
+#  Cargo.toml, los `use` y los scripts, y se hace por tandas con su propio CI.
+#  Mientras tanto, `cargo xtask nombres` (grupo `arquitectura` de make ci) exige:
+#
+#    · que todo crate esté en [crates.conformes] o en [crates.pendientes];
+#    · que un crate NUEVO nazca conforme (los pendientes no pueden crecer);
+#    · que un módulo nuevo no use una palabra del léxico inglés de abajo, salvo
+#      los que ya estaban (lista [modulos].pendientes, que solo puede menguar).
+#
+#  Al renombrar un crate: se cambia el nombre, se mueve su línea de pendientes a
+#  conformes y se borra de [modulos].pendientes lo que se haya traducido.
+
+[crates]
+conformes = [
+    "aegis-entidad", "aegis-presupuesto", "aegis-patron", "aegis-procedencia",
+    "aegis-sensor", "aegis-firmware", "aegis-integridad", "aegis-confinar",
+    "aegis-emular", "aegis-instrumentar", "aegis-volcado", "aegis-evasion",
+    "aegis-disectores", "aegis-captura", "aegis-estado", "aegis-custodia",
+    "aegis-invitado", "aegis-almacen", "aegis-almacen-pcap", "aegis-consola",
+    "aegis-tejido", "aegis-flujo", "aegis-rango", "aegis-conocimiento",
+    "aegis-postura",
+    # Siglas y nombres propios de formato
+    "aegis-pe", "aegis-macho", "aegis-ipc", "aegis-pqc", "aegis-ml",
+    "aegis-scal", "aegis-vmi", "aegis-ips", "aegis-sbom", "aegis-itdr",
+    "aegis-e2e",
+]
+
+[crates.pendientes]
+"aegis-agent" = "aegis-agente"
+"aegis-attest" = "aegis-atestacion"
+"aegis-audit" = "aegis-auditoria"
+"aegis-behavior" = "aegis-conducta"
+"aegis-cloudnative" = "aegis-contenedores"
+"aegis-ctl" = "aegis-control"
+"aegis-deception" = "aegis-decepcion"
+"aegis-decompile" = "aegis-decompilador"
+"aegis-disasm" = "aegis-desensamblador"
+"aegis-edgeml" = "aegis-ml-borde"
+"aegis-emu" = "aegis-microemulador"
+"aegis-enforce" = "aegis-imposicion"
+"aegis-firehose" = "aegis-entrega"
+"aegis-fleet" = "aegis-flota"
+"aegis-forensics" = "aegis-forense"
+"aegis-fwaudit" = "aegis-auditoria-firmware"
+"aegis-harden" = "aegis-blindaje"
+"aegis-hardsense" = "aegis-sensor-hardware"
+"aegis-honeytoken" = "aegis-credenciales-senuelo"
+"aegis-hunt" = "aegis-caza"
+"aegis-ingest" = "aegis-ingesta"
+"aegis-intel" = "aegis-reputacion"
+"aegis-kguard" = "aegis-guarda-bytecode"
+"aegis-kintegrity" = "aegis-integridad-kernel"
+"aegis-l7hunter" = "aegis-cazador-l7"
+"aegis-memhunter" = "aegis-cazador-memoria"
+"aegis-mesh" = "aegis-malla"
+"aegis-net" = "aegis-red"
+"aegis-parser" = "aegis-analizador"
+"aegis-ptguard" = "aegis-guarda-pt"
+"aegis-ransom" = "aegis-ransomware"
+"aegis-resp" = "aegis-respuesta"
+"aegis-rollback" = "aegis-reversion"
+"aegis-sandbox" = "aegis-aislamiento"
+"aegis-scan" = "aegis-escaner"
+"aegis-selfdefense" = "aegis-autodefensa"
+"aegis-swarm" = "aegis-enjambre"
+"aegis-sync" = "aegis-sincronizacion"
+"aegis-syscallguard" = "aegis-guarda-syscall"
+"aegis-unpacker" = "aegis-desempaquetador"
+"aegis-update" = "aegis-actualizacion"
+"aegis-vuln" = "aegis-vulnerabilidades"
+"aegis-watchdog" = "aegis-vigilante"
+"aegis-wire" = "aegis-diseccion"
+# Plano de control
+"aegis-case" = "aegis-caso"
+"aegis-detonate" = "aegis-detonacion"
+"aegis-enrich" = "aegis-enriquecimiento"
+"aegis-orchestrator" = "aegis-orquestador"
+"aegis-pipeline" = "aegis-canalizacion"
+"aegis-predict" = "aegis-prediccion"
+"aegis-ruleforge" = "aegis-forja-reglas"
+"aegis-scale" = "aegis-escala"
+"aegis-server" = "aegis-servidor"
+"aegis-share" = "aegis-difusion"
+"fleet-simulator" = "aegis-simulador-flota"
+"aegis-swarm-net" = "aegis-enjambre-red"
+
+[modulos]
+# Nombres que Rust impone o que son convención universal: no se traducen.
+convencion = ["lib", "main", "mod", "error", "tests", "bin", "build", "benches"]
+
+# Palabras inglesas que delatan un nombre de módulo por traducir. Se compara
+# cada trozo del nombre separado por «_» (así «edge_ml» cae por «edge»).
+lexico_ingles = [
+    "agent", "artifact", "artifacts", "attest", "baseline", "behavior",
+    "chain", "client", "collect", "config", "crypto", "decode",
+    "decoy", "dedupe", "dump", "edge", "engine", "entropy", "event", "exploit",
+    "features", "gate", "generated", "graph", "guard", "handler", "heartbeat",
+    "hollow", "hooks", "hunter", "inject", "integrity", "inventory", "isolate",
+    "kill", "logger", "memory", "mesh", "model", "net", "packet", "platform",
+    "policy", "posture", "priority", "process", "producer", "protocol",
+    "quarantine", "registry", "report", "responder", "revert", "ring", "rules",
+    "scan", "score", "server", "service", "signature", "store", "strings",
+    "sync", "taint", "technique", "tracer", "transport", "triage", "trip",
+    "updater", "vaccine", "velocity", "verdict", "views",
+    "watchdog", "wire",
+]
+
+# Módulos en inglés que ya existían en la FASE 0: el plan de traducción. Solo
+# puede menguar. Lo genera y lo comprueba `cargo xtask nombres`.
+pendientes = [
+    "aegis-agent/behavior",
+    "aegis-agent/decode",
+    "aegis-agent/edge_ml",
+    "aegis-agent/graph",
+    "aegis-agent/triage",
+    "aegis-attest/attest",
+    "aegis-audit/crypto",
+    "aegis-audit/event",
+    "aegis-audit/logger",
+    "aegis-behavior/chain",
+    "aegis-behavior/engine",
+    "aegis-behavior/score",
+    "aegis-behavior/technique",
+    "aegis-ctl/handler",
+    "aegis-ctl/protocol",
+    "aegis-ctl/server",
+    "aegis-deception/decoy",
+    "aegis-deception/engine",
+    "aegis-deception/guard",
+    "aegis-edgeml/behavior",
+    "aegis-emu/taint",
+    "aegis-evasion/hollow",
+    "aegis-evasion/hooks",
+    "aegis-evasion/inject",
+    "aegis-evasion/report",
+    "aegis-firmware/report",
+    "aegis-forensics/artifacts",
+    "aegis-forensics/collect",
+    "aegis-forensics/dump",
+    "aegis-forensics/exploit",
+    "aegis-forensics/report",
+    "aegis-forensics/store",
+    "aegis-harden/generated_strings",
+    "aegis-harden/strings",
+    "aegis-honeytoken/registry",
+    "aegis-honeytoken/trip",
+    "aegis-integridad/baseline",
+    "aegis-intel/client",
+    "aegis-intel/protocol",
+    "aegis-intel/transport",
+    "aegis-intel/verdict",
+    "aegis-ipc/producer",
+    "aegis-ipc/ring",
+    "aegis-kguard/integrity",
+    "aegis-kintegrity/engine",
+    "aegis-kintegrity/verdict",
+    "aegis-kintegrity/views",
+    "aegis-memhunter/hunter",
+    "aegis-mesh/crypto",
+    "aegis-mesh/mesh",
+    "aegis-mesh/vaccine",
+    "aegis-mesh/wire",
+    "aegis-ml/entropy",
+    "aegis-ml/features",
+    "aegis-ml/model",
+    "aegis-net/packet",
+    "aegis-net/scan",
+    "aegis-pipeline/dedupe",
+    "aegis-ptguard/report",
+    "aegis-ransom/engine",
+    "aegis-ransom/responder",
+    "aegis-ransom/velocity",
+    "aegis-resp/isolate",
+    "aegis-resp/kill",
+    "aegis-resp/quarantine",
+    "aegis-rollback/revert",
+    "aegis-sandbox/policy",
+    "aegis-scal/linux/memory",
+    "aegis-scal/linux/net",
+    "aegis-scal/linux/process",
+    "aegis-scal/memory",
+    "aegis-scal/platform",
+    "aegis-scal/process",
+    "aegis-scan/memory",
+    "aegis-scan/rules",
+    "aegis-scan/service",
+    "aegis-server/config",
+    "aegis-sync/priority",
+    "aegis-sync/sync",
+    "aegis-syscallguard/report",
+    "aegis-unpacker/dump",
+    "aegis-unpacker/gate",
+    "aegis-unpacker/tracer",
+    "aegis-update/artifact",
+    "aegis-update/signature",
+    "aegis-update/updater",
+    "aegis-vuln/inventory",
+    "aegis-vuln/posture",
+    "aegis-watchdog/heartbeat",
+    "aegis-watchdog/watchdog",
+]

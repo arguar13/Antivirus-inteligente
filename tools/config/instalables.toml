@@ -1,0 +1,66 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Ejecutables instalables de AegisCore
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Lo que llega de verdad a una máquina. Es la ÚNICA lista del proyecto, y la
+#  leen:
+#
+#    · tools/ci/artifacts.sh y tools/ci/hermetico.sh   qué se construye y publica
+#    · cargo xtask matriz                               qué cuenta como «Producto»
+#    · cargo xtask docs                                 el diagrama C4 del README
+#
+#  Para publicar un binario nuevo se añade aquí y en ningún otro sitio.
+#
+#  Campos
+#    binario          nombre del ejecutable ([[bin]] del paquete)
+#    paquete          crate que lo define
+#    workspace        "agente" (raíz), "servidor" (server/) o "enjambre" (swarm-net/)
+#    lado             "endpoint" o "plano-de-control"
+#    caracteristicas  features con las que se construye el artefacto publicado
+#    hermetico        features del binario estático musl (tools/ci/hermetico.sh);
+#                     omitido = no se publica versión hermética
+#    descripcion      una línea para el README y la matriz
+
+[[instalable]]
+binario = "aegis-agent"
+paquete = "aegis-agent"
+workspace = "agente"
+lado = "endpoint"
+caracteristicas = ["bpf"]
+hermetico = ["hermetico"]
+descripcion = "El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje."
+
+[[instalable]]
+binario = "aegisctl"
+paquete = "aegis-ctl"
+workspace = "agente"
+lado = "endpoint"
+caracteristicas = []
+hermetico = []
+descripcion = "CLI de administración local sobre el socket de control del agente."
+
+[[instalable]]
+binario = "aegis-watchdog"
+paquete = "aegis-watchdog"
+workspace = "agente"
+lado = "endpoint"
+caracteristicas = []
+hermetico = []
+descripcion = "Supervisor: reinicia el agente ante caída, cuelgue o exceso de memoria."
+
+[[instalable]]
+binario = "aegis-fleet"
+paquete = "aegis-fleet"
+workspace = "agente"
+lado = "endpoint"
+caracteristicas = []
+hermetico = []
+descripcion = "Demostración autocontenida del canal de flota (gRPC sobre mTLS): hoy no se conecta al servidor real."
+
+[[instalable]]
+binario = "aegis-server"
+paquete = "aegis-server"
+workspace = "servidor"
+lado = "plano-de-control"
+caracteristicas = []
+descripcion = "Plano de control: ingesta de la flota, API de administración y consola SOC."

@@ -1,0 +1,93 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Capas de la arquitectura
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Cuatro capas, de abajo arriba. Un crate solo puede depender de crates de su
+#  misma capa o de una INFERIOR: así no hay ciclos entre capas y el núcleo no
+#  arrastra nunca el transporte ni el sistema operativo.
+#
+#    núcleo       tipos, modelos y primitivas puras: no tocan el SO ni la red
+#    plataforma   acceso al kernel, al hardware y a los recursos locales
+#    motores      detección y análisis: deciden, no transportan
+#    es           entrada/salida: CLI, transporte, servicios, persistencia y
+#                 los ejecutables que lo ensamblan todo
+#
+#  Fuera de las capas quedan las herramientas de prueba (no se instalan).
+#
+#  Lo comprueba `cargo xtask capas` (grupo `arquitectura` de make ci). Todo
+#  crate de los tres workspaces tiene que aparecer exactamente una vez.
+
+[nucleo]
+crates = [
+    "aegis-entidad", "aegis-presupuesto", "aegis-pqc", "aegis-parser",
+    "aegis-patron", "aegis-pe", "aegis-macho", "aegis-ipc", "aegis-sync",
+    "aegis-procedencia", "aegis-share", "aegis-case",
+]
+
+[plataforma]
+crates = [
+    "aegis-scal", "aegis-sensor", "aegis-sandbox", "aegis-enforce",
+    "aegis-firmware", "aegis-kguard", "aegis-harden", "aegis-vmi",
+    "aegis-audit", "aegis-resp", "aegis-update",
+]
+
+[motores]
+crates = [
+    # Agente
+    "aegis-behavior", "aegis-scan", "aegis-ml", "aegis-edgeml", "aegis-emu",
+    "aegis-emular", "aegis-decompile", "aegis-disasm", "aegis-instrumentar",
+    "aegis-ransom", "aegis-rollback", "aegis-unpacker", "aegis-evasion",
+    "aegis-forensics", "aegis-memhunter", "aegis-volcado", "aegis-kintegrity",
+    "aegis-syscallguard", "aegis-hardsense", "aegis-ptguard", "aegis-l7hunter",
+    "aegis-cloudnative", "aegis-integridad", "aegis-attest", "aegis-fwaudit",
+    "aegis-confinar", "aegis-deception", "aegis-honeytoken", "aegis-net",
+    "aegis-wire", "aegis-disectores", "aegis-ips", "aegis-captura",
+    "aegis-vuln", "aegis-sbom", "aegis-estado", "aegis-custodia",
+    "aegis-swarm", "aegis-selfdefense",
+    # Plano de control
+    "aegis-itdr", "aegis-orchestrator", "aegis-predict", "aegis-flujo",
+    "aegis-enrich", "aegis-rango", "aegis-conocimiento", "aegis-postura",
+    "aegis-ruleforge", "aegis-detonate",
+]
+
+[es]
+crates = [
+    # Agente
+    "aegis-ctl", "aegis-fleet", "aegis-firehose", "aegis-ingest",
+    "aegis-intel", "aegis-mesh", "aegis-hunt", "aegis-agent",
+    "aegis-watchdog", "aegis-invitado",
+    # Plano de control
+    "aegis-server", "aegis-almacen", "aegis-almacen-pcap", "aegis-pipeline",
+    "aegis-scale", "aegis-consola", "aegis-tejido",
+    # Enjambre
+    "aegis-swarm-net",
+]
+
+[herramientas]
+crates = ["aegis-e2e", "fleet-simulator"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Excepciones conocidas
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Dependencias que hoy suben de capa. Cada una lleva su causa raíz y su plan.
+#  La lista SOLO puede menguar: una dependencia prohibida que no esté aquí hace
+#  fallar `make ci`, y una excepción que ya no ocurre también (hay que borrarla).
+
+[[excepcion]]
+desde = "aegis-postura"
+hacia = "aegis-ingest"
+causa = "El modelo de evento normalizado vive en aegis-ingest, que es E/S."
+plan = "Extraer el modelo de evento a un crate de núcleo y que ingest lo produzca."
+
+[[excepcion]]
+desde = "aegis-postura"
+hacia = "aegis-pipeline"
+causa = "Misma causa: la postura consume el evento ya canalizado del pipeline."
+plan = "Se resuelve con la misma extracción del modelo de evento."
+
+[[excepcion]]
+desde = "aegis-detonate"
+hacia = "aegis-invitado"
+causa = "El protocolo vsock entre anfitrión e invitado está definido en el binario invitado."
+plan = "Mover los tipos del protocolo de detonación a un crate de núcleo compartido."

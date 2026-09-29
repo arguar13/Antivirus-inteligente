@@ -1,0 +1,4 @@
+# `cargo xtask <orden>`: las tareas del repositorio (xtask/, workspace propio).
+# `cargo xtask` sin argumentos muestra la ayuda.
+[alias]
+xtask = "run --quiet --locked --manifest-path xtask/Cargo.toml --"

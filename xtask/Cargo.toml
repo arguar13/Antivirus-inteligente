@@ -1,0 +1,25 @@
+# Tareas del repositorio de AegisCore (`cargo xtask <orden>`).
+#
+# Workspace PROPIO, fuera del del agente y del del servidor, por la misma razon
+# que swarm-net: sus dependencias (serde, toml) son de herramienta de desarrollo
+# y no tienen por que entrar en el arbol de dependencias del agente, que en un
+# EDR es superficie de ataque y se audita linea a linea
+# (tools/lineabase-agente.txt). Nada de aqui se instala en ninguna maquina.
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+license = "Apache-2.0"
+description = "Tareas del repositorio de AegisCore: matriz de capacidades, documentacion generada, arquitectura y matriz de kernels"
+
+[dependencies]
+# La tabla de presupuesto del README se CALCULA con el mismo codigo que usa el
+# agente, en vez de copiarse a mano.
+aegis-presupuesto = { path = "../crates/aegis-presupuesto" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+[workspace]

@@ -1,0 +1,16 @@
+# Finales de línea: LF en todo el texto, en cualquier sistema.
+#
+# El repositorio se edita desde Windows y se construye en Linux (WSL y el
+# runner de CI). Un script con CRLF falla en bash de forma confusa
+# («_comun.sh\r: No such file or directory»), y pasó de verdad en la FASE 0 del
+# MP-15 por una edición hecha con una herramienta de Windows. Con esto git
+# normaliza a LF al comitear y al sacar, y `make ci` (grupo `finales`) falla si
+# un fichero del árbol de trabajo tiene CRLF igualmente.
+* text=auto eol=lf
+
+# Binarios: sin normalización.
+*.png  binary
+*.ico  binary
+*.onnx binary
+*.o    binary
+*.qcow2 binary

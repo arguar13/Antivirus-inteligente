@@ -25,7 +25,12 @@ while IFS= read -r md; do
             fallos=$((fallos + 1))
         fi
     done < <(grep -oE '\]\([^)]+\)' "$md" | sed -E 's/^\]\(//; s/\)$//')
-done < <(find . -name '*.md' -not -path './target/*' -not -path './.git/*')
+# docs/plantillas/ se salta A PROPOSITO, no por comodidad: la plantilla del
+# README se convierte en el README de la raiz, asi que sus enlaces son relativos
+# a la raiz y aqui parecerian rotos. Se comprueban de verdad donde valen: en el
+# README.md generado, que lleva exactamente los mismos enlaces.
+done < <(find . -name '*.md' -not -path './target/*' -not -path './.git/*' \
+             -not -path './docs/plantillas/*')
 
 if [ "$fallos" -gt 0 ]; then
     echo "FALLO: $fallos de $total enlaces relativos estan rotos." >&2

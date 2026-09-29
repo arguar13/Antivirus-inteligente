@@ -1,0 +1,168 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Matriz de kernels y distribuciones
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Puerta OBLIGATORIA de make ci (grupo `kernels`): cada imagen arranca en una
+#  microVM (KVM para x86-64, emulación completa para aarch64) con el kernel y el
+#  espacio de usuario REALES de su distribución —no un kernel suelto sobre el
+#  sistema del anfitrión—, y dentro se ejecutan:
+#
+#    1. `aegis-agent --capacidades --maquina`   qué ofrece ese kernel y qué se degrada
+#    2. el verificador del kernel sobre cada objeto eBPF de [[bpf]]
+#    3. cada prueba de [[prueba]]
+#
+#  Uso:   cargo xtask kernels traer        descarga y verifica las imágenes
+#         cargo xtask kernels ejecutar     arranca la matriz entera
+#         cargo xtask kernels ejecutar --solo debian-12
+#
+#  Las imágenes se descargan de la distribución y se verifican contra el fichero
+#  de sumas que ELLA publica. Se usa la versión vigente («latest»/«current»): la
+#  matriz tiene que probar lo que un cliente instala hoy, con sus parches de
+#  kernel, y el kernel exacto que arrancó queda en el resultado de cada ejecución.
+
+[vm]
+memoria_mib = 2048
+cpus = 2
+plazo_kvm_s = 600
+plazo_emulado_s = 2400
+
+# ── x86-64 ──────────────────────────────────────────────────────────────────
+
+[[imagen]]
+id = "debian-11"
+distro = "Debian 11 (bullseye)"
+arquitectura = "x86_64"
+kernel = "5.10"
+url = "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-genericcloud-amd64.qcow2"
+sumas = "https://cloud.debian.org/images/cloud/bullseye/latest/SHA512SUMS"
+algoritmo = "sha512"
+
+[[imagen]]
+id = "rocky-9"
+distro = "Rocky Linux 9"
+arquitectura = "x86_64"
+kernel = "5.14-el9"
+url = "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
+sumas = "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2.CHECKSUM"
+algoritmo = "sha256"
+nota = "Kernel 5.14 con retroportes de RHEL 9: la familia más distinta de la matriz."
+
+[[imagen]]
+id = "ubuntu-22.04"
+distro = "Ubuntu 22.04 LTS"
+arquitectura = "x86_64"
+kernel = "5.15"
+url = "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+sumas = "https://cloud-images.ubuntu.com/jammy/current/SHA256SUMS"
+algoritmo = "sha256"
+
+[[imagen]]
+id = "debian-12"
+distro = "Debian 12 (bookworm)"
+arquitectura = "x86_64"
+kernel = "6.1"
+url = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2"
+sumas = "https://cloud.debian.org/images/cloud/bookworm/latest/SHA512SUMS"
+algoritmo = "sha512"
+
+[[imagen]]
+id = "amazon-linux-2023"
+distro = "Amazon Linux 2023"
+arquitectura = "x86_64"
+kernel = "6.1"
+indice = "https://cdn.amazonlinux.com/al2023/os-images/latest/kvm/"
+patron = "al2023-kvm-"
+sumas = "https://cdn.amazonlinux.com/al2023/os-images/latest/kvm/SHA256SUMS"
+algoritmo = "sha256"
+firmware = "uefi"
+
+[[imagen]]
+id = "opensuse-leap-15.6"
+distro = "openSUSE Leap 15.6"
+arquitectura = "x86_64"
+kernel = "6.4"
+url = "https://download.opensuse.org/distribution/leap/15.6/appliances/openSUSE-Leap-15.6-Minimal-VM.x86_64-Cloud.qcow2"
+sumas = "https://download.opensuse.org/distribution/leap/15.6/appliances/openSUSE-Leap-15.6-Minimal-VM.x86_64-Cloud.qcow2.sha256"
+algoritmo = "sha256"
+nota = "Sustituto de SLES 15 SP6: mismo kernel y base binaria; la imagen de SLES exige registro en SUSE."
+
+[[imagen]]
+id = "ubuntu-24.04"
+distro = "Ubuntu 24.04 LTS"
+arquitectura = "x86_64"
+kernel = "6.8"
+url = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+sumas = "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS"
+algoritmo = "sha256"
+
+[[imagen]]
+id = "fedora-44"
+distro = "Fedora 44"
+arquitectura = "x86_64"
+kernel = "estable"
+url = "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2"
+sumas = "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-44-1.7-x86_64-CHECKSUM"
+algoritmo = "sha256"
+nota = "Sigue al kernel estable más reciente; SELinux en enforcing."
+
+# ── aarch64 (emulación completa: lenta, pero es el kernel ARM real) ─────────
+
+[[imagen]]
+id = "ubuntu-24.04-arm64"
+distro = "Ubuntu 24.04 LTS"
+arquitectura = "aarch64"
+kernel = "6.8"
+url = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img"
+sumas = "https://cloud-images.ubuntu.com/noble/current/SHA256SUMS"
+algoritmo = "sha256"
+firmware = "uefi"
+
+[[imagen]]
+id = "debian-12-arm64"
+distro = "Debian 12 (bookworm)"
+arquitectura = "aarch64"
+kernel = "6.1"
+url = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-arm64.qcow2"
+sumas = "https://cloud.debian.org/images/cloud/bookworm/latest/SHA512SUMS"
+algoritmo = "sha512"
+firmware = "uefi"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Objetos eBPF: los cinco tienen que pasar el verificador en cada kernel
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[bpf]]
+objeto = "aegis_probes"
+
+[[bpf]]
+objeto = "aegis_xdp"
+
+[[bpf]]
+objeto = "aegis_kintegrity"
+# Iteradores abiertos de tareas (kernel 6.4+ con BTF). Donde no existen el
+# resultado es «no aplica» con el motivo, no un fallo: dice que ESE kernel no
+# tiene la capacidad, no que el bytecode esté mal.
+requiere_kfunc = ["bpf_iter_task_new", "bpf_task_from_pid"]
+
+[[bpf]]
+objeto = "aegis_sslsniff"
+
+[[bpf]]
+objeto = "aegis_ips"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Pruebas de extremo a extremo dentro de cada microVM
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[prueba]]
+id = "agente-en-vivo"
+descripcion = "El agente publicado engancha sus sondas, consume actividad real y para limpio sin perder eventos."
+tipo = "instalable"
+binario = "aegis-agent"
+
+[[prueba]]
+id = "red-en-vivo"
+descripcion = "Una conexión TCP real llega del kernel con su dirección, su puerto y la marca de loopback."
+tipo = "cargo-test"
+paquete = "aegis-e2e"
+prueba = "red_en_vivo"

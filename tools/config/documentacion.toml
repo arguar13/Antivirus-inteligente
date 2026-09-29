@@ -1,0 +1,102 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Datos de la documentación generada
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  El README y la matriz de capacidades se GENERAN (`cargo xtask docs`) a partir
+#  de la plantilla docs/plantillas/README.md, del código y de este fichero. Aquí
+#  solo van las entradas que no son del código: qué hosts de ejemplo se muestran
+#  en la tabla de presupuesto y qué relaciones dibuja el diagrama C4.
+#
+#  Ninguna cifra se escribe a mano: los megabytes salen de aegis-presupuesto, los
+#  recuentos de los crates y las relaciones solo se dibujan con evidencia.
+
+# Hosts de ejemplo de la tabla de presupuesto. Los valores de reposo, pico y
+# techo los calcula `aegis_presupuesto::Presupuesto::para` con la RAM indicada.
+[[presupuesto.host]]
+nombre = "Pasarela IoT"
+ram_gib = 1
+
+[[presupuesto.host]]
+nombre = "Portátil"
+ram_gib = 8
+
+[[presupuesto.host]]
+nombre = "Estación"
+ram_gib = 16
+
+[[presupuesto.host]]
+nombre = "Servidor"
+ram_gib = 64
+
+[[presupuesto.host]]
+nombre = "Host de base de datos"
+ram_gib = 768
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Diagrama C4 (nivel 2: contenedores)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Los contenedores propios son los de tools/config/instalables.toml. Aquí se
+#  declaran los externos y las relaciones.
+#
+#  Cada relación lleva su EVIDENCIA: un fichero del repositorio y un texto que
+#  tiene que contener. Si la evidencia no está, `cargo xtask docs` falla: el
+#  diagrama no puede dibujar algo que el código no hace. Por eso no hay flecha
+#  del agente al cliente de flota, ni del cliente de flota al servidor real: hoy
+#  no existen (ver docs/matriz-capacidades.md).
+
+[[c4.externo]]
+id = "kernel"
+nombre = "Kernel Linux"
+detalle = "Sondas eBPF CO-RE (tracepoints) y filtro XDP"
+
+[[c4.externo]]
+id = "navegador"
+nombre = "Analista SOC"
+detalle = "Navegador con la consola web"
+
+[[c4.externo]]
+id = "postgres"
+nombre = "PostgreSQL"
+detalle = "Flota, alertas, casos y almacén histórico"
+
+[[c4.externo]]
+id = "redis"
+nombre = "Redis"
+detalle = "Difusión de eventos en tiempo real"
+
+[[c4.relacion]]
+desde = "kernel"
+hacia = "aegis-agent"
+etiqueta = "telemetría por ring buffer BPF"
+evidencia = { fichero = "crates/aegis-agent/src/bpf.rs", contiene = "RingBufferBuilder::new()" }
+
+[[c4.relacion]]
+desde = "aegisctl"
+hacia = "aegis-agent"
+etiqueta = "órdenes por socket Unix 0600"
+evidencia = { fichero = "crates/aegis-agent/src/main.rs", contiene = "aegis_ctl::ControlServer::bind" }
+
+[[c4.relacion]]
+desde = "aegis-watchdog"
+hacia = "aegis-agent"
+etiqueta = "lanza y reinicia el proceso"
+evidencia = { fichero = "crates/aegis-watchdog/src/bin/aegis-watchdog.rs", contiene = "\"--program\"" }
+
+[[c4.relacion]]
+desde = "navegador"
+hacia = "aegis-server"
+etiqueta = "HTTP y WebSocket, sin TLS propio (AM-3.4)"
+evidencia = { fichero = "server/crates/aegis-server/src/panel.rs", contiene = "include_str!(\"../../../panel/index.html\")" }
+
+[[c4.relacion]]
+desde = "aegis-server"
+hacia = "postgres"
+etiqueta = "SQL (sqlx)"
+evidencia = { fichero = "server/crates/aegis-server/Cargo.toml", contiene = "sqlx = " }
+
+[[c4.relacion]]
+desde = "aegis-server"
+hacia = "redis"
+etiqueta = "publicación de eventos"
+evidencia = { fichero = "server/crates/aegis-server/Cargo.toml", contiene = "redis = " }
