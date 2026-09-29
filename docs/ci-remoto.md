@@ -65,6 +65,26 @@ git remote set-url --add --push origin "$(git remote get-url origin)"
 `deploy/ci/instalar-runner.sh --comprobar` dice qué le falta a una máquina para
 servir de runner.
 
+## Mientras vive en el PC de desarrollo
+
+Es la configuración actual, por decisión del propietario: forja y runner dentro de
+WSL. Tiene una particularidad que obliga a un modo de uso propio: **WSL apaga la
+distribución cuando no queda ninguna terminal conectada**, y con ella la forja y el
+runner, aunque la máquina virtual siga en pie. Una ejecución de dos horas moría a
+mitad. Dejar la distribución encendida siempre lo evitaría, pero tendría la memoria
+ocupada todo el día.
+
+Por eso, en este PC el CI se lanza así:
+
+```powershell
+wsl -d Ubuntu -u root -- "/mnt/c/dev - aplicaciones creadas/Aegis antivirus/deploy/ci/ci-en-este-pc.sh"
+```
+
+[`deploy/ci/ci-en-este-pc.sh`](../deploy/ci/ci-en-este-pc.sh) levanta la forja y el
+runner, empuja `HEAD`, se queda conectado mientras corre la tarea —lo que mantiene
+viva la distribución—, va diciendo por dónde va, da el veredicto y **apaga los dos
+servicios al terminar**. Ni la forja ni el runner arrancan solos con WSL.
+
 ## Lo que no es código
 
 Una máquina dedicada, su dirección y las credenciales de la forja son decisiones y
