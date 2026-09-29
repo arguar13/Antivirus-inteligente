@@ -159,8 +159,14 @@ struct {
 static __always_inline void contar(__u32 cual)
 {
     __u64 *c = bpf_map_lookup_elem(&aegis_l7_contadores, &cual);
+    /* Incremento NORMAL, no atomico, igual que aegis_stat_inc de las sondas: el
+     * mapa es PERCPU_ARRAY, cada CPU tiene su copia y un programa BPF no se
+     * adelanta a si mismo en la misma CPU. El __sync_fetch_and_add de antes no
+     * aportaba nada y el compilador lo emitia como BPF_ATOMIC, que el
+     * verificador de los kernels anteriores a 5.12 rechaza («BPF_STX uses
+     * reserved fields»): el objeto entero no cargaba en Debian 11. */
     if (c)
-        __sync_fetch_and_add(c, 1);
+        (*c)++;
 }
 
 /* `true` si este PID hay que observarlo. */

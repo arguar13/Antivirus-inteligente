@@ -569,31 +569,33 @@ int aegis_tp_sock_state(struct trace_event_raw_inet_sock_set_state *ctx)
     __builtin_memset(n, 0, sizeof(*n));
 
     /*
-     * Las direcciones se leen a pila con bpf_core_read y desde ahi se copian al
-     * registro. Ni memcpy directo desde ctx ni indexado elemento a elemento
-     * valen: preserve_access_index hace que el compilador materialice un
-     * puntero base sobre ctx para el array, y el verificador rechaza
-     * dereferenciar un puntero de contexto modificado
-     * ("dereference of modified ctx ptr"). Con bpf_core_read la reubicacion
-     * CO-RE se mantiene, la lectura pasa por el helper de probe read, y la
-     * copia final va de pila a ring buffer, que si es un patron aceptado.
+     * Las direcciones se leen con bpf_core_read DIRECTAMENTE al registro del
+     * ring buffer, que ya esta a cero. Ni memcpy directo desde ctx ni indexado
+     * elemento a elemento valen: preserve_access_index hace que el compilador
+     * materialice un puntero base sobre ctx para el array, y el verificador
+     * rechaza dereferenciar un puntero de contexto modificado ("dereference of
+     * modified ctx ptr"). Con bpf_core_read la reubicacion CO-RE se mantiene y
+     * la lectura pasa por el helper de probe read.
+     *
+     * EL ORIGEN ES LA DIRECCION DEL CAMPO (`&ctx->saddr`), NO EL CAMPO. `saddr`
+     * es un array, y dentro de __builtin_preserve_access_index no decae a
+     * puntero: con `ctx->saddr` el compilador CARGABA el contenido del array y
+     * lo usaba como direccion de origen. La lectura fallaba en silencio y la IP
+     * quedaba a cero en TODOS los kernels —ningun evento de red llevo nunca su
+     * direccion, y la clasificacion loopback/privada de abajo no funcionaba—.
+     * Solo el verificador de 5.15 (Ubuntu 22.04) rechazaba el patron, y con el
+     * el objeto entero: el agente no arrancaba alli. Lo destapo la matriz de
+     * kernels (FASE 0 del MP-15); lo fija crates/aegis-e2e/tests/red_en_vivo.rs.
      */
-    __u8 tmp_src[16];
-    __u8 tmp_dst[16];
-    __builtin_memset(tmp_src, 0, sizeof(tmp_src));
-    __builtin_memset(tmp_dst, 0, sizeof(tmp_dst));
-
     if (family == AEGIS_AF_INET) {
         /* IPv4 en los cuatro primeros bytes; el resto queda a cero, para que
          * Ring 3 no ramifique por familia en cada evento. */
-        bpf_core_read(tmp_src, 4, ctx->saddr);
-        bpf_core_read(tmp_dst, 4, ctx->daddr);
+        bpf_core_read(n->saddr, 4, &ctx->saddr);
+        bpf_core_read(n->daddr, 4, &ctx->daddr);
     } else {
-        bpf_core_read(tmp_src, 16, ctx->saddr_v6);
-        bpf_core_read(tmp_dst, 16, ctx->daddr_v6);
+        bpf_core_read(n->saddr, 16, &ctx->saddr_v6);
+        bpf_core_read(n->daddr, 16, &ctx->daddr_v6);
     }
-    __builtin_memcpy(n->saddr, tmp_src, 16);
-    __builtin_memcpy(n->daddr, tmp_dst, 16);
 
     n->pid = tgid;
     n->sport = ctx->sport;

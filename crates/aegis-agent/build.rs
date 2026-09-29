@@ -42,6 +42,12 @@ fn main() {
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("cargo define OUT_DIR"));
 
+    // La arquitectura del bytecode la decide el Makefile con
+    // CARGO_CFG_TARGET_ARCH, que make hereda de este entorno: la del OBJETIVO,
+    // no la de la maquina que compila. El BTF del que sale vmlinux.h llega por
+    // AEGIS_BTF, asi que cambiarlo tiene que recompilar.
+    println!("cargo:rerun-if-env-changed=AEGIS_BTF");
+
     let salida = Command::new("make")
         .arg("-C")
         .arg(&bpf_dir)

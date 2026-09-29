@@ -28,7 +28,13 @@
 
 CLANG      ?= clang
 CC         ?= cc
-ARCH       := $(shell uname -m | sed 's/x86_64/x86/; s/aarch64/arm64/; s/ppc64le/powerpc/')
+# Arquitectura del bytecode: la del OBJETIVO, no la de la maquina que compila.
+# Cuando compila cargo, los build.rs heredan a make CARGO_CFG_TARGET_ARCH; sin
+# esto se tomaba `uname -m`, y un agente cruzado para aarch64 empotraba bytecode
+# con __TARGET_ARCH_x86 (las uprobes leerian los registros de otra CPU). Un solo
+# sitio para los cuatro build.rs que compilan eBPF. Se puede forzar con ARCH=.
+ARCH_ORIGEN := $(or $(CARGO_CFG_TARGET_ARCH),$(shell uname -m))
+ARCH       := $(shell echo $(ARCH_ORIGEN) | sed 's/x86_64/x86/; s/aarch64/arm64/; s/ppc64le/powerpc/; s/powerpc64/powerpc/')
 CLANG_INC  := $(shell $(CLANG) -print-resource-dir)/include
 # En Debian/Ubuntu las cabeceras UAPI dependientes de arquitectura (asm/types.h)
 # viven en el directorio multiarch, no en /usr/include a secas.
@@ -44,6 +50,9 @@ KI_OBJ     := $(BUILD)/aegis_kintegrity.bpf.o
 SSL_OBJ    := $(BUILD)/aegis_sslsniff.bpf.o
 IPS_OBJ    := $(BUILD)/aegis_ips.bpf.o
 VERIFIER   := $(BUILD)/aegis_bpf_verify
+# Version ESTATICA del verificador, la que se lleva a las microVM de la matriz de
+# kernels: tiene que arrancar igual en Debian 11 (glibc 2.31) que en Fedora.
+VERIFIER_ESTATICO := $(BUILD)/aegis_bpf_verify_estatico
 CORECHECK  := $(BUILD)/aegis_core_check
 
 # Fuente del BTF con el que se genera vmlinux.h.
@@ -87,7 +96,7 @@ BPF_CFLAGS := -target bpf -O2 -g \
 VERIFY_CFLAGS := -O2 -Wall -Wextra -Werror -Iinclude -I$(ABI_INC)
 VERIFY_LDLIBS := -lbpf -lelf -lz
 
-.PHONY: build verify core-check core-matrix sign check-integrity clean dump
+.PHONY: build verify verify-estatico core-check core-matrix sign check-integrity clean dump
 
 build: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(IPS_OBJ)
 
@@ -146,6 +155,11 @@ $(IPS_OBJ): src/aegis_ips.bpf.c include/aegis_bpf_common.h $(VMLINUX_H) | $(BUIL
 $(VERIFIER): tools/aegis_bpf_verify.c | $(BUILD)
 	$(CC) $(VERIFY_CFLAGS) $< -o $@ $(VERIFY_LDLIBS)
 
+$(VERIFIER_ESTATICO): tools/aegis_bpf_verify.c | $(BUILD)
+	$(CC) $(VERIFY_CFLAGS) -static $< -o $@ -l:libbpf.a -l:libelf.a -l:libz.a -l:libzstd.a
+
+verify-estatico: $(VERIFIER_ESTATICO)
+
 $(CORECHECK): tools/aegis_core_check.c | $(BUILD)
 	$(CC) $(VERIFY_CFLAGS) $< -o $@ $(VERIFY_LDLIBS)
 
@@ -172,21 +186,15 @@ verify: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(IPS_OBJ) $(VERIFIER)
 	@# de compilacion —puede ser el de otra maquina, y de hecho suele serlo— y
 	@# responderia que la kfunc existe justo cuando aqui no esta.
 	@#
-	@# La omision solo ocurre habiendo COMPROBADO que la kfunc falta. Sin bpftool
-	@# para averiguarlo se verifica igual: ante la duda, la comprobacion estricta.
-	@if ! command -v bpftool >/dev/null 2>&1 \
-	   || bpftool btf dump file /sys/kernel/btf/vmlinux format raw 2>/dev/null \
-	      | grep -q "FUNC 'bpf_iter_task_new'"; then \
-	    ./$(VERIFIER) $(KI_OBJ); \
-	else \
-	    echo "OMITIDO: $(KI_OBJ) usa los iteradores abiertos de tareas"; \
-	    echo "         (bpf_iter_task_*) y el kernel de esta maquina no los expone"; \
-	    echo "         en su BTF: $$(uname -r)."; \
+	@# La omision solo ocurre habiendo COMPROBADO que la kfunc falta, y lo
+	@# comprueba el propio verificador contra el BTF del kernel en ejecucion
+	@# (--requiere-kfunc; salida 77 = no aplica). Es el mismo mecanismo que usa la
+	@# matriz de kernels dentro de cada microVM: una sola logica, no dos.
+	@./$(VERIFIER) --requiere-kfunc bpf_iter_task_new --requiere-kfunc bpf_task_from_pid $(KI_OBJ); rc=$$?; \
+	if [ $$rc -eq 77 ]; then \
 	    echo "         El objeto SI se compilo y sus reubicaciones CO-RE se"; \
-	    echo "         comprueban en 'core-check'. Lo que no se puede ejercer aqui"; \
-	    echo "         es su CARGA, porque hace falta un kernel que traiga esas"; \
-	    echo "         kfunc (6.4+ con los iteradores compilados)."; \
-	fi
+	    echo "         comprueban en 'core-check'; lo que no se ejerce aqui es su CARGA."; \
+	elif [ $$rc -ne 0 ]; then exit $$rc; fi
 	@./$(VERIFIER) $(SSL_OBJ)
 	@./$(VERIFIER) $(IPS_OBJ)
 
