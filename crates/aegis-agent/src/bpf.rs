@@ -272,7 +272,7 @@ where
             )
         })
         .collect();
-    let plan = planificar(
+    let mut plan = planificar(
         secciones.iter().map(|(n, s)| (n.as_str(), s.as_str())),
         // libbpf lee este fichero para obtener el id de perf del tracepoint.
         |tp| tracefs.join("events").join(tp).join("id").is_file(),
@@ -284,8 +284,8 @@ where
     // queda ciega se dicen ANTES de empezar a consumir, no al terminar.
     for o in &plan.omitidos {
         eprintln!(
-            "aegis-agent: DEGRADADO sonda={} tracepoint={} (no existe en este kernel)",
-            o.programa, o.tracepoint
+            "aegis-agent: DEGRADADO sonda={} tracepoint={}: {}",
+            o.programa, o.tracepoint, o.motivo
         );
     }
     for f in &plan.familias_sin_datos {
@@ -343,6 +343,8 @@ where
     // Los enlaces tienen que seguir vivos mientras se consume: al soltarlos,
     // libbpf desengancha el programa y la telemetria se apaga en silencio.
     let mut links: Vec<Link> = Vec::new();
+    let mut enganchadas: Vec<String> = Vec::new();
+    let mut primer_fallo: Option<TelemetryError> = None;
     // progs_mut y no progs: attach() solo existe sobre la vista mutable del
     // programa, porque enganchar modifica el estado del objeto BPF.
     for prog in obj.progs_mut() {
@@ -350,13 +352,53 @@ where
         if !plan.activos.contains(&nombre) {
             continue;
         }
-        let link = prog
-            .attach()
-            .map_err(|e: libbpf_rs::Error| TelemetryError::ProbeAttach {
-                probe: nombre,
-                detail: e.to_string(),
-            })?;
-        links.push(link);
+        match prog.attach() {
+            Ok(link) => {
+                links.push(link);
+                enganchadas.push(nombre);
+            }
+            // Una sonda que el kernel o la politica (SELinux, lockdown) no dejan
+            // enganchar se omite y se DECLARA, igual que la que no tiene
+            // tracepoint: la doctrina es degradar por familia, no abortar. Antes
+            // el primer -EACCES tumbaba el agente entero (visto en Rocky 9 con
+            // SELinux en enforcing, FASE 0 del MP-15).
+            Err(e) => {
+                eprintln!("aegis-agent: DEGRADADO sonda={nombre} no se pudo enganchar: {e}");
+                let tracepoint = secciones
+                    .iter()
+                    .find(|(n, _)| *n == nombre)
+                    .map(|(_, s)| s.trim_start_matches("tracepoint/").to_string())
+                    .unwrap_or_default();
+                plan.omitidos.push(SondaOmitida {
+                    familia: capacidades::familia_de_programa(&nombre),
+                    programa: nombre.clone(),
+                    tracepoint,
+                    motivo: format!("el enganche fallo: {e}"),
+                });
+                primer_fallo.get_or_insert(TelemetryError::ProbeAttach {
+                    probe: nombre,
+                    detail: e.to_string(),
+                });
+            }
+        }
+    }
+    // Sin ninguna sonda viva no hay agente: eso SI es un error, el del primer
+    // enganche que fallo.
+    if links.is_empty() {
+        return Err(primer_fallo.unwrap_or(TelemetryError::NoProbes));
+    }
+    let antes = plan.familias_sin_datos.clone();
+    plan.activos = enganchadas;
+    plan.recalcular_familias();
+    for f in plan
+        .familias_sin_datos
+        .iter()
+        .filter(|f| !antes.contains(f))
+    {
+        eprintln!(
+            "aegis-agent: DEGRADADO familia={} sin sondas vivas: su telemetria es SinDatos",
+            f.nombre()
+        );
     }
 
     // --- Consumo ---------------------------------------------------------

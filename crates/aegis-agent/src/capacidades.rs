@@ -172,10 +172,13 @@ pub fn familia_de_programa(nombre: &str) -> Option<Familia> {
 pub struct SondaOmitida {
     /// Nombre del programa en el objeto.
     pub programa: String,
-    /// Tracepoint que falta, en la forma `categoria/evento`.
+    /// Su tracepoint, en la forma `categoria/evento`.
     pub tracepoint: String,
     /// Familia a la que pertenece.
     pub familia: Option<Familia>,
+    /// Por que no esta viva: el tracepoint no existe, o el kernel o la politica
+    /// (SELinux, lockdown) denegaron el enganche.
+    pub motivo: String,
 }
 
 /// Que sondas se enganchan y que familias quedan sin datos en este kernel.
@@ -201,7 +204,6 @@ pub fn planificar<'a>(
     existe: impl Fn(&str) -> bool,
 ) -> PlanSondas {
     let mut plan = PlanSondas::default();
-    let mut vivas: Vec<Familia> = Vec::new();
     for (nombre, seccion) in programas {
         let familia = familia_de_programa(nombre);
         match seccion.strip_prefix("tracepoint/") {
@@ -209,18 +211,30 @@ pub fn planificar<'a>(
                 programa: nombre.to_string(),
                 tracepoint: tp.to_string(),
                 familia,
+                motivo: "el tracepoint no existe en este kernel".into(),
             }),
-            _ => {
-                plan.activos.push(nombre.to_string());
-                vivas.extend(familia);
-            }
+            _ => plan.activos.push(nombre.to_string()),
         }
     }
-    plan.familias_sin_datos = Familia::TODAS
-        .into_iter()
-        .filter(|f| !vivas.contains(f))
-        .collect();
+    plan.recalcular_familias();
     plan
+}
+
+impl PlanSondas {
+    /// Recalcula las familias sin datos a partir de las sondas activas. Se llama
+    /// al planificar y otra vez tras el enganche, porque una sonda planificada
+    /// puede no llegar a engancharse (politica, lockdown).
+    pub fn recalcular_familias(&mut self) {
+        let vivas: Vec<Familia> = self
+            .activos
+            .iter()
+            .filter_map(|n| familia_de_programa(n))
+            .collect();
+        self.familias_sin_datos = Familia::TODAS
+            .into_iter()
+            .filter(|f| !vivas.contains(f))
+            .collect();
+    }
 }
 
 /// Lo que el propio kernel responde cuando se le pregunta con `bpf()`. Solo se
@@ -799,6 +813,30 @@ mod tests {
         assert_eq!(plan.activos, vec!["aegis_tp_execve"]);
         assert!(plan.familias_sin_datos.contains(&Familia::Red));
         assert!(!plan.familias_sin_datos.contains(&Familia::Ejecucion));
+    }
+
+    #[test]
+    fn una_sonda_que_no_engancha_deja_su_familia_sin_datos_si_no_hay_otra() {
+        // Rocky 9 con SELinux: la sonda se planifica, pero el enganche se deniega.
+        let programas = [
+            ("aegis_tp_execve", "tracepoint/syscalls/sys_enter_execve"),
+            ("aegis_tp_rename", "tracepoint/syscalls/sys_enter_rename"),
+            (
+                "aegis_tp_renameat2",
+                "tracepoint/syscalls/sys_enter_renameat2",
+            ),
+        ];
+        let mut plan = planificar(programas, |_| true);
+        assert!(plan
+            .familias_sin_datos
+            .iter()
+            .all(|f| *f != Familia::Ejecucion));
+
+        // Falla execve (unica de su familia) y rename (renameat2 sigue viva).
+        plan.activos.retain(|a| a == "aegis_tp_renameat2");
+        plan.recalcular_familias();
+        assert!(plan.familias_sin_datos.contains(&Familia::Ejecucion));
+        assert!(!plan.familias_sin_datos.contains(&Familia::Renombrados));
     }
 
     #[test]
