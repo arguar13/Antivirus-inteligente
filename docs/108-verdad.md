@@ -88,6 +88,8 @@ desarrolla, que habrían roto a cualquiera que clonase el repositorio.
 | Las sondas no compilaban (y con ellas, clippy, pruebas, IPS, hermético, matriz…) | El BTF con el que se generan los tipos era el del kernel en marcha, o uno extraído a mano que solo existía en esta máquina | BTF de construcción fijado y obtenido de forma reproducible de la imagen oficial de Ubuntu 24.04 | `make ci` lo exige antes de empezar |
 | El CI moría a mitad en este PC | WSL apaga la distribución sin terminales conectadas, y con ella la forja y el runner | `deploy/ci/ci-en-este-pc.sh` se queda conectado durante la ejecución y apaga los servicios al acabar | ejecución completa |
 | Ficheros con CRLF rompían bash | Ediciones hechas con herramientas de Windows | `.gitattributes` con LF y grupo `finales` | `make ci` |
+| Con el BTF ya fijado, clippy seguía sin compilar `aegis-net` en el runner | `vmlinux.h` solo dependía de existir: el directorio de salida de Cargo, reutilizado, conservaba el de otro BTF (sin `bpf_iter_task`); y tres de los cuatro `build.rs` no se reejecutaban al cambiar `AEGIS_BTF` | Sello con la ruta y la suma del BTF de origen, del que depende `vmlinux.h`; los cuatro `build.rs` siguen a `AEGIS_BTF` | `make check-btf-sello`, grupo `bpf` (demostrado fallando con la regla vieja) |
+| Un verificador abortaba con «HOME: unbound variable» solo en el runner | Una unidad de systemd sin `User=` no define `HOME` | `User=root` en la unidad del runner | `instalar-runner.sh --comprobar`, que el flujo ejecuta antes de `make ci` |
 
 ## Controles del modelo de amenazas que toca
 
