@@ -46,8 +46,16 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
  * drenar antes de perder eventos. */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 8 * 1024 * 1024);
+    __uint(max_entries, AEGIS_RING_BYTES);
 } aegis_events SEC(".maps");
+
+/* Eventos perdidos por familia (ring lleno o cedidos por prioridad). */
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, AEGIS_FAM__MAX);
+    __type(key, __u32);
+    __type(value, __u64);
+} aegis_perdidas SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
@@ -164,16 +172,38 @@ static __always_inline __u64 aegis_task_key(struct task_struct *task)
  * exige un tamano conocido para bpf_ringbuf_reserve, y ademas el ABI obliga a
  * que sea multiplo de 64.
  */
-static __always_inline void *aegis_evt_begin(__u16 type, __u32 total_len,
+static __always_inline void aegis_perdida(__u32 familia)
+{
+    __u32 k = familia;
+    __u64 *slot = bpf_map_lookup_elem(&aegis_perdidas, &k);
+    if (slot)
+        (*slot)++;
+}
+
+static __always_inline void *aegis_evt_begin(__u32 familia, __u16 type, __u32 total_len,
                                              __u64 actor_key, __u64 target_key,
                                              __u32 flags)
 {
+    /* Ver «PERDER CON PRIORIDAD» en aegis_bpf_common.h. El 0 es
+     * BPF_RB_AVAIL_DATA: los bytes que el agente aun no ha consumido. */
+    enum aegis_prioridad prio = aegis_prioridad_de(familia);
+    if (prio != AEGIS_PRIO_ALTA) {
+        __u64 pendiente = bpf_ringbuf_query(&aegis_events, 0);
+        __u64 umbral = prio == AEGIS_PRIO_MEDIA ? AEGIS_RING_BYTES / 10 * 9
+                                                : AEGIS_RING_BYTES / 4 * 3;
+        if (pendiente > umbral) {
+            aegis_stat_inc(AEGIS_STAT_DROPPED_PRIORIDAD);
+            aegis_perdida(familia);
+            return 0;
+        }
+    }
     void *rec = bpf_ringbuf_reserve(&aegis_events, total_len, 0);
     if (!rec) {
         /* Ring lleno. Se descarta y se cuenta: el agente ve crecer el contador
          * y sabe que tiene un punto ciego. Bloquear aqui seria peor: estamos en
          * el contexto del proceso que hizo la syscall. */
         aegis_stat_inc(AEGIS_STAT_DROPPED_FULL);
+        aegis_perdida(familia);
         return 0;
     }
 
@@ -280,8 +310,22 @@ static __always_inline __u32 aegis_popcount64(__u64 x)
  * telemetria util, y el correlador de Ring 3 confirma el exito por la
  * actividad posterior del proceso.
  * ------------------------------------------------------------------------ */
+/*
+ * EL CONTEXTO DE LAS SONDAS DE SYSCALLS (FASE 1 del MP-16).
+ *
+ * Un tracepoint `syscalls:sys_enter_*` entrega un `struct syscall_trace_enter`
+ * (`ent`, `int nr`, `args[]`), y uno `sys_exit_*`, un `struct syscall_trace_exit`
+ * (`ent`, `int nr`, `long ret`). Se declaraban como `trace_event_raw_sys_enter` /
+ * `_exit`, que son las estructuras del tracepoint `raw_syscalls:sys_enter` (con
+ * `long id` donde las otras tienen `int nr`). En los kernels corrientes las dos
+ * ponen `args` y `ret` en el mismo sitio y no se notaba. En RHEL 9 `trace_entry`
+ * lleva un campo mas: CO-RE reubico `args` a su sitio en la estructura
+ * EQUIVOCADA, ocho bytes mas alla, y cada sonda leia el argumento siguiente (la
+ * ruta de `execve` salia del puntero a `argv`: basura). Lo destapo la matriz en
+ * Rocky 9. La prueba de las fuentes de `aegis-agent` impide volver a declararlo.
+ */
 SEC("tracepoint/syscalls/sys_enter_execve")
-int aegis_tp_execve(struct trace_event_raw_sys_enter *ctx)
+int aegis_tp_execve(struct syscall_trace_enter *ctx)
 {
     __u32 tgid = 0;
     if (!aegis_should_emit(0, &tgid))
@@ -339,7 +383,7 @@ int aegis_tp_execve(struct trace_event_raw_sys_enter *ctx)
     if (written > AEGIS_BPF_STR2_MAX)
         written = AEGIS_BPF_STR2_MAX;
 
-    void *rec = aegis_evt_begin(AEGIS_EVT_PROCESS_CREATE, AEGIS_BPF_EVT_LARGE,
+    void *rec = aegis_evt_begin(AEGIS_FAM_EJECUCION, AEGIS_EVT_PROCESS_CREATE, AEGIS_BPF_EVT_LARGE,
                                 actor, 0, 0);
     if (!rec)
         return 0;
@@ -388,21 +432,29 @@ int aegis_tp_execve(struct trace_event_raw_sys_enter *ctx)
  * manipulacion de binarios. Las lecturas se cubren, cuando hace falta, por otra
  * via en Ring 3.
  * ------------------------------------------------------------------------ */
-SEC("tracepoint/syscalls/sys_enter_openat")
-int aegis_tp_openat(struct trace_event_raw_sys_enter *ctx)
+/*
+ * TODAS LAS VIAS DE APERTURA (FASE 1 del MP-16).
+ *
+ * Al principio solo se enganchaba `openat`, que es lo que usa glibc. Pero musl
+ * abre con `open`, `creat` sigue existiendo, y `openat2` tambien: un binario
+ * estatico con musl —o un programa que hace la syscall a mano— escribia
+ * ficheros sin que la familia de ficheros lo viera. Lo destapo la matriz de
+ * kernels: la prueba de prioridad, compilada con musl, no producia ni un evento
+ * de fichero. Ahora cada via tiene su sonda fina y todas comparten este nucleo.
+ * En aarch64 `open` y `creat` no existen como syscall: el plan de sondas lo
+ * declara y la familia sigue viva por `openat`, como `rename` y `renameat2`.
+ */
+static __always_inline int aegis_abrir(__u64 nombre, __u32 flags, __u32 modo)
 {
     __u32 tgid = 0;
     if (!aegis_should_emit(AEGIS_CFG_TRACE_FILES, &tgid))
         return 0;
-
-    __u32 flags = (__u32)ctx->args[2];
 
     /* El puntero al nombre se guarda SIEMPRE, tambien para aperturas de solo
      * lectura: la asociacion descriptor-ruta hace falta para poder atribuir
      * escrituras posteriores, y un fichero abierto para lectura puede
      * reabrirse para escritura mas tarde con el mismo descriptor heredado. */
     __u64 clave = bpf_get_current_pid_tgid();
-    __u64 nombre = (__u64)ctx->args[1];
     bpf_map_update_elem(&aegis_open_pending, &clave, &nombre, BPF_ANY);
 
     if (!(flags & AEGIS_O_WRITE_INTENT)) {
@@ -413,7 +465,7 @@ int aegis_tp_openat(struct trace_event_raw_sys_enter *ctx)
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     __u64 actor = aegis_task_key(task);
 
-    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_PRE_CREATE, AEGIS_BPF_EVT_LARGE,
+    void *rec = aegis_evt_begin(AEGIS_FAM_FICHEROS, AEGIS_EVT_FILE_PRE_CREATE, AEGIS_BPF_EVT_LARGE,
                                 actor, 0, 0);
     if (!rec)
         return 0;
@@ -424,7 +476,7 @@ int aegis_tp_openat(struct trace_event_raw_sys_enter *ctx)
     f->bytes_written = 0;
     f->pid = tgid;
     f->desired_access = flags;
-    f->create_options = (__u32)ctx->args[3];   /* modo */
+    f->create_options = modo;
     f->info_flags = 0;
     f->entropy_before = 0;   /* la entropia se calcula sobre escrituras, no aqui */
     f->entropy_after = 0;
@@ -434,10 +486,41 @@ int aegis_tp_openat(struct trace_event_raw_sys_enter *ctx)
     f->reserved1 = 0;
 
     f->path = aegis_put_str(rec, AEGIS_BPF_STR1_OFF, AEGIS_BPF_STR1_MAX,
-                            (const void *)ctx->args[1]);
+                            (const void *)nombre);
 
     aegis_evt_commit(rec);
     return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_openat")
+int aegis_tp_openat(struct syscall_trace_enter *ctx)
+{
+    return aegis_abrir(ctx->args[1], (__u32)ctx->args[2], (__u32)ctx->args[3]);
+}
+
+SEC("tracepoint/syscalls/sys_enter_open")
+int aegis_tp_open(struct syscall_trace_enter *ctx)
+{
+    return aegis_abrir(ctx->args[0], (__u32)ctx->args[1], (__u32)ctx->args[2]);
+}
+
+/* creat(ruta, modo) es open(ruta, O_CREAT | O_WRONLY | O_TRUNC, modo). */
+SEC("tracepoint/syscalls/sys_enter_creat")
+int aegis_tp_creat(struct syscall_trace_enter *ctx)
+{
+    return aegis_abrir(ctx->args[0], AEGIS_O_CREAT | AEGIS_O_WRONLY | AEGIS_O_TRUNC,
+                       (__u32)ctx->args[1]);
+}
+
+/* openat2 lleva las banderas en una estructura en memoria del proceso:
+ * `struct open_how { __u64 flags; __u64 mode; __u64 resolve; }`. */
+SEC("tracepoint/syscalls/sys_enter_openat2")
+int aegis_tp_openat2(struct syscall_trace_enter *ctx)
+{
+    __u64 como[2] = { 0, 0 };
+    if (bpf_probe_read_user(como, sizeof(como), (const void *)ctx->args[2]) != 0)
+        return 0;
+    return aegis_abrir(ctx->args[1], (__u32)como[0], (__u32)como[1]);
 }
 
 /* ------------------------------------------------------------------------
@@ -450,7 +533,7 @@ int aegis_tp_openat(struct trace_event_raw_sys_enter *ctx)
  * cualquier uso merece contexto.
  * ------------------------------------------------------------------------ */
 SEC("tracepoint/syscalls/sys_enter_ptrace")
-int aegis_tp_ptrace(struct trace_event_raw_sys_enter *ctx)
+int aegis_tp_ptrace(struct syscall_trace_enter *ctx)
 {
     __u32 tgid = 0;
     if (!aegis_should_emit(AEGIS_CFG_TRACE_PTRACE, &tgid))
@@ -470,7 +553,7 @@ int aegis_tp_ptrace(struct trace_event_raw_sys_enter *ctx)
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     __u64 actor = aegis_task_key(task);
 
-    void *rec = aegis_evt_begin(AEGIS_EVT_HANDLE_REQUEST, AEGIS_BPF_EVT_SMALL,
+    void *rec = aegis_evt_begin(AEGIS_FAM_PTRACE, AEGIS_EVT_HANDLE_REQUEST, AEGIS_BPF_EVT_SMALL,
                                 actor, 0, 0);
     if (!rec)
         return 0;
@@ -524,7 +607,7 @@ int aegis_tp_process_exit(struct trace_event_raw_sched_process_template *ctx)
 
     __u64 actor = aegis_task_key(task);
 
-    void *rec = aegis_evt_begin(AEGIS_EVT_PROCESS_EXIT, AEGIS_BPF_EVT_TINY,
+    void *rec = aegis_evt_begin(AEGIS_FAM_SALIDA, AEGIS_EVT_PROCESS_EXIT, AEGIS_BPF_EVT_TINY,
                                 actor, 0, 0);
     if (!rec)
         return 0;
@@ -560,7 +643,7 @@ int aegis_tp_sock_state(struct trace_event_raw_inet_sock_set_state *ctx)
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     __u64 actor = aegis_task_key(task);
 
-    void *rec = aegis_evt_begin(AEGIS_EVT_NET_CONNECT, AEGIS_BPF_EVT_SMALL,
+    void *rec = aegis_evt_begin(AEGIS_FAM_RED, AEGIS_EVT_NET_CONNECT, AEGIS_BPF_EVT_SMALL,
                                 actor, 0, 0);
     if (!rec)
         return 0;
@@ -633,8 +716,7 @@ int aegis_tp_sock_state(struct trace_event_raw_inet_sock_set_state *ctx)
  * codigo que corre con privilegios.
  * ------------------------------------------------------------------------ */
 
-SEC("tracepoint/syscalls/sys_exit_openat")
-int aegis_tp_openat_exit(struct trace_event_raw_sys_exit *ctx)
+static __always_inline int aegis_abrir_salida(long ret)
 {
     __u64 clave = bpf_get_current_pid_tgid();
     __u64 *guardado = bpf_map_lookup_elem(&aegis_open_pending, &clave);
@@ -643,7 +725,6 @@ int aegis_tp_openat_exit(struct trace_event_raw_sys_exit *ctx)
     __u64 ptr = *guardado;
     bpf_map_delete_elem(&aegis_open_pending, &clave);
 
-    long ret = ctx->ret;
     /* Una apertura fallida no crea descriptor: no hay nada que asociar. */
     if (ret < 0)
         return 0;
@@ -655,7 +736,7 @@ int aegis_tp_openat_exit(struct trace_event_raw_sys_exit *ctx)
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     __u64 actor = aegis_task_key(task);
 
-    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_FD_BIND, AEGIS_BPF_EVT_LARGE,
+    void *rec = aegis_evt_begin(AEGIS_FAM_FICHEROS, AEGIS_EVT_FILE_FD_BIND, AEGIS_BPF_EVT_LARGE,
                                 actor, 0, 0);
     if (!rec)
         return 0;
@@ -674,6 +755,30 @@ int aegis_tp_openat_exit(struct trace_event_raw_sys_exit *ctx)
     return 0;
 }
 
+SEC("tracepoint/syscalls/sys_exit_openat")
+int aegis_tp_openat_exit(struct syscall_trace_exit *ctx)
+{
+    return aegis_abrir_salida(ctx->ret);
+}
+
+SEC("tracepoint/syscalls/sys_exit_open")
+int aegis_tp_open_exit(struct syscall_trace_exit *ctx)
+{
+    return aegis_abrir_salida(ctx->ret);
+}
+
+SEC("tracepoint/syscalls/sys_exit_creat")
+int aegis_tp_creat_exit(struct syscall_trace_exit *ctx)
+{
+    return aegis_abrir_salida(ctx->ret);
+}
+
+SEC("tracepoint/syscalls/sys_exit_openat2")
+int aegis_tp_openat2_exit(struct syscall_trace_exit *ctx)
+{
+    return aegis_abrir_salida(ctx->ret);
+}
+
 /* ------------------------------------------------------------------------
  * Sonda: escritura de fichero
  *
@@ -689,7 +794,7 @@ int aegis_tp_openat_exit(struct trace_event_raw_sys_exit *ctx)
  * Lo que no cae en ninguna de las dos no se emite.
  * ------------------------------------------------------------------------ */
 SEC("tracepoint/syscalls/sys_enter_write")
-int aegis_tp_write(struct trace_event_raw_sys_enter *ctx)
+int aegis_tp_write(struct syscall_trace_enter *ctx)
 {
     __u32 tgid = 0;
     if (!aegis_should_emit(AEGIS_CFG_TRACE_WRITES, &tgid))
@@ -769,7 +874,7 @@ int aegis_tp_write(struct trace_event_raw_sys_enter *ctx)
      * precio de que el tamano sea demostrable.
      */
     if (alta_entropia) {
-        void *rec = aegis_evt_begin(AEGIS_EVT_FILE_WRITE, AEGIS_BPF_EVT_WSAMPLE,
+        void *rec = aegis_evt_begin(AEGIS_FAM_ESCRITURAS, AEGIS_EVT_FILE_WRITE, AEGIS_BPF_EVT_WSAMPLE,
                                     actor, 0, 0);
         if (!rec)
             return 0;
@@ -798,7 +903,7 @@ int aegis_tp_write(struct trace_event_raw_sys_enter *ctx)
 
     /* Sin muestra: el registro pequeno basta para la medida de velocidad y
      * ahorra 512 bytes de ring por escritura. */
-    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_WRITE, AEGIS_BPF_EVT_SMALL,
+    void *rec = aegis_evt_begin(AEGIS_FAM_ESCRITURAS, AEGIS_EVT_FILE_WRITE, AEGIS_BPF_EVT_SMALL,
                                 actor, 0, 0);
     if (!rec)
         return 0;
@@ -824,7 +929,7 @@ int aegis_tp_write(struct trace_event_raw_sys_enter *ctx)
  * sistema no habia visto nunca es una senal fuerte y muy barata de obtener.
  * ------------------------------------------------------------------------ */
 SEC("tracepoint/syscalls/sys_enter_renameat2")
-int aegis_tp_renameat2(struct trace_event_raw_sys_enter *ctx)
+int aegis_tp_renameat2(struct syscall_trace_enter *ctx)
 {
     __u32 tgid = 0;
     if (!aegis_should_emit(AEGIS_CFG_TRACE_RENAME, &tgid))
@@ -833,7 +938,7 @@ int aegis_tp_renameat2(struct trace_event_raw_sys_enter *ctx)
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     __u64 actor = aegis_task_key(task);
 
-    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_RENAME, AEGIS_BPF_EVT_LARGE,
+    void *rec = aegis_evt_begin(AEGIS_FAM_RENOMBRADOS, AEGIS_EVT_FILE_RENAME, AEGIS_BPF_EVT_LARGE,
                                 actor, 0, 0);
     if (!rec)
         return 0;
@@ -852,7 +957,7 @@ int aegis_tp_renameat2(struct trace_event_raw_sys_enter *ctx)
 }
 
 SEC("tracepoint/syscalls/sys_enter_rename")
-int aegis_tp_rename(struct trace_event_raw_sys_enter *ctx)
+int aegis_tp_rename(struct syscall_trace_enter *ctx)
 {
     __u32 tgid = 0;
     if (!aegis_should_emit(AEGIS_CFG_TRACE_RENAME, &tgid))
@@ -861,7 +966,7 @@ int aegis_tp_rename(struct trace_event_raw_sys_enter *ctx)
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     __u64 actor = aegis_task_key(task);
 
-    void *rec = aegis_evt_begin(AEGIS_EVT_FILE_RENAME, AEGIS_BPF_EVT_LARGE,
+    void *rec = aegis_evt_begin(AEGIS_FAM_RENOMBRADOS, AEGIS_EVT_FILE_RENAME, AEGIS_BPF_EVT_LARGE,
                                 actor, 0, 0);
     if (!rec)
         return 0;

@@ -176,13 +176,72 @@ struct aegis_bpf_config {
     __u32 write_distinct_threshold;
 };
 
+/* Tamano del ring buffer de eventos. Las prioridades se miden contra el. */
+#define AEGIS_RING_BYTES (8u * 1024u * 1024u)
+
 enum aegis_stat {
     AEGIS_STAT_EMITTED = 0,
     AEGIS_STAT_DROPPED_FULL = 1,   /* ring lleno: punto ciego de deteccion   */
     AEGIS_STAT_FILTERED = 2,       /* descartado por politica, no es perdida */
     AEGIS_STAT_TRUNCATED = 3,
-    AEGIS_STAT__MAX = 4,
+    AEGIS_STAT_DROPPED_PRIORIDAD = 4, /* cedido a un evento de mas prioridad  */
+    AEGIS_STAT__MAX = 5,
 };
+
+/*
+ * Familias de telemetria, en el MISMO orden que `Familia::todas()` del agente
+ * (crates/aegis-agent/src/capacidades.rs). Indexan el mapa de perdidas por
+ * familia; la prueba del objeto real comprueba que el mapa tiene una entrada
+ * por familia.
+ */
+enum aegis_familia {
+    AEGIS_FAM_EJECUCION = 0,
+    AEGIS_FAM_SALIDA = 1,
+    AEGIS_FAM_FICHEROS = 2,
+    AEGIS_FAM_ESCRITURAS = 3,
+    AEGIS_FAM_RENOMBRADOS = 4,
+    AEGIS_FAM_PTRACE = 5,
+    AEGIS_FAM_RED = 6,
+    AEGIS_FAM__MAX = 7,
+};
+
+/*
+ * PERDER CON PRIORIDAD (FASE 1 del MP-16).
+ *
+ * Con el ring lleno se perdia lo que llegara, y en una tormenta de escrituras
+ * —justo lo que hace un cifrador— lo que llega son escrituras: el `exec` del
+ * cifrador y el `ptrace` de quien inyecta podian perderse detras de miles de
+ * aperturas de fichero. Ahora cada familia tiene prioridad, y las de prioridad
+ * menor CEDEN el ring antes de que se llene:
+ *
+ *   alta   ejecucion, salida de proceso, ptrace   solo se pierden con el ring LLENO
+ *   media  red, renombrados                       ceden por encima del 90 %
+ *   baja   ficheros, escrituras                   ceden por encima del 75 %
+ *
+ * El ultimo cuarto del ring queda asi para lo que no se puede perder. Lo cedido
+ * se cuenta, por familia, y el agente lo publica: una perdida que no se ve es
+ * un punto ciego que nadie sabe que tiene.
+ */
+enum aegis_prioridad {
+    AEGIS_PRIO_ALTA = 0,
+    AEGIS_PRIO_MEDIA = 1,
+    AEGIS_PRIO_BAJA = 2,
+};
+
+static __always_inline enum aegis_prioridad aegis_prioridad_de(__u32 familia)
+{
+    switch (familia) {
+    case AEGIS_FAM_EJECUCION:
+    case AEGIS_FAM_SALIDA:
+    case AEGIS_FAM_PTRACE:
+        return AEGIS_PRIO_ALTA;
+    case AEGIS_FAM_RED:
+    case AEGIS_FAM_RENOMBRADOS:
+        return AEGIS_PRIO_MEDIA;
+    default:
+        return AEGIS_PRIO_BAJA;
+    }
+}
 
 /* Buffer temporal por CPU para construir la linea de comandos.
  *

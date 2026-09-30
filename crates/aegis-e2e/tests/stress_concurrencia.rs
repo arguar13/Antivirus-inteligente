@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aegis_agent::ransom::RansomStage;
+use aegis_agent::motores::secuestro::RansomStage;
 use aegis_agent::{Pipeline, ProcKey, TelemetryEvent};
 use aegis_ipc::{PushOutcome, RingConsumer, RingProducer};
 use aegis_ml::{FeatureExtractor, MalwareModel};
