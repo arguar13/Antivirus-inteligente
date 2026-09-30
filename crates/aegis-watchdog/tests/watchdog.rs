@@ -226,6 +226,64 @@ fn una_parada_autorizada_no_se_reinicia() {
     wd.stop();
 }
 
+/// Una parada autorizada PIDE parar (SIGTERM) antes de matar: el agente tiene
+/// que poder desenganchar lo suyo y publicar su informe final.
+#[test]
+fn una_parada_autorizada_deja_salir_limpio_al_agente() {
+    let lab = Lab::nuevo("paralimpia");
+    let limpio = lab.path().join("limpio");
+    let listo = lab.path().join("listo");
+    let mut target = agente_de_prueba(&lab);
+    // Avisa de que ya tiene el `trap` puesto: sin esperar a eso, el SIGTERM
+    // podia llegar antes y matar al shell con la accion por defecto.
+    target.args = vec![
+        "-c".into(),
+        format!(
+            "exec 1>/dev/null 2>/dev/null; trap 'echo limpio > \"{}\"; exit 0' TERM;              : > \"{}\"; while :; do sleep 0.2 & wait $!; done",
+            limpio.display(),
+            listo.display()
+        ),
+    ];
+    let mut wd = Watchdog::new(target);
+    wd.spawn().unwrap();
+    esperar_vivo(&mut wd);
+    for _ in 0..200 {
+        if listo.exists() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        listo.exists(),
+        "el agente de prueba no llego a poner su trap"
+    );
+    let inicio = std::time::Instant::now();
+    wd.stop();
+    assert!(
+        limpio.exists(),
+        "el agente no recibio SIGTERM: se le mato sin dejarle salir"
+    );
+    assert!(inicio.elapsed() < Duration::from_secs(5));
+}
+
+/// Y si el objetivo no atiende SIGTERM, la parada no se queda colgada: SIGKILL
+/// al acabar el plazo.
+#[test]
+fn una_parada_autorizada_termina_aunque_el_agente_ignore_sigterm() {
+    let lab = Lab::nuevo("paraterca");
+    let mut target = agente_de_prueba(&lab);
+    target.args = vec![
+        "-c".into(),
+        "exec 1>/dev/null 2>/dev/null; trap '' TERM; exec sleep 3600".into(),
+    ];
+    let mut wd = Watchdog::new(target);
+    wd.spawn().unwrap();
+    let pid = wd.pid().unwrap();
+    esperar_vivo(&mut wd);
+    wd.stop_con_plazo(Duration::from_millis(500));
+    assert!(!proceso_vivo(pid as i32), "sigue vivo tras la parada");
+}
+
 // ---------------------------------------------------------------------------
 // Reinicio ante cuelgue (latido rancio)
 // ---------------------------------------------------------------------------

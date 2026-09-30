@@ -2,11 +2,16 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::time::{Duration, Instant};
 
 use aegis_presupuesto::{Presupuesto, Veredicto, Vigilante};
 
 use crate::heartbeat::{self, Heartbeat};
 use crate::supervisor::{decide, Decision, TargetState};
+
+/// Cuanto se espera a que el objetivo salga por si mismo tras SIGTERM en una
+/// parada autorizada, antes del SIGKILL.
+pub const PLAZO_PARADA: Duration = Duration::from_secs(10);
 
 /// Error del watchdog.
 #[derive(Debug, thiserror::Error)]
@@ -206,11 +211,37 @@ impl Watchdog {
     }
 
     /// Detiene la supervision y el objetivo (parada ordenada del watchdog).
+    ///
+    /// Es la parada AUTORIZADA, asi que se le pide al objetivo que pare: SIGTERM,
+    /// y SIGKILL solo si en [`PLAZO_PARADA`] no ha salido. Antes era SIGKILL
+    /// directamente: el agente no llegaba a desenganchar lo suyo ni a publicar
+    /// su informe final, y el cgroup de su trabajador confinado quedaba huerfano
+    /// (visto en la matriz de kernels, FASE 1 del MP-16).
     pub fn stop(&mut self) {
-        if let Some(mut h) = self.hijo.take() {
-            let _ = h.kill();
-            let _ = h.wait();
+        self.stop_con_plazo(PLAZO_PARADA);
+    }
+
+    /// Como [`Watchdog::stop`], con otro plazo antes del SIGKILL.
+    pub fn stop_con_plazo(&mut self, plazo: Duration) {
+        let Some(mut h) = self.hijo.take() else {
+            return;
+        };
+        if let Ok(pid) = i32::try_from(h.id()) {
+            // SAFETY: `kill` solo recibe enteros; el pid es el de un hijo propio
+            // que todavia no se ha recolectado, asi que no puede estar reciclado.
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
         }
+        let inicio = Instant::now();
+        while inicio.elapsed() < plazo {
+            if let Ok(Some(_)) = h.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = h.kill();
+        let _ = h.wait();
     }
 }
 
