@@ -269,8 +269,11 @@ pub struct Kernels {
 pub struct ParametrosVm {
     /// Memoria de cada microVM.
     pub memoria_mib: u32,
-    /// CPU virtuales.
+    /// CPU virtuales con KVM.
     pub cpus: u32,
+    /// CPU virtuales con emulacion completa: QEMU traduce cada vCPU en su
+    /// propio hilo del anfitrion (MTTCG), asi que aqui si acortan el arranque.
+    pub cpus_emulado: u32,
     /// Plazo con KVM.
     pub plazo_kvm_s: u64,
     /// Plazo con emulacion completa (otra arquitectura).

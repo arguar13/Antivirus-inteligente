@@ -23,8 +23,9 @@
 [vm]
 memoria_mib = 2048
 cpus = 2
+cpus_emulado = 4
 plazo_kvm_s = 600
-plazo_emulado_s = 2400
+plazo_emulado_s = 3600
 
 # ── x86-64 ──────────────────────────────────────────────────────────────────
 

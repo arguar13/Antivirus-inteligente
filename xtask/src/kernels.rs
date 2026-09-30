@@ -466,34 +466,37 @@ fn arrancar(
     let serie = dir.join("consola.log");
     let _ = std::fs::remove_file(&serie);
 
-    let (prog, mut args, plazo): (&str, Vec<String>, u64) = match im.arquitectura.as_str() {
-        "x86_64" => (
-            "qemu-system-x86_64",
-            vec![
-                "-machine".into(),
-                "q35,accel=kvm".into(),
-                "-cpu".into(),
-                "host".into(),
-            ],
-            k.vm.plazo_kvm_s,
-        ),
-        "aarch64" => (
-            "qemu-system-aarch64",
-            vec![
-                "-machine".into(),
-                "virt".into(),
-                // Un modelo concreto y no `max`: con `max` QEMU emula en software
-                // la autenticacion de punteros (ARMv8.3) en cada instruccion, y en
-                // emulacion completa la imagen de Ubuntu no paso del firmware
-                // UEFI en 40 minutos. Con Cortex-A72 llega a systemd en menos de 3.
-                // Para eBPF da igual: el kernel y el verificador son los mismos.
-                "-cpu".into(),
-                "cortex-a72".into(),
-            ],
-            k.vm.plazo_emulado_s,
-        ),
-        otra => return Err(format!("{}: arquitectura desconocida {otra}", im.id).into()),
-    };
+    let (prog, mut args, plazo, cpus): (&str, Vec<String>, u64, u32) =
+        match im.arquitectura.as_str() {
+            "x86_64" => (
+                "qemu-system-x86_64",
+                vec![
+                    "-machine".into(),
+                    "q35,accel=kvm".into(),
+                    "-cpu".into(),
+                    "host".into(),
+                ],
+                k.vm.plazo_kvm_s,
+                k.vm.cpus,
+            ),
+            "aarch64" => (
+                "qemu-system-aarch64",
+                vec![
+                    "-machine".into(),
+                    "virt".into(),
+                    // Un modelo concreto y no `max`: con `max` QEMU emula en software
+                    // la autenticacion de punteros (ARMv8.3) en cada instruccion, y en
+                    // emulacion completa la imagen de Ubuntu no paso del firmware
+                    // UEFI en 40 minutos. Con Cortex-A72 llega a systemd en menos de 3.
+                    // Para eBPF da igual: el kernel y el verificador son los mismos.
+                    "-cpu".into(),
+                    "cortex-a72".into(),
+                ],
+                k.vm.plazo_emulado_s,
+                k.vm.cpus_emulado,
+            ),
+            otra => return Err(format!("{}: arquitectura desconocida {otra}", im.id).into()),
+        };
     if im.firmware == "uefi" {
         let (codigo, vars) = if im.arquitectura == "aarch64" {
             (
@@ -532,7 +535,12 @@ fn arrancar(
         "-m".into(),
         k.vm.memoria_mib.to_string(),
         "-smp".into(),
-        k.vm.cpus.to_string(),
+        cpus.to_string(),
+        // Fuente de entropia del anfitrion. Sin ella, bajo emulacion el kernel
+        // tardaba mas de 3 minutos en inicializar su generador (crng), y
+        // cloud-init y systemd esperaban detras: la imagen ARM rozaba el plazo.
+        "-device".into(),
+        "virtio-rng-pci".into(),
         "-display".into(),
         "none".into(),
         "-monitor".into(),
