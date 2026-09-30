@@ -9,6 +9,7 @@ mod capas;
 mod config;
 mod docs;
 mod enlace;
+mod incrustados;
 mod kernels;
 mod matriz;
 mod nombres;
@@ -32,7 +33,8 @@ Arquitectura
   capas                   Las dependencias solo bajan de capa (tools/config/capas.toml).
   nombres [--inventario]  Un solo idioma en crates y modulos (tools/config/nombres.toml).
   amenazas                Estructura y evidencias del modelo de amenazas.
-  arquitectura            capas + nombres + amenazas.
+  incrustados             Todo fichero incrustado (include_bytes!) esta en git.
+  arquitectura            capas + nombres + amenazas + incrustados.
 
 Matriz de kernels (tools/config/kernels.toml)
   kernels traer [--solo ID]... [--arquitectura ARQ]
@@ -112,6 +114,11 @@ fn ejecutar(args: &[String]) -> Resultado<()> {
             }
             Ok(())
         }
+        Some("incrustados") => {
+            let repo = repo::Repo::cargar(&raiz)?;
+            println!("{}", incrustados::comprobar(&repo)?);
+            Ok(())
+        }
         Some("amenazas") => {
             let repo = repo::Repo::cargar(&raiz)?;
             println!("{}", amenazas::comprobar(&repo)?);
@@ -125,6 +132,7 @@ fn ejecutar(args: &[String]) -> Resultado<()> {
                 capas::comprobar(&repo),
                 nombres::comprobar(&repo),
                 amenazas::comprobar(&repo),
+                incrustados::comprobar(&repo),
             ];
             let mut fallos = Vec::new();
             for r in resultados {

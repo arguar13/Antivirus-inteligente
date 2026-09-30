@@ -18,10 +18,22 @@ dist/
 venv/
 __pycache__/
 
-# Artefactos del producto (nunca deben entrar al repositorio)
+# Artefactos del producto (nunca deben entrar al repositorio): los modelos de
+# PRODUCCION, entrenados con datos, llegan por el canal de actualizacion firmado.
 *.joblib
 *.onnx
 models/
+# EXCEPCION: los tres modelos de REFERENCIA que los crates incrustan con
+# include_bytes!. No son datos entrenados: son pesos fijados a mano que generan de
+# forma determinista crates/*/tools/build_*.py, y sin ellos el codigo no compila
+# en un clon limpio (lo destapo el primer runner independiente, FASE 0 del MP-15).
+# La puerta `incrustados` de make ci exige que todo fichero incrustado este en git.
+!crates/aegis-ml/models/
+!crates/aegis-ml/models/aegis-static-v1.onnx
+!crates/aegis-edgeml/models/
+!crates/aegis-edgeml/models/aegis-behavior-v1.onnx
+!crates/aegis-l7hunter/models/
+!crates/aegis-l7hunter/models/aegis-c2-l7-v1.onnx
 corpus/
 reports/
 *.aegisq
