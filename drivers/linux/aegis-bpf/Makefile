@@ -63,6 +63,12 @@ CORECHECK  := $(BUILD)/aegis_core_check
 # destino, no en la compilacion.
 BTF_ORIGEN ?= $(if $(AEGIS_BTF),$(AEGIS_BTF),/sys/kernel/btf/vmlinux)
 VMLINUX_H  := $(BUILD)/vmlinux.h
+# Sello del BTF de origen: su ruta y su suma. vmlinux.h depende de el, asi que se
+# regenera cuando cambia el BTF, y solo entonces. Antes solo dependia de que
+# existiera: un OUT_DIR reutilizado conservaba el vmlinux.h de otro BTF (el del
+# kernel del anfitrion, sin `bpf_iter_task`) y la compilacion fallaba en un
+# runner limpio aunque AEGIS_BTF ya apuntase al BTF fijado (FASE 0 del MP-15).
+BTF_SELLO  := $(BUILD)/vmlinux.origen
 
 # -nostdinc + el include de clang primero: para el target bpf no hay libc, y
 # asi <stdint.h> resuelve al de clang (freestanding, autocontenido) en vez de
@@ -96,7 +102,7 @@ BPF_CFLAGS := -target bpf -O2 -g \
 VERIFY_CFLAGS := -O2 -Wall -Wextra -Werror -Iinclude -I$(ABI_INC)
 VERIFY_LDLIBS := -lbpf -lelf -lz
 
-.PHONY: build verify verify-estatico core-check core-matrix sign check-integrity clean dump
+.PHONY: FORCE build check-btf-sello verify verify-estatico core-check core-matrix sign check-integrity clean dump
 
 build: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(IPS_OBJ)
 
@@ -109,7 +115,14 @@ $(BUILD):
 # encabezado generado sin trazabilidad es una caja negra: si un dia el bytecode
 # se comporta distinto, lo primero que hay que poder responder es contra que
 # BTF se compilo.
-$(VMLINUX_H): | $(BUILD)
+# Se evalua en cada invocacion (FORCE) pero solo se REESCRIBE si cambia, de modo
+# que su fecha, y con ella la de vmlinux.h y los objetos, no se mueve en balde.
+$(BTF_SELLO): FORCE | $(BUILD)
+	@nuevo="$(BTF_ORIGEN) $$(sha256sum "$(BTF_ORIGEN)" 2>/dev/null | cut -d' ' -f1)"; 	 if [ ! -f $@ ] || [ "$$(cat $@)" != "$$nuevo" ]; then echo "$$nuevo" > $@; fi
+
+FORCE:
+
+$(VMLINUX_H): $(BTF_SELLO) | $(BUILD)
 	@command -v bpftool >/dev/null 2>&1 || { \
 	    echo "ERROR: falta bpftool; es quien traduce el BTF a vmlinux.h."; \
 	    echo "       compilalo con: make -C <libbpf/bpftool>/src"; exit 1; }
@@ -249,6 +262,13 @@ sign: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
 # entregar el programa al kernel (modulo 14). Este paso del CI comprueba que los
 # tres objetos se firman y se re-verifican de forma consistente con la misma
 # clave, que es lo que puede hacer sin un estado versionado.
+# Puerta del sello del BTF: un directorio de salida con el vmlinux.h de OTRO BTF
+# tiene que regenerarse, y una segunda pasada con el mismo BTF no tiene que
+# rehacer nada. Reproduce lo que rompio el primer runner limpio: un OUT_DIR de
+# Cargo reutilizado que conservaba un vmlinux.h sin `bpf_iter_task`.
+check-btf-sello:
+	@t=$$(mktemp -d); trap 'rm -rf "$$t"' EXIT; 	 echo '#error "vmlinux.h de otro BTF"' > "$$t/vmlinux.h"; 	 echo "/otro/btf 0" > "$$t/vmlinux.origen"; 	 $(MAKE) -s BUILD="$$t" build >/dev/null 2>&1 || { 	     echo "FALLO: con otro BTF en el sello, vmlinux.h no se regenero"; exit 1; }; 	 a=$$(stat -c %y "$$t/vmlinux.h"); 	 $(MAKE) -s BUILD="$$t" build >/dev/null 2>&1; 	 b=$$(stat -c %y "$$t/vmlinux.h"); 	 [ "$$a" = "$$b" ] || { echo "FALLO: sin cambiar el BTF, vmlinux.h se regenero"; exit 1; }; 	 echo "  OK    vmlinux.h se regenera cuando cambia el BTF, y solo entonces"
+
 check-integrity: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
 	@python3 tools/sign_bytecode.py sign $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)
 	@python3 tools/sign_bytecode.py check $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ)

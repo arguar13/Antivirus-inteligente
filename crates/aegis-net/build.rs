@@ -45,6 +45,11 @@ fn main() {
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("cargo define OUT_DIR"));
 
+    // El BTF del que sale vmlinux.h llega por AEGIS_BTF: cambiarlo tiene que
+    // recompilar. Sin esta linea, Cargo reutilizaba el script y el Makefile, el
+    // vmlinux.h de otro BTF que ya estaba en OUT_DIR.
+    println!("cargo:rerun-if-env-changed=AEGIS_BTF");
+
     let salida = Command::new("make")
         .arg("-C")
         .arg(&bpf_dir)

@@ -389,6 +389,7 @@ paso abi   "ABI · layout C vs Rust (clang)" env CC=clang ./tools/abi-check.sh
 # falla por algo que no es un defecto ensena a la gente a ignorar el CI.
 if [ -f drivers/linux/aegis-bpf/Makefile ]; then
     paso bpf   "eBPF · compilacion"            make -C drivers/linux/aegis-bpf build
+    paso bpf   "eBPF · vmlinux.h sigue al BTF" make -C drivers/linux/aegis-bpf check-btf-sello
     if command -v python3 >/dev/null 2>&1; then
         paso bpf   "eBPF · integridad HMAC"    make -C drivers/linux/aegis-bpf check-integrity
     fi
