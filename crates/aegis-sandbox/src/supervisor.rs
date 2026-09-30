@@ -89,12 +89,17 @@ const _: () = assert!(std::mem::size_of::<DatosSeccomp>() == 64);
 const _: () = assert!(std::mem::size_of::<NotifSeccomp>() == 80);
 const _: () = assert!(std::mem::size_of::<RespSeccomp>() == 24);
 
+// El tipo de la peticion de `ioctl` no es el mismo en todas las libc: `c_ulong`
+// en glibc, `c_int` en musl. `libc::Ioctl` es el de la que se enlaza, y el valor
+// se reinterpreta bit a bit (el kernel lo lee como `unsigned int`). Con
+// `c_ulong` escrito a mano, este crate no compilaba contra musl, y no se supo
+// hasta que el agente hermetico lo enlazo por primera vez (FASE 1 del MP-16).
 /// `SECCOMP_IOCTL_NOTIF_RECV` = `_IOWR('!', 0, struct seccomp_notif)`.
-const IOCTL_RECV: libc::c_ulong = 0xc050_2100;
+const IOCTL_RECV: libc::Ioctl = 0xc050_2100_u32 as libc::Ioctl;
 /// `SECCOMP_IOCTL_NOTIF_SEND` = `_IOWR('!', 1, struct seccomp_notif_resp)`.
-const IOCTL_SEND: libc::c_ulong = 0xc018_2101;
+const IOCTL_SEND: libc::Ioctl = 0xc018_2101_u32 as libc::Ioctl;
 /// `SECCOMP_IOCTL_NOTIF_ID_VALID` = `_IOW('!', 2, __u64)`.
-const IOCTL_ID_VALID: libc::c_ulong = 0x4008_2102;
+const IOCTL_ID_VALID: libc::Ioctl = 0x4008_2102_u32 as libc::Ioctl;
 /// `SECCOMP_USER_NOTIF_FLAG_CONTINUE`.
 const FLAG_CONTINUE: u32 = 1;
 /// `SECCOMP_GET_NOTIF_SIZES`.
