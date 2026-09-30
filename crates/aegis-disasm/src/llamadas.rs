@@ -69,6 +69,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::cfg::Cfg;
 use crate::instruccion::{Flujo, Instruccion, MAX_REGISTROS};
+use crate::plazo::Plazo;
 
 /// Lo que se sabe del contenido de un registro en un punto del programa.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,8 +268,17 @@ pub const MAX_LLAMADAS: usize = 1_000_000;
 const MAX_VISITAS_POR_BLOQUE: u32 = 4 * MAX_REGISTROS as u32;
 
 impl GrafoDeLlamadas {
-    /// Construye el grafo de llamadas sobre un grafo de flujo ya construido.
+    /// Construye el grafo de llamadas sin cota de trabajo.
+    ///
+    /// Solo para ficheros de confianza (herramientas, pruebas). El analisis de
+    /// produccion usa [`GrafoDeLlamadas::construir_con_plazo`].
     pub fn construir(cfg: &Cfg) -> GrafoDeLlamadas {
+        GrafoDeLlamadas::construir_con_plazo(cfg, &mut Plazo::sin_cota())
+    }
+
+    /// Construye el grafo de llamadas cobrando su trabajo al `plazo` del
+    /// analisis. Si se agota, para y lo declara en [`GrafoDeLlamadas::cortado`].
+    pub fn construir_con_plazo(cfg: &Cfg, plazo: &mut Plazo) -> GrafoDeLlamadas {
         let mut g = GrafoDeLlamadas::default();
 
         // Las entradas de funcion son las del grafo de flujo mas los destinos de
@@ -289,16 +299,21 @@ impl GrafoDeLlamadas {
         // El analisis de constantes recorre el grafo de flujo entero una vez,
         // no una vez por funcion: los bloques se comparten y repetirlo seria
         // pagar el mismo trabajo tantas veces como funciones lo alcancen.
-        let salidas = propaga(cfg);
+        let (salidas, propagacion_cortada) = propaga(cfg, plazo);
+        g.cortado |= propagacion_cortada;
 
-        for entrada in entradas.iter().take(MAX_FUNCIONES).copied() {
+        'funciones: for entrada in entradas.iter().take(MAX_FUNCIONES).copied() {
             let bloques = cuerpo(cfg, entrada, &entradas);
             let mut llama_a = BTreeSet::new();
             for b in &bloques {
                 let Some(bloque) = cfg.bloque(*b) else {
                     continue;
                 };
-                let mut estado = salidas.get(b).map(|(e, _)| *e).unwrap_or_else(estado_vacio);
+                if !plazo.cobrar(bloque.instrucciones.len() as u64 + 1) {
+                    g.cortado = true;
+                    break 'funciones;
+                }
+                let mut estado = salidas.get(b).copied().unwrap_or_else(estado_vacio);
                 for i in &bloque.instrucciones {
                     if let Some(a) = arista(i, &estado) {
                         if g.llamadas.len() >= MAX_LLAMADAS {
@@ -517,9 +532,17 @@ fn aplica(i: &Instruccion, estado: &mut Estado) {
 /// por bloque, el numero total de reencolados esta acotado. El tope de visitas
 /// esta igualmente, porque un fallo en esa monotonia seria un bucle infinito
 /// dentro del agente.
-fn propaga(cfg: &Cfg) -> BTreeMap<u64, (Estado, Estado)> {
+fn propaga(cfg: &Cfg, plazo: &mut Plazo) -> (BTreeMap<u64, Estado>, bool) {
+    // SOLO los estados de entrada, y solo los que dicen algo.
+    //
+    // Antes se guardaban la entrada y la salida de cada bloque, y una copia de
+    // las dos en el resultado: tres copias de 32 registros de 24 bytes por
+    // bloque, unos 3 KiB. Con los 150.000 bloques de `python3` eran 470 MiB
+    // (FASE 1 del MP-16). El grafo de llamadas solo usa la entrada, y la
+    // salida se recalcula al propagar; y un estado en el que no se sabe nada es
+    // el valor por defecto, asi que no se guarda.
     let mut entrada: BTreeMap<u64, Estado> = BTreeMap::new();
-    let mut salida: BTreeMap<u64, Estado> = BTreeMap::new();
+    let vacio = estado_vacio();
     let mut visitas: BTreeMap<u64, u32> = BTreeMap::new();
     let mut cola: VecDeque<u64> = VecDeque::new();
     let mut encolado: BTreeSet<u64> = BTreeSet::new();
@@ -536,6 +559,11 @@ fn propaga(cfg: &Cfg) -> BTreeMap<u64, (Estado, Estado)> {
     // iteracion: con el tope de doscientos mil bloques de [`crate::cfg`], eso
     // son cuatro billones de comprobaciones, o sea un cuelgue dentro del
     // agente. El coste aqui es lineal en bloques y aristas.
+    // A que bloques ya llego algun estado. Separado de `entrada` porque ahi
+    // no estar significa «no se sabe nada», que no es lo mismo que «aun no se
+    // llego»: el primer estado que llega se toma tal cual, los siguientes se
+    // intersecan con el.
+    let mut llegados: BTreeSet<u64> = BTreeSet::new();
     let mut alcanzables: BTreeSet<u64> = BTreeSet::new();
     let mut frente: VecDeque<u64> = cfg
         .bloques()
@@ -555,7 +583,7 @@ fn propaga(cfg: &Cfg) -> BTreeMap<u64, (Estado, Estado)> {
     }
     for b in cfg.bloques() {
         if b.predecesores.is_empty() || !alcanzables.contains(&b.inicio) {
-            entrada.insert(b.inicio, estado_vacio());
+            llegados.insert(b.inicio);
             if encolado.insert(b.inicio) {
                 cola.push_back(b.inicio);
             }
@@ -572,41 +600,42 @@ fn propaga(cfg: &Cfg) -> BTreeMap<u64, (Estado, Estado)> {
         let Some(bloque) = cfg.bloque(dir) else {
             continue;
         };
-        let mut e = *entrada.get(&dir).unwrap_or(&estado_vacio());
+        if !plazo.cobrar(bloque.instrucciones.len() as u64 + 1) {
+            return (entrada, true);
+        }
+        let mut e = *entrada.get(&dir).unwrap_or(&vacio);
         for i in &bloque.instrucciones {
             aplica(i, &mut e);
         }
-        salida.insert(dir, e);
 
         for s in &bloque.sucesores {
-            let nuevo = match entrada.get(s) {
+            let ya = llegados.contains(s);
+            let previo = *entrada.get(s).unwrap_or(&vacio);
+            let nuevo = if ya {
                 // El sucesor ya tenia un estado de entrada: se encuentra con
                 // este. Solo sobrevive lo que es cierto por los dos caminos.
-                Some(previo) => {
-                    let mut m = estado_vacio();
-                    for k in 0..MAX_REGISTROS as usize {
-                        m[k] = Valor::encuentro(previo[k], e[k]);
-                    }
-                    m
+                let mut m = estado_vacio();
+                for k in 0..MAX_REGISTROS as usize {
+                    m[k] = Valor::encuentro(previo[k], e[k]);
                 }
+                m
+            } else {
                 // Primera vez que se llega: se toma tal cual.
-                None => e,
+                e
             };
-            let cambia = entrada.get(s) != Some(&nuevo);
-            entrada.insert(*s, nuevo);
+            let cambia = !ya || previo != nuevo;
+            llegados.insert(*s);
+            if nuevo == vacio {
+                entrada.remove(s);
+            } else {
+                entrada.insert(*s, nuevo);
+            }
             if cambia && encolado.insert(*s) {
                 cola.push_back(*s);
             }
         }
     }
-
-    cfg.bloques()
-        .map(|b| {
-            let e = *entrada.get(&b.inicio).unwrap_or(&estado_vacio());
-            let s = *salida.get(&b.inicio).unwrap_or(&e);
-            (b.inicio, (e, s))
-        })
-        .collect()
+    (entrada, false)
 }
 
 /// Los bloques que pertenecen a la funcion que empieza en `entrada`.

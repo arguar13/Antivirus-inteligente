@@ -41,6 +41,7 @@ use crate::cfg::Cfg;
 use crate::importaciones::{Forma, Importaciones};
 use crate::instruccion::{Arquitectura, Clase, Flujo, Instruccion, Segmento};
 use crate::llamadas::GrafoDeLlamadas;
+use crate::plazo::Plazo;
 
 /// Lo que una regla busca en el binario.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,11 +281,14 @@ fn buscar_todas(s: &Senal, ctx: &Contexto) -> Vec<u64> {
             .map(|r| r.donde)
             .take(MAX_APARICIONES)
             .collect(),
+        // Con la busqueda indexada del grafo, no recorriendo todos los bloques
+        // por cada arista: eso era O(aristas x bloques), 35 s sobre `python3`
+        // (FASE 1 del MP-16).
         Senal::SaltaFueraDelCodigo => ctx
             .llamadas
             .llamadas
             .iter()
-            .filter(|l| !ctx.cfg.bloques().any(|b| l.a >= b.inicio && l.a < b.fin))
+            .filter(|l| ctx.cfg.bloque_que_contiene(l.a).is_none())
             .map(|l| l.desde)
             .take(MAX_APARICIONES)
             .collect(),
@@ -477,12 +481,35 @@ fn evidencias_de(r: &Regla, vistas: &[(&Senal, u64)], ctx: &Contexto) -> Vec<Evi
         .collect()
 }
 
-/// Evalua todo el catalogo.
+/// Evalua todo el catalogo sin cota de trabajo (ficheros de confianza).
 pub fn evaluar(ctx: &Contexto) -> Vec<Capacidad> {
-    CATALOGO
-        .iter()
-        .filter_map(|r| evaluar_una(r, ctx))
-        .collect()
+    evaluar_con_plazo(ctx, &mut Plazo::sin_cota()).0
+}
+
+/// Lo que cuesta, en unidades del plazo, buscar una senal: cuantos elementos
+/// recorre.
+fn coste(s: &Senal, ctx: &Contexto) -> u64 {
+    match s {
+        Senal::Importa(_) => ctx.importaciones.resoluciones.len() as u64,
+        Senal::SaltaFueraDelCodigo => ctx.llamadas.llamadas.len() as u64,
+        _ => ctx.cfg.cobertura.instrucciones.max(1),
+    }
+}
+
+/// Evalua el catalogo cobrando cada senal al `plazo` del analisis. Devuelve
+/// las capacidades y si se corto antes de terminar el catalogo.
+pub fn evaluar_con_plazo(ctx: &Contexto, plazo: &mut Plazo) -> (Vec<Capacidad>, bool) {
+    let mut capacidades = Vec::new();
+    for r in CATALOGO {
+        let precio: u64 = r.senales.iter().map(|s| coste(s, ctx)).sum();
+        if !plazo.cobrar(precio) {
+            return (capacidades, true);
+        }
+        if let Some(c) = evaluar_una(r, ctx) {
+            capacidades.push(c);
+        }
+    }
+    (capacidades, false)
 }
 
 /// El catalogo.

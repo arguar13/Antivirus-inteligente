@@ -27,7 +27,7 @@ use crate::importaciones::{Importaciones, Importadas, SinTabla};
 use crate::instruccion::Arquitectura;
 use crate::llamadas::GrafoDeLlamadas;
 use crate::plazo::{Cobertura, Plazo};
-use crate::reglas::{evaluar, Contexto};
+use crate::reglas::{evaluar_con_plazo, Contexto};
 use crate::{arm64, x86};
 
 /// Lo que hay que saber del binario para analizarlo.
@@ -106,7 +106,7 @@ pub fn analizar(e: &Entrada, plazo: &mut Plazo) -> Analisis {
             Err(_) => Cfg::default(),
         },
     };
-    let llamadas = GrafoDeLlamadas::construir(&cfg);
+    let llamadas = GrafoDeLlamadas::construir_con_plazo(&cfg, plazo);
     let importaciones = Importaciones::buscar(&cfg, e.importadas, e.arquitectura);
 
     let ctx = Contexto::nuevo(
@@ -117,7 +117,7 @@ pub fn analizar(e: &Entrada, plazo: &mut Plazo) -> Analisis {
         e.base,
         e.arquitectura,
     );
-    let capacidades = evaluar(&ctx);
+    let (capacidades, reglas_cortadas) = evaluar_con_plazo(&ctx, plazo);
 
     // La cobertura sale del grafo de flujo y se completa con lo que aporta el
     // grafo de llamadas. Van juntas dentro del informe y no como dos valores
@@ -126,7 +126,11 @@ pub fn analizar(e: &Entrada, plazo: &mut Plazo) -> Analisis {
         bytes_totales: e.codigo.len() as u64,
         transferencias_indirectas: cfg.indirectos.len(),
         funciones: llamadas.cuantas_funciones().max(cfg.cobertura.funciones),
-        cortado_por_plazo: cfg.cobertura.cortado_por_plazo || llamadas.cortado,
+        cortado_por_plazo: cfg.cobertura.cortado_por_plazo
+            || llamadas.cortado
+            || reglas_cortadas
+            || plazo.agotado_por_tiempo(),
+        cortado_por_tope: cfg.cobertura.cortado_por_tope || plazo.agotado_por_tope(),
         ..cfg.cobertura.clone()
     };
     let informe = Informe::nuevo(capacidades, cobertura);

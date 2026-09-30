@@ -23,11 +23,22 @@
 
 use std::time::{Duration, Instant};
 
-/// Cota de tiempo y de trabajo para un analisis.
+/// Cota de tiempo y de trabajo para un analisis ENTERO.
 ///
 /// Lleva las dos porque una sola no basta: el tiempo protege de un binario que
-/// tarda, y el tope de instrucciones protege de una maquina tan rapida que el
-/// reloj no salta pero la memoria se llena. Se agota la primera que llegue.
+/// tarda, y el tope de trabajo protege de una maquina tan rapida que el reloj no
+/// salta pero la memoria se llena. Se agota la primera que llegue.
+///
+/// # Cubre TODAS las fases
+///
+/// Al principio solo lo consultaba la construccion del grafo de flujo: el grafo
+/// de llamadas, la propagacion de constantes y las reglas corrian despues sin
+/// cota. Sobre `python3` —un ejecutable corriente de 7 MiB— eso eran 21 s y
+/// 600 MiB, con un plazo declarado de 500 ms (FASE 1 del MP-16, medido en el
+/// trabajador confinado, que lo mato por memoria). Ahora cada fase cobra su
+/// trabajo aqui —instrucciones decodificadas, instrucciones recorridas,
+/// elementos examinados— con [`Plazo::sigue`] o [`Plazo::cobrar`], y al
+/// agotarse para y lo declara en la [`Cobertura`].
 #[derive(Debug, Clone)]
 pub struct Plazo {
     limite: Duration,
@@ -77,6 +88,23 @@ impl Plazo {
             return false;
         }
         true
+    }
+
+    /// Cobra `n` unidades de trabajo de golpe y dice si se puede seguir.
+    ///
+    /// Para las fases que recorren algo cuyo tamaño ya se conoce (todas las
+    /// instrucciones del grafo, todas las aristas): cobrar de una vez evita
+    /// pagar la comprobacion por elemento, y el sobrepaso queda acotado por ese
+    /// `n`, que el propio tope ya limito en la fase anterior.
+    pub fn cobrar(&mut self, n: u64) -> bool {
+        self.gastadas = self.gastadas.saturating_add(n);
+        self.gastadas <= self.tope_instrucciones && self.inicio.elapsed() < self.limite
+    }
+
+    /// Un plazo sin cota: solo para herramientas y pruebas que analizan un
+    /// fichero de confianza. El camino de produccion usa siempre un tope.
+    pub fn sin_cota() -> Plazo {
+        Plazo::nuevo(Duration::MAX, u64::MAX)
     }
 
     /// Si se agoto por tiempo.
