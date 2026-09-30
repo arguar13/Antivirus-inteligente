@@ -604,6 +604,21 @@ fn cabecera(datos: &[u8], nombre: &str) -> Option<String> {
 /// patrones: en cada posicion se mira un byte, y solo cuando ese byte puede
 /// empezar un patron se prueban los que empiezan por el. Ver [`PRIMERAS`].
 fn credenciales(datos: &[u8]) -> Vec<Tapado> {
+    let mut trabajo = 0u64;
+    credenciales_contando(datos, &mut trabajo)
+}
+
+/// [`credenciales`], contando el TRABAJO que hace: posiciones visitadas,
+/// patrones considerados, bytes comparados y bytes recorridos hasta el final de
+/// cada valor.
+///
+/// Existe para que las pruebas de coste midan el algoritmo y no la maquina. Se
+/// media con reloj, y fallaba cada vez que otro proceso compilaba al lado: un
+/// cociente de tiempos bajo carga mide al planificador. El trabajo contado es
+/// exacto y reproducible, y es justo lo que un relleno hostil intentaria
+/// multiplicar (FASE 1 del MP-16, la misma causa raiz que la prueba de purga de
+/// `aegis-server`).
+fn credenciales_contando(datos: &[u8], trabajo: &mut u64) -> Vec<Tapado> {
     let tope = datos.len().min(VENTANA);
     let mut salida = Vec::new();
     let mut i = 0usize;
@@ -615,6 +630,7 @@ fn credenciales(datos: &[u8]) -> Vec<Tapado> {
     // No se hace copia del paquete en minusculas: seria mil quinientos bytes de
     // reserva y copia por paquete, y el caso normal ni siquiera los mira.
     while i + 1 < tope && salida.len() < MAX_HALLAZGOS {
+        *trabajo += 1;
         let a = datos[i].to_ascii_lowercase();
         let b = datos[i + 1].to_ascii_lowercase();
         if !pareja_posible(a, b) {
@@ -626,6 +642,7 @@ fn credenciales(datos: &[u8]) -> Vec<Tapado> {
         // Solo los patrones que empiezan por esos dos bytes: uno o dos, no los
         // dieciocho.
         for p in tramo(a, b) {
+            *trabajo += 1;
             let marca = p.texto.as_bytes();
             if i + marca.len() > tope {
                 continue;
@@ -636,9 +653,11 @@ fn credenciales(datos: &[u8]) -> Vec<Tapado> {
             // El ultimo byte antes que el patron entero: es lo que impide que un
             // relleno elegido a proposito haga comparar diecisiete bytes en cada
             // posicion del paquete.
+            *trabajo += 1;
             if !ultimo_cuadra(datos, i, marca, p.ignora_caso) {
                 continue;
             }
+            *trabajo += marca.len() as u64;
             let casa = if p.ignora_caso {
                 datos[i..i + marca.len()].eq_ignore_ascii_case(marca)
             } else {
@@ -655,6 +674,7 @@ fn credenciales(datos: &[u8]) -> Vec<Tapado> {
                     Fin::Formulario => b == b'&' || b == b'\r' || b == b'\n' || b == b' ',
                 })
                 .map_or(tope, |n| inicio_valor + n);
+            *trabajo += (fin.max(inicio_valor) - inicio_valor) as u64;
             if fin > inicio_valor {
                 salida.push(Tapado {
                     desde: inicio_valor,
@@ -805,51 +825,17 @@ mod pruebas {
         assert_eq!(l.bytes(), p);
     }
 
-    /// Cuantas veces cuesta MIRAR cada paquete de `otros` lo que cuesta mirar
-    /// `base`, **sin el ruido de la maquina**.
+    /// El trabajo de mirar un paquete, contado y no cronometrado.
     ///
-    /// # Como se mide, y por que asi
-    ///
-    /// Un cociente entre dos tiempos solo vale si los dos se tomaron en las
-    /// mismas condiciones, y en una maquina compartida las condiciones cambian de
-    /// un momento a otro. Por eso cada paquete se mide INMEDIATAMENTE despues de
-    /// un lote de `base`, y se calcula el cociente de ese par: dos lotes seguidos
-    /// sufren la misma carga. Se repite y se toma la MEDIANA de los cocientes, que
-    /// ignora las pasadas en las que otro proceso se cruzo.
-    ///
-    /// Las dos formas anteriores fallaron de verdad. Medir la base una vez al
-    /// principio y los demas despues comparaba momentos distintos: con otro
-    /// proceso compilando al lado, un relleno de «w» salia de 5 a 8 veces mas caro
-    /// que el neutro sin serlo. Y el cociente de dos MINIMOS, aun intercalados,
-    /// seguia comparando pasadas distintas: el coste real de ese relleno es 3,5
-    /// veces el neutro —medido estable, 3,47 a 3,56—, y bajo carga salia 4,4.
-    ///
-    /// Se mide [`Redactor::inspeccionar`] y no [`Redactor::limpiar`]: la copia que
-    /// hace `limpiar` es lineal por necesidad y no es lo que se quiere acotar.
-    fn cocientes(r: &Redactor, base: &[u8], otros: &[&[u8]], cuantos: u32) -> Vec<f64> {
-        const PASADAS: usize = 9;
-        let lote = |p: &[u8]| {
-            let t = std::time::Instant::now();
-            for _ in 0..cuantos {
-                std::hint::black_box(r.inspeccionar(p, Donde::default()));
-            }
-            t.elapsed().as_secs_f64()
-        };
-        let mut por_paquete: Vec<Vec<f64>> = vec![Vec::with_capacity(PASADAS); otros.len()];
-        for _ in 0..PASADAS {
-            for (v, p) in por_paquete.iter_mut().zip(otros) {
-                let b = lote(base);
-                let o = lote(p);
-                v.push(o / b.max(1e-12));
-            }
-        }
-        por_paquete
-            .into_iter()
-            .map(|mut v| {
-                v.sort_by(f64::total_cmp);
-                v[v.len() / 2]
-            })
-            .collect()
+    /// Antes estas pruebas cronometraban lotes y comparaban cocientes de
+    /// tiempos, y fallaban cada vez que otro proceso compilaba al lado: bajo
+    /// carga, un cociente de tiempos mide al planificador, no al algoritmo. Lo
+    /// que la propiedad afirma es que el relleno o el tamaño no MULTIPLICAN EL
+    /// TRABAJO, y el trabajo se puede contar exactamente.
+    fn trabajo(datos: &[u8]) -> u64 {
+        let mut t = 0;
+        let _ = credenciales_contando(datos, &mut t);
+        t
     }
 
     /// El relleno del paquete no puede multiplicar el coste de mirarlo.
@@ -862,36 +848,30 @@ mod pruebas {
     /// que el atacante apaga generando trafico.
     #[test]
     fn el_relleno_del_paquete_no_multiplica_el_coste_de_mirarlo() {
-        let r = Redactor::nuevo();
-
         // Un paquete corriente, de relleno neutro, y el peor relleno posible: el
         // primer byte de cada patron, repetido.
         let neutro = vec![b'.'; 1500];
         let mut rellenos: Vec<u8> = PATRONES.iter().map(|p| p.texto.as_bytes()[0]).collect();
         rellenos.sort_unstable();
         rellenos.dedup();
-        let hostiles: Vec<Vec<u8>> = rellenos.iter().map(|b| vec![*b; 1500]).collect();
-        let refs: Vec<&[u8]> = hostiles.iter().map(Vec::as_slice).collect();
-        let c = cocientes(&r, &neutro, &refs, 400);
-        let (i_peor, peor) = c
+        let base = trabajo(&neutro) as f64;
+        let (cual, peor) = rellenos
             .iter()
-            .copied()
-            .enumerate()
+            .map(|b| (*b, trabajo(&vec![*b; 1500]) as f64 / base))
             .max_by(|a, b| a.1.total_cmp(&b.1))
-            .unwrap_or((0, 0.0));
-        let cual = rellenos.get(i_peor).copied().unwrap_or(b'?');
+            .unwrap_or((b'?', 0.0));
         eprintln!(
-            "relleno: el peor es «{}», a {peor:.2} veces el neutro",
+            "relleno: el peor es «{}», a {peor:.2} veces el trabajo del neutro",
             cual as char
         );
 
-        // Cuatro veces sigue siendo margen —lo que esta prueba impide es el
-        // factor VEINTE que habia—; el peor relleno real, el de las uves dobles,
-        // esta en 3,5.
+        // Cuatro veces es el margen: lo que esta prueba impide es el factor
+        // VEINTE que habia (probar los dieciocho patrones en cada posicion). El
+        // peor relleno real hace, por posicion, la pareja, un patron y su ultimo
+        // byte: tres unidades frente a una.
         assert!(
             peor <= 4.0,
-            "un paquete lleno de «{}» cuesta {peor:.2} veces lo que uno neutro: el filtro \
-             de entrada no esta filtrando",
+            "un paquete lleno de «{}» cuesta {peor:.2} veces el trabajo de uno neutro: el              filtro de entrada no esta filtrando",
             cual as char
         );
     }
@@ -915,34 +895,28 @@ mod pruebas {
         let mut grande = cabecera.to_vec();
         grande.extend(std::iter::repeat_n(b'A', 4 * 1024 * 1024));
 
-        // LO QUE SE EXIGE, Y POR QUE NO ES UN COCIENTE SOBRE `limpiar`. Devuelve una
-        // COPIA del paquete: no se puede entregar un paquete limpio de cuatro
-        // megabytes sin escribir cuatro megabytes, y esa copia es lineal por
-        // necesidad. Exigir un cociente sobre `limpiar` media sobre todo al
-        // asignador de memoria —fallos de pagina frente a memoria reutilizada— y
-        // al ancho de banda de la maquina: pasaba de ~20 a 28 en cuanto otro
-        // proceso compilaba a la vez, y fallo asi en una tanda de CI. Restar una
-        // copia medida aparte tampoco sirve: son dos cifras de cientos de
-        // milisegundos con ruido propio, y el resto sale dominado por ese ruido.
-        //
-        // La propiedad de la ventana es otra y mas estricta: pasado su tamano,
-        // MIRAR cuesta lo mismo. Se compara la inspeccion sola sobre un paquete del
-        // tamano exacto de la ventana y sobre uno de cuatro megabytes: tienen que
-        // costar practicamente igual.
+        // LO QUE SE EXIGE. `limpiar` devuelve una COPIA del paquete, lineal por
+        // necesidad, asi que lo que se acota es MIRAR: pasado el tamano de la
+        // ventana, mirar cuesta EXACTAMENTE lo mismo. Se compara el trabajo
+        // contado sobre un paquete del tamano justo de la ventana y sobre uno de
+        // cuatro megabytes con los mismos primeros bytes. Antes era un cociente
+        // de tiempos, que pasaba de ~20 a 28 en cuanto otro proceso compilaba al
+        // lado y fallo asi en CI.
         let mut en_ventana = cabecera.to_vec();
         en_ventana.extend(std::iter::repeat_n(b'A', VENTANA - cabecera.len()));
-        let cociente = cocientes(&r, &en_ventana, &[&grande], 200)[0];
+        let (t_ventana, t_grande) = (trabajo(&en_ventana), trabajo(&grande));
         eprintln!(
-            "ventana: mirar {} B cuesta {cociente:.2} veces mirar {} B",
+            "ventana: mirar {} B cuesta {t_grande} unidades; mirar {} B, {t_ventana}",
             grande.len(),
             en_ventana.len()
         );
+        assert_eq!(
+            t_grande, t_ventana,
+            "pasado el tamano de la ventana el trabajo sigue creciendo: la ventana no acota"
+        );
         assert!(
-            cociente <= 3.0,
-            "MIRAR {} bytes cuesta {cociente:.2} veces lo que mirar {}: pasado el tamano de \
-             la ventana el coste sigue creciendo, asi que la ventana no esta acotando nada",
-            grande.len(),
-            en_ventana.len()
+            t_grande <= VENTANA as u64 * 4,
+            "el trabajo de mirar ({t_grande}) no esta acotado por la ventana ({VENTANA} B)"
         );
 
         // Y lo que sale tiene el tamano que entro, tapado o no.
