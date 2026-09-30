@@ -1,0 +1,12 @@
+# Supresiones de LeakSanitizer para el fuzzing (tools/fuzz.sh).
+#
+# Cada linea es una asignacion que NO es una fuga por entrada, con la prueba de
+# por que. Anadir una exige el mismo razonamiento: suprimir de mas apagaria la
+# deteccion de fugas de verdad en un parser que recibe bytes hostiles.
+#
+# iced-x86 construye sus tablas de decodificacion UNA vez, en un lazy_static, y
+# las deja vivas para siempre a proposito (cajas filtradas a referencias
+# estaticas): memoria acotada y de un solo uso, no una fuga por entrada.
+# LeakSanitizer no encuentra los punteros y la cuenta; aparecio en la primera
+# sesion de fuzzing del desensamblador (FASE 1 del MP-16).
+leak:iced_x86::decoder::table_de

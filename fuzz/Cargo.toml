@@ -19,6 +19,8 @@ aegis-fleet = { path = "../crates/aegis-fleet" }
 aegis-firmware = { path = "../crates/aegis-firmware" }
 aegis-scal = { path = "../crates/aegis-scal" }
 aegis-parser = { path = "../crates/aegis-parser" }
+aegis-trabajador = { path = "../crates/aegis-trabajador" }
+aegis-entidad = { path = "../crates/aegis-entidad" }
 
 # Cada objetivo comprueba una invariante: el parser NUNCA entra en panico ante
 # entrada arbitraria. Un panico ante un mensaje de red malformado es una via de
@@ -74,3 +76,45 @@ name = "aegisql"
 path = "fuzz_targets/aegisql.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "trabajador_protocolo"
+path = "fuzz_targets/trabajador_protocolo.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trabajador_modelo"
+path = "fuzz_targets/trabajador_modelo.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trabajador_pe"
+path = "fuzz_targets/trabajador_pe.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trabajador_macho"
+path = "fuzz_targets/trabajador_macho.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trabajador_desensamblado"
+path = "fuzz_targets/trabajador_desensamblado.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "trabajador_emulacion"
+path = "fuzz_targets/trabajador_emulacion.rs"
+test = false
+doc = false
+bench = false

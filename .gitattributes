@@ -14,3 +14,6 @@
 *.onnx binary
 *.o    binary
 *.qcow2 binary
+
+# Semillas y regresiones de fuzzing: bytes de formatos binarios, nunca texto.
+fuzz/semillas/** binary

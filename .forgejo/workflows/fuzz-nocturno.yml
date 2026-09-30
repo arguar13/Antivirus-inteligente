@@ -1,0 +1,55 @@
+# Fuzzing nocturno de AegisCore (FASE 1 del MP-16).
+#
+# make ci corre los objetivos del trabajador unos segundos: basta para que un
+# parser que se rompe con lo obvio no llegue a la rama. Lo que encuentra el
+# fuzzing de verdad sale de horas, y eso es esto: todos los objetivos, diez
+# minutos cada uno, cada noche, sobre el corpus que se va acumulando en la cache
+# del runner.
+#
+# Cuando algo falla, el caso queda en fuzz/artifacts/<objetivo>/ (se sube como
+# artefacto de la ejecucion). El TRIAJE: reproducirlo con
+#   cargo +$(cat tools/toolchain/nightly-fuzz.txt) fuzz run <objetivo> <caso>
+# arreglar el parser en su causa raiz, y copiar el caso a
+# fuzz/semillas/<objetivo>/, donde crates/aegis-trabajador/tests/fuzzing.rs lo
+# convierte en regresion para siempre.
+#
+# Con la forja en el PC de desarrollo (opcion elegida por el propietario, ver
+# docs/ci-remoto.md) la ejecucion ocurre las noches en que la forja esta
+# encendida; en una maquina dedicada, todas.
+
+name: fuzz-nocturno
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    name: fuzzing de todos los parsers
+    runs-on: kvm
+    timeout-minutes: 240
+    steps:
+      - name: Codigo
+        uses: actions/checkout@v4
+
+      - name: Comprobar el runner
+        run: ./deploy/ci/instalar-runner.sh --comprobar
+
+      - name: Fuzzing
+        env:
+          CARGO_TARGET_DIR: /var/cache/aegis-ci/target-fuzz
+          AEGIS_EXIGIR_FUZZ: "1"
+        run: |
+          # El corpus vive en la cache del runner y crece noche a noche.
+          mkdir -p /var/cache/aegis-ci/fuzz-corpus
+          rm -rf fuzz/corpus
+          ln -s /var/cache/aegis-ci/fuzz-corpus fuzz/corpus
+          ./tools/fuzz.sh 600
+
+      - name: Casos encontrados
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
