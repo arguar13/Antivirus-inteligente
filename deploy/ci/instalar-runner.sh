@@ -44,6 +44,7 @@ comprobar() {
     FALTAN=0
     printf '%s==> runner de CI de AegisCore%s\n' "$GRIS" "$FIN"
     if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then ok "KVM"; else falta "KVM (/dev/kvm): la matriz de kernels no puede arrancar"; fi
+    if [ -n "${HOME:-}" ]; then ok "HOME"; else falta "HOME sin definir (la unidad del runner necesita User=root)"; fi
     for b in clang qemu-system-x86_64 qemu-system-aarch64 cloud-localds mkfs.ext4 readelf nm \
              psql redis-server node; do
         if command -v "$b" >/dev/null 2>&1; then ok "$b"; else falta "$b"; fi
@@ -120,6 +121,10 @@ After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target
 
 [Service]
+# User= explicito aunque sea root: sin el, systemd no define HOME ni USER, y los
+# verificadores que usan \$HOME (cache de Trivy, de Kafka) abortaban con
+# «unbound variable» solo en el runner.
+User=root
 WorkingDirectory=$DIR_RUNNER
 ExecStart=/usr/local/bin/forgejo-runner daemon --config $DIR_RUNNER/config.yml
 Environment=PATH=/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
