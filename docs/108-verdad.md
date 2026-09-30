@@ -52,6 +52,13 @@ Las cifras de cada ejecución (eventos emitidos y perdidos, memoria del agente e
 vivo) las publica cada tanda en `matriz-kernels/resumen.md`; no se copian aquí a
 mano porque cambian con cada imagen vigente.
 
+## Veredicto
+
+`make ci` pasa entero en el runner remoto, en un clon limpio y con la matriz de
+diez kernels incluida: ejecución 6 de Forgejo Actions sobre `52c231c`, 38 minutos.
+Las cinco ejecuciones anteriores fallaron, y cada fallo está en las tablas de abajo
+con su causa raíz y su puerta.
+
 ## Hallazgos, cada uno con su arreglo de raíz
 
 | Hallazgo | Causa raíz | Arreglo | Puerta |
