@@ -29,6 +29,18 @@ VERDE=$'\033[32m'; ROJO=$'\033[31m'; GRIS=$'\033[90m'; FIN=$'\033[0m'
 FALLOS=0
 SOLO="${1:-}"
 
+# El BTF de CONSTRUCCION (los tipos contra los que se compilan las sondas eBPF)
+# es parte de la tanda, no del entorno de quien la lanza. Antes cada maquina
+# usaba el suyo —el del kernel en marcha, o uno pasado por variable— y el primer
+# runner limpio fallo en cascada porque su kernel no tenia los tipos que las
+# sondas usan (FASE 0 del MP-15). Se fija aqui y se exige.
+export AEGIS_BTF="${AEGIS_BTF:-/opt/aegis-btf/vmlinux-construccion}"
+if [ "$SOLO" != "--grupos" ] && [ ! -s "$AEGIS_BTF" ]; then
+    printf '%sFalta el BTF de construccion en %s.%s\n' "$ROJO" "$AEGIS_BTF" "$FIN"
+    printf '    Obtenlo con: tools/toolchain/traer_btf_construccion.sh\n'
+    exit 1
+fi
+
 # Donde van las salidas de cada comprobacion, PRIVADO de esta ejecucion.
 #
 # POR QUE NO UNA RUTA FIJA EN /tmp

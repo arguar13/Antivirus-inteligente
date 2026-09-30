@@ -57,6 +57,7 @@ comprobar() {
         done
     fi
     if [ -x /opt/aegis/musl-sysroot/bin/aegis-musl-gcc ]; then ok "sysroot musl"; else falta "sysroot musl (tools/toolchain/preparar_musl.sh)"; fi
+    if [ -s /opt/aegis-btf/vmlinux-construccion ]; then ok "BTF de construccion"; else falta "BTF de construccion (tools/toolchain/traer_btf_construccion.sh)"; fi
     [ "$FALTAN" -eq 0 ] && { printf '%sEl runner sirve.%s\n' "$VERDE" "$FIN"; return 0; }
     printf '%s%d pieza(s) faltan: sudo %s --instancia URL --token TOKEN%s\n' "$ROJO" "$FALTAN" "$0" "$FIN"
     return 1
@@ -90,6 +91,9 @@ instalar() {
 
     echo "==> multiarquitectura arm64 (agente y sondas cruzados de la matriz)"
     "$RAIZ/tools/matriz-kernels/construir-cruzado.sh" --preparar
+
+    echo "==> BTF de construccion de las sondas eBPF (reproducible, no el del anfitrion)"
+    "$RAIZ/tools/toolchain/traer_btf_construccion.sh"
 
     echo "==> forgejo-runner $VERSION_RUNNER (verificado por suma)"
     local base="https://code.forgejo.org/forgejo/runner/releases/download/v$VERSION_RUNNER"
