@@ -36,3 +36,16 @@ pub use model::{MalwareModel, ModelError, Prediction, Thresholds, Verdict};
 /// permisos de escritura puede sustituir, y el agente lo cargaria sin saberlo.
 /// Un modelo decide si algo se bloquea; cambiarlo equivale a cambiar el agente.
 pub const EMBEDDED_MODEL: &[u8] = include_bytes!("../models/aegis-static-v1.onnx");
+
+/// Si el modelo empotrado es la LINEA BASE DE REFERENCIA y no un modelo
+/// entrenado.
+///
+/// Lo es: una regresion logistica con pesos fijados a mano a partir de
+/// heuristicas (`tools/build_model.py`), que existe para que la inferencia sea
+/// real de extremo a extremo. Sus puntuaciones son explicables pero NO son
+/// evidencia: sin corpus no hay calibracion, y el primer dia en el agente acuso
+/// de sospechosos a `python3` y a `git` (FASE 1 del MP-16). Mientras esto sea
+/// cierto, quien lo use publica la puntuacion como no concluyente. El modelo
+/// entrenado —y el paso a acusar, gobernado por los falsos positivos medidos—
+/// es la FASE 4.
+pub const EMBEDDED_MODEL_ES_REFERENCIA: bool = true;
