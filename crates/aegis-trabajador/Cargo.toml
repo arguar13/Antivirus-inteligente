@@ -1,0 +1,43 @@
+[package]
+name = "aegis-trabajador"
+description = "Proceso trabajador confinado (seccomp, Landlock, sin red, uid propio, cgroup y plazo) donde corren los parsers de bytes no confiables del agente"
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Analizadores de PRUEBA que entran en panico, agotan la memoria o no terminan.
+# Solo para demostrar en la matriz de kernels que un parser que revienta no
+# interrumpe la proteccion. El instalable no la lleva: lo comprueba la puerta
+# `motores` sobre el binario publicado.
+prueba-fallos = []
+
+[dependencies]
+aegis-entidad = { path = "../aegis-entidad" }
+aegis-motor = { path = "../aegis-motor" }
+# Los parsers que corren confinados.
+aegis-ml = { path = "../aegis-ml" }
+aegis-pe = { path = "../aegis-pe" }
+aegis-macho = { path = "../aegis-macho" }
+aegis-disasm = { path = "../aegis-disasm" }
+aegis-emu = { path = "../aegis-emu" }
+# Ya en la linea base (aegis-ml y aegis-disasm lo usan): localizar el segmento
+# ejecutable de un ELF para el desensamblador.
+goblin = "0.9"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+aegis-sandbox = { path = "../aegis-sandbox" }
+libc = "0.2"
+
+# El trabajador solo, con los analizadores de prueba, para las pruebas de
+# confinamiento real. No es un instalable.
+[[bin]]
+name = "aegis-trabajador-prueba"
+path = "src/bin/aegis-trabajador-prueba.rs"
+required-features = ["prueba-fallos"]
