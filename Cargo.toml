@@ -3,6 +3,8 @@ resolver = "2"
 exclude = ["fuzz", "swarm-net", "xtask"]
 members = [
     "crates/aegis-entidad",
+    "crates/aegis-motor",
+    "crates/aegis-trabajador",
     "crates/aegis-estado",
     "crates/aegis-parser",
     "crates/aegis-hunt",

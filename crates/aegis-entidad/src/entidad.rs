@@ -251,6 +251,29 @@ pub fn proceso(maquina: &Eid, boot: u64, pid: u32, arranque_ns: u64) -> Eid {
     )
 }
 
+/// La identidad de un proceso a partir de la clave que deriva el kernel.
+///
+/// Las sondas eBPF no envian `(pid, arranque)` en cada evento: envian una clave
+/// de 64 bits resumida de ese mismo par (`aegis_key_from` en las sondas), que es
+/// lo UNICO que llevan todos los tipos de evento —una salida o una escritura no
+/// traen el instante de arranque—. El resumen no se puede invertir, asi que esta
+/// identidad no coincide con la de [`proceso`]: es la del AGENTE, que es quien
+/// origina la del proceso en el endpoint, y la misma para todos los eventos del
+/// mismo proceso. Se separa de [`proceso`] con un campo propio para que las dos
+/// derivaciones no puedan colisionar.
+#[must_use]
+pub fn proceso_por_clave(maquina: &Eid, boot: u64, clave_kernel: u64) -> Eid {
+    Eid::derivar(
+        Clase::Proceso,
+        &[
+            maquina.texto().as_bytes(),
+            &boot.to_be_bytes(),
+            b"clave-kernel",
+            &clave_kernel.to_be_bytes(),
+        ],
+    )
+}
+
 /// La identidad del CONTENIDO de un fichero.
 ///
 /// Es el resumen y nada mas: el mismo contenido en mil maquinas es **una**

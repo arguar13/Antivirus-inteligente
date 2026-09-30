@@ -34,12 +34,15 @@ dependencies = [
  "aegis-behavior",
  "aegis-ctl",
  "aegis-edgeml",
- "aegis-emu",
+ "aegis-entidad",
  "aegis-harden",
  "aegis-ipc",
  "aegis-kguard",
+ "aegis-motor",
  "aegis-ransom",
  "aegis-scal",
+ "aegis-trabajador",
+ "aegis-watchdog",
  "anyhow",
  "dashmap",
  "libbpf-rs",
@@ -487,6 +490,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-motor"
+version = "0.1.0"
+dependencies = [
+ "aegis-entidad",
+]
+
+[[package]]
 name = "aegis-net"
 version = "0.1.0"
 dependencies = [
@@ -686,6 +696,22 @@ dependencies = [
  "aegis-scal",
  "libc",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "aegis-trabajador"
+version = "0.1.0"
+dependencies = [
+ "aegis-disasm",
+ "aegis-emu",
+ "aegis-entidad",
+ "aegis-macho",
+ "aegis-ml",
+ "aegis-motor",
+ "aegis-pe",
+ "aegis-sandbox",
+ "goblin",
+ "libc",
 ]
 
 [[package]]
