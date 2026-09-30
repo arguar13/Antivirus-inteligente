@@ -36,7 +36,7 @@ máquina.
 |---|---:|---:|---:|
 | Crates | 71 | 20 | 1 |
 | Funciones de prueba | 3.297 | 1.216 | 6 |
-| Líneas de Rust | 229.717 | 92.587 | 555 |
+| Líneas de Rust | 229.747 | 92.627 | 555 |
 
 Además: **3.798** líneas de C propio (sondas eBPF y driver de Windows, sin contar el `vmlinux.h` generado), **56** verificadores `tools/verificar-*.sh`, **39** dependencias directas del agente con su justificación en [`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y **5** ejecutables instalables.
 
