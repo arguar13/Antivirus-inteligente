@@ -64,7 +64,7 @@ fn una_conexion_tcp_llega_con_su_direccion_y_su_puerto() {
             poll_timeout: Duration::from_millis(50),
             ..Default::default()
         };
-        let _ = bpf::run(&cfg, &p, move |registro| {
+        bpf::run(&cfg, &p, move |registro| {
             r.fetch_add(1, Ordering::Relaxed);
             if let Ok(Some(TelemetryEvent::NetConnect {
                 daddr,
@@ -77,15 +77,26 @@ fn una_conexion_tcp_llega_con_su_direccion_y_su_puerto() {
                     v.push((daddr, dport, loopback));
                 }
             }
-        });
+        })
     });
 
-    // La senal real de que las sondas estan vivas, no un tiempo supuesto.
-    let vivas = esperar_hasta(Duration::from_secs(20), || {
+    // La senal real de que las sondas estan vivas, no un tiempo supuesto. Si la
+    // carga falla, el hilo termina y su error es el diagnostico: antes se
+    // descartaba y la prueba solo decia que no habia eventos. El limite cubre
+    // el verificador bajo emulacion completa (aarch64 en la matriz), decenas de
+    // veces mas lento que en nativo.
+    let vivas = esperar_hasta(Duration::from_secs(180), || {
         let _ = Command::new("/bin/true").status();
-        recibidos.load(Ordering::Relaxed) > 0
+        recibidos.load(Ordering::Relaxed) > 0 || hilo.is_finished()
     });
-    assert!(vivas, "las sondas no entregaron ningun evento en 20 s");
+    if hilo.is_finished() {
+        match hilo.join() {
+            Ok(Ok(_)) => panic!("el consumo de telemetria termino sin que nadie lo parase"),
+            Ok(Err(e)) => panic!("las sondas no se cargaron: {e}"),
+            Err(_) => panic!("el hilo de telemetria entro en panico"),
+        }
+    }
+    assert!(vivas, "las sondas no entregaron ningun evento en 180 s");
 
     let escucha = TcpListener::bind("127.0.0.1:0").expect("escuchar en loopback");
     let puerto = escucha.local_addr().expect("puerto local").port();
@@ -103,7 +114,9 @@ fn una_conexion_tcp_llega_con_su_direccion_y_su_puerto() {
     let observadas = conexiones.lock().map(|v| v.clone()).unwrap_or_default();
 
     parar.store(true, Ordering::Relaxed);
-    let _ = hilo.join();
+    if let Ok(Err(e)) = hilo.join() {
+        panic!("el consumo de telemetria fallo: {e}");
+    }
 
     assert!(
         visto,
