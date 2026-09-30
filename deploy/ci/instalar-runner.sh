@@ -49,13 +49,15 @@ comprobar() {
              psql redis-server node; do
         if command -v "$b" >/dev/null 2>&1; then ok "$b"; else falta "$b"; fi
     done
-    for b in cargo rustup cargo-deny cargo-audit cargo-vet; do
+    for b in cargo rustup cargo-deny cargo-audit cargo-vet cargo-fuzz; do
         if command -v "$b" >/dev/null 2>&1; then ok "$b"; else falta "$b"; fi
     done
     if command -v rustup >/dev/null 2>&1; then
         for t in x86_64-unknown-linux-musl aarch64-unknown-linux-gnu; do
             if rustup target list --installed 2>/dev/null | grep -qx "$t"; then ok "objetivo $t"; else falta "objetivo de Rust $t"; fi
         done
+        nightly="$(tr -d '[:space:]' < "$RAIZ/tools/toolchain/nightly-fuzz.txt")"
+        if rustup toolchain list 2>/dev/null | grep -q "^$nightly"; then ok "toolchain de fuzzing $nightly"; else falta "toolchain de fuzzing $nightly"; fi
     fi
     if [ -x /opt/aegis/musl-sysroot/bin/aegis-musl-gcc ]; then ok "sysroot musl"; else falta "sysroot musl (tools/toolchain/preparar_musl.sh)"; fi
     if [ -s /opt/aegis-btf/vmlinux-construccion ]; then ok "BTF de construccion"; else falta "BTF de construccion (tools/toolchain/traer_btf_construccion.sh)"; fi
@@ -84,8 +86,11 @@ instalar() {
     rustup default "$VERSION_RUST"
     rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-unknown-linux-gnu
 
-    echo "==> herramientas de cadena de suministro"
-    cargo install --locked cargo-deny cargo-audit cargo-vet
+    echo "==> herramientas de cadena de suministro y de fuzzing"
+    cargo install --locked cargo-deny cargo-audit cargo-vet cargo-fuzz
+    # El nightly del fuzzing, FIJADO: libFuzzer y el sanitizador lo exigen, y uno
+    # sin fecha seria otro compilador cada dia.
+    rustup toolchain install "$(tr -d '[:space:]' < "$RAIZ/tools/toolchain/nightly-fuzz.txt")" --profile minimal
 
     echo "==> sysroot musl"
     "$RAIZ/tools/toolchain/preparar_musl.sh"

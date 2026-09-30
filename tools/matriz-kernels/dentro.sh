@@ -102,12 +102,137 @@ agente_en_vivo() {
     linea "AEGIS-MEDIDA|aegis-agent|eventos_emitidos|${emitidos:-0}|eventos"
     linea "AEGIS-MEDIDA|aegis-agent|eventos_perdidos|${perdidos:-?}|eventos"
     linea "AEGIS-MEDIDA|aegis-agent|rss_en_vivo|${rss:-?}|KiB"
+    # El camino caliente, por kernel: lo que tarda el arbitro entero por evento
+    # y cada motor por evaluacion, percentil 99 en nanosegundos, del ultimo
+    # informe del agente. Una linea por crate: es lo que la matriz de
+    # capacidades lee como su medida.
+    linea "AEGIS-MEDIDA|aegis-motor|p99_camino_caliente|$(p99_de "$T/agente.log" 'aegis-agent: arbitro:')|ns"
+    linea "AEGIS-MEDIDA|aegis-agent|p99_triaje|$(p99_de "$T/agente.log" 'aegis-agent: motor triaje:')|ns"
+    linea "AEGIS-MEDIDA|aegis-behavior|p99_evaluacion|$(p99_de "$T/agente.log" 'aegis-agent: motor conducta:')|ns"
+    linea "AEGIS-MEDIDA|aegis-ransom|p99_evaluacion|$(p99_de "$T/agente.log" 'aegis-agent: motor secuestro:')|ns"
 
     if [ "$rc" -eq 0 ] && [ "${emitidos:-0}" -gt 0 ] && [ "${perdidos:-1}" -eq 0 ]; then
         linea "AEGIS-MATRIZ|prueba|$id|pasa|emitidos=$emitidos perdidos=$perdidos"
     else
         linea "AEGIS-MATRIZ|prueba|$id|falla|salida=$rc emitidos=${emitidos:-?} perdidos=${perdidos:-?}"
         volcar "$T/agente.log"
+    fi
+}
+
+# El p99 (ns) de la ultima linea de un informe del agente que empieza por $2.
+p99_de() {
+    v="$(grep -- "$2" "$1" | tail -n 1 | sed -n 's/.* p99_ns=\([0-9]*\).*/\1/p')"
+    printf '%s' "${v:-?}"
+}
+
+# Eventos que lleva el arbitro segun el ultimo informe del agente vigilado.
+eventos_arbitro() {
+    if command -v systemd-run > /dev/null 2>&1; then
+        journalctl -u aegis-vigilado --no-pager -o cat 2> /dev/null
+    else
+        cat "$T/vigilado.log"
+    fi | grep 'aegis-agent: arbitro:' | tail -n 1 | sed -n 's/.* eventos=\([0-9]*\) .*/\1/p'
+}
+
+# ── El trabajador confinado muere y el agente sigue ──────────────────────────
+# El agente PUBLICADO, bajo el watchdog publicado, como en produccion. Se mata a
+# su trabajador confinado varias veces —SIGKILL, lo mismo que le pasa cuando un
+# parser revienta con un fichero— mientras se ejecutan ELF malformados, y se
+# exige: que el watchdog NO reinicie al agente (su latido no se paro), que el
+# agente cuente las muertes, y que siga consumiendo eventos DESPUES de la ultima.
+trabajador_en_vivo() {
+    id="$1"
+    for b in aegis-agent aegis-watchdog; do
+        install -m 0755 "$C/bin/$b" "/usr/local/bin/$b"
+        command -v restorecon > /dev/null 2>&1 && restorecon "/usr/local/bin/$b"
+    done
+    rm -rf /run/aegiscore
+    : > "$T/vigilado.log"
+    vigilar="/usr/local/bin/aegis-watchdog --program /usr/local/bin/aegis-agent \
+        --arg --stats-interval --arg 2 --heartbeat /run/aegiscore/agent.heartbeat \
+        --max-age-ms 15000"
+    if command -v systemd-run > /dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        systemd-run --quiet --unit=aegis-vigilado --property=RemainAfterExit=yes $vigilar
+    else
+        # shellcheck disable=SC2086
+        $vigilar > "$T/vigilado.log" 2>&1 < /dev/null &
+    fi
+
+    # Bajo emulacion completa el agente tarda en enganchar sus sondas: se espera
+    # a su primer latido, que sale del bucle ya en marcha.
+    i=0
+    while [ "$i" -lt 300 ] && [ ! -s /run/aegiscore/agent.heartbeat ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    # Los ELF malformados van donde un agente instalado los puede leer: con
+    # SELinux en enforcing, lo que cloud-init crea en su /tmp lleva una etiqueta
+    # que el dominio del agente no lee, y el analista los daba por ilegibles sin
+    # llegar a pedirle nada al trabajador (Rocky 9).
+    malos=/usr/local/lib/aegis-prueba
+    mkdir -p "$malos"
+    muertes=0
+    k=0
+    while [ "$k" -lt 4 ]; do
+        f="$malos/malo$k"
+        { printf '\177ELF\002\001\001'; head -c 2048 /dev/urandom; } > "$f"
+        chmod +x "$f"
+        command -v restorecon > /dev/null 2>&1 && restorecon "$f"
+        # El exec falla (no es un ELF valido), pero el evento llega igual y el
+        # analista se lo manda al trabajador, que asi se relanza si estaba muerto.
+        "$f" > /dev/null 2>&1
+        j=0
+        w=""
+        while [ "$j" -lt 60 ] && [ -z "$w" ]; do
+            w="$(pgrep -f -- 'aegis-agent --trabajador' | head -n 1)"
+            [ -z "$w" ] && sleep 1
+            j=$((j + 1))
+        done
+        if [ -n "$w" ] && kill -KILL "$w" 2> /dev/null; then
+            muertes=$((muertes + 1))
+        fi
+        sleep 1
+        k=$((k + 1))
+    done
+
+    # Despues de la ultima muerte, actividad que el agente tiene que ver.
+    sleep 3
+    antes="$(eventos_arbitro)"
+    i=0
+    while [ "$i" -lt 40 ]; do
+        /bin/true
+        i=$((i + 1))
+    done
+    sleep 5
+    despues="$(eventos_arbitro)"
+
+    # Parada autorizada: con la marca, el watchdog para al agente y termina.
+    : > /run/aegiscore/agent.shutdown
+    sleep 5
+    if command -v systemd-run > /dev/null 2>&1; then
+        systemctl stop aegis-vigilado
+        journalctl -u aegis-vigilado --no-pager -o cat > "$T/vigilado.log" 2>&1
+        systemctl reset-failed aegis-vigilado > /dev/null 2>&1
+    fi
+
+    rm -rf "$malos"
+    reinicios="$(grep -c -- '-> reiniciado' "$T/vigilado.log")"
+    ultima="$(grep 'aegis-agent: trabajador:' "$T/vigilado.log" | tail -n 1)"
+    contadas="$(printf '%s' "$ultima" | sed -n 's/.* muertes=\([0-9]*\) .*/\1/p')"
+    grep -E "DEGRADADO|trabajador confinado" "$T/vigilado.log" | sed 's/^aegis-agent: /AEGIS-LOG|/'
+
+    linea "AEGIS-MEDIDA|aegis-trabajador|muertes_sin_interrupcion|$muertes|muertes"
+    linea "AEGIS-MEDIDA|aegis-trabajador|p99_analisis|$(p99_de "$T/vigilado.log" 'aegis-agent: trabajador:')|ns"
+    linea "AEGIS-MEDIDA|aegis-watchdog|reinicios_del_agente|$reinicios|reinicios"
+
+    if [ "$muertes" -eq 4 ] && [ "$reinicios" -eq 0 ] && [ "${contadas:-0}" -ge 4 ] \
+        && [ -n "$antes" ] && [ -n "$despues" ] && [ "$despues" -ge $((antes + 40)) ] \
+        && grep -q 'parada limpia' "$T/vigilado.log"; then
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|muertes=$muertes reinicios=0 eventos_tras_la_ultima=$((despues - antes))"
+    else
+        linea "AEGIS-MATRIZ|prueba|$id|falla|muertes=$muertes contadas=${contadas:-?} reinicios=$reinicios eventos=${antes:-?}->${despues:-?}"
+        volcar "$T/vigilado.log" 60
     fi
 }
 
@@ -143,9 +268,10 @@ while IFS='|' read -r tipo a b c; do
     prueba)
         case "$b" in
         instalable)
-            case "$c" in
-            aegis-agent) agente_en_vivo "$a" ;;
-            *) linea "AEGIS-MATRIZ|prueba|$a|falla|instalable sin arnes: $c" ;;
+            case "$a" in
+            agente-en-vivo) agente_en_vivo "$a" ;;
+            trabajador-en-vivo) trabajador_en_vivo "$a" ;;
+            *) linea "AEGIS-MATRIZ|prueba|$a|falla|prueba sin arnes: $a ($c)" ;;
             esac
             ;;
         cargo-test)

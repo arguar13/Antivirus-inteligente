@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use libbpf_rs::{Link, MapCore, MapFlags, ObjectBuilder, RingBufferBuilder};
 
-use crate::capacidades::{self, Capacidades, SondeoBpf, Tri};
+use crate::capacidades::{self, Capacidades, Familia, SondeoBpf, Tri};
 pub use crate::capacidades::{planificar, PlanSondas, SondaOmitida};
 use crate::error::TelemetryError;
 
@@ -148,6 +148,9 @@ pub enum BpfStat {
     Filtered = 2,
     /// Cadenas truncadas por longitud.
     Truncated = 3,
+    /// Eventos que cedieron el ring a otros de mas prioridad (ver «PERDER CON
+    /// PRIORIDAD» en `aegis_bpf_common.h`).
+    DroppedPrioridad = 4,
 }
 
 /// Configuracion del origen de telemetria.
@@ -205,8 +208,48 @@ pub struct KernelStats {
     pub filtered: u64,
     /// Cadenas truncadas.
     pub truncated: u64,
+    /// Eventos que cedieron el ring a otros de mas prioridad.
+    pub cedidos: u64,
+    /// Eventos perdidos por familia (ring lleno o cedidos), en el orden de
+    /// [`Familia::TODAS`].
+    pub perdidas_por_familia: Vec<(Familia, u64)>,
     /// Que sondas estuvieron vivas y que familias quedaron sin datos.
     pub plan: PlanSondas,
+}
+
+/// Los contadores del kernel, legibles MIENTRAS se consume.
+///
+/// Es lo que recibe el pulso de [`run_con_pulso`]: la perdida por familia se
+/// publica en cada informe del agente, no solo al parar.
+pub struct Contadores<'a> {
+    stats: &'a dyn MapCore,
+    perdidas: &'a dyn MapCore,
+}
+
+impl Contadores<'_> {
+    /// Eventos emitidos al ring.
+    pub fn emitidos(&self) -> u64 {
+        read_percpu_sum(self.stats, BpfStat::Emitted as u32)
+    }
+
+    /// Eventos perdidos con el ring lleno.
+    pub fn perdidos(&self) -> u64 {
+        read_percpu_sum(self.stats, BpfStat::DroppedFull as u32)
+    }
+
+    /// Eventos que cedieron el ring a otros de mas prioridad.
+    pub fn cedidos(&self) -> u64 {
+        read_percpu_sum(self.stats, BpfStat::DroppedPrioridad as u32)
+    }
+
+    /// Perdidas (llenas o cedidas) de cada familia.
+    pub fn perdidas_por_familia(&self) -> Vec<(Familia, u64)> {
+        Familia::TODAS
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (*f, read_percpu_sum(self.perdidas, i as u32)))
+            .collect()
+    }
 }
 
 fn map_err(e: libbpf_rs::Error) -> TelemetryError {
@@ -243,10 +286,32 @@ fn read_percpu_sum(map: &dyn MapCore, index: u32) -> u64 {
 pub fn run<F>(
     config: &SourceConfig,
     stop: &AtomicBool,
-    mut on_record: F,
+    on_record: F,
 ) -> Result<KernelStats, TelemetryError>
 where
     F: FnMut(&[u8]),
+{
+    run_con_pulso(config, stop, on_record, |_| {})
+}
+
+/// Como [`run`], y ademas llama a `pulso` en cada vuelta del bucle de sondeo,
+/// HAYA EVENTOS O NO: como mucho cada [`SourceConfig::poll_timeout`]. El pulso
+/// recibe los [`Contadores`] del kernel, para publicarlos mientras se consume.
+///
+/// Es de donde sale el latido del agente y lo que no puede esperar a que llegue
+/// un evento: los resultados del camino frio, el mantenimiento. Latir desde el
+/// callback de los eventos haria que un sistema en reposo pareciera un agente
+/// colgado, y el watchdog lo reiniciaria sin motivo; latir desde aqui dice lo
+/// que importa: que el bucle que consume el kernel sigue dando vueltas.
+pub fn run_con_pulso<F, P>(
+    config: &SourceConfig,
+    stop: &AtomicBool,
+    mut on_record: F,
+    mut pulso: P,
+) -> Result<KernelStats, TelemetryError>
+where
+    F: FnMut(&[u8]),
+    P: FnMut(&Contadores<'_>),
 {
     // Integridad ANTES que nada: no se carga un bytecode en el que no se confia,
     // y no tiene sentido comprobar el entorno para un binario ya sospechoso.
@@ -412,6 +477,15 @@ where
         .find(|m| m.name() == OsStr::new("aegis_stats"))
         .ok_or_else(|| TelemetryError::BpfLoad("falta el mapa aegis_stats".into()))?;
 
+    let perdidas_map = obj
+        .maps()
+        .find(|m| m.name() == OsStr::new("aegis_perdidas"))
+        .ok_or_else(|| TelemetryError::BpfLoad("falta el mapa aegis_perdidas".into()))?;
+    let contadores = Contadores {
+        stats: &stats_map,
+        perdidas: &perdidas_map,
+    };
+
     {
         let mut rb_builder = RingBufferBuilder::new();
         rb_builder
@@ -423,7 +497,9 @@ where
         let rb = rb_builder.build().map_err(map_err)?;
 
         while !stop.load(Ordering::Relaxed) {
-            match rb.poll(config.poll_timeout) {
+            let sondeo = rb.poll(config.poll_timeout);
+            pulso(&contadores);
+            match sondeo {
                 Ok(()) => {}
                 Err(e) => {
                     // EINTR es normal: llega una senal durante el sondeo. Solo
@@ -442,13 +518,57 @@ where
         dropped_full: read_percpu_sum(&stats_map, BpfStat::DroppedFull as u32),
         filtered: read_percpu_sum(&stats_map, BpfStat::Filtered as u32),
         truncated: read_percpu_sum(&stats_map, BpfStat::Truncated as u32),
+        cedidos: contadores.cedidos(),
+        perdidas_por_familia: contadores.perdidas_por_familia(),
         plan,
     })
+}
+
+/// El instante actual en el reloj de los eventos del kernel.
+///
+/// Las sondas sellan cada evento con `bpf_ktime_get_boot_ns()`: CLOCK_BOOTTIME,
+/// que cuenta desde el arranque de la maquina e incluye la suspension. Todo lo
+/// que el agente compara con esos sellos —caducar nodos muertos del grafo,
+/// sesiones de trazado, expedientes del arbitro— tiene que usar ESTE reloj.
+/// Antes se usaba el tiempo desde que arranco el agente: siempre menor que los
+/// sellos, `ahora - muerte` saturaba a cero y el grafo no caducaba nunca por
+/// tiempo, solo al llegar a su techo de nodos (FASE 1 del MP-16).
+pub fn ahora_boot_ns() -> u64 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `clock_gettime` solo escribe en la estructura que se le pasa, que
+    // vive en esta pila y tiene el tipo que espera; CLOCK_BOOTTIME existe en
+    // todo kernel que puede cargar las sondas (2.6.39+).
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_BOOTTIME, &mut ts) };
+    if r != 0 {
+        return 0;
+    }
+    u64::try_from(ts.tv_sec).unwrap_or(0) * 1_000_000_000 + u64::try_from(ts.tv_nsec).unwrap_or(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// El reloj del agente es el de las sondas: cuenta desde el ARRANQUE DE LA
+    /// MAQUINA, no desde el del proceso. `/proc/uptime` es CLOCK_BOOTTIME en
+    /// segundos, asi que tienen que coincidir con margen de un segundo.
+    #[test]
+    fn el_reloj_del_agente_es_el_de_los_eventos_del_kernel() {
+        let uptime: f64 = std::fs::read_to_string("/proc/uptime")
+            .expect("/proc/uptime")
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse().ok())
+            .expect("uptime legible");
+        let ahora = ahora_boot_ns() as f64 / 1e9;
+        assert!(
+            (ahora - uptime).abs() < 1.0,
+            "ahora_boot_ns={ahora} s y /proc/uptime={uptime} s: no es CLOCK_BOOTTIME"
+        );
+    }
 
     /// La puerta que impide que una sonda nueva se degrade en silencio: se abre el
     /// objeto REAL empotrado (abrir no carga nada, no hace falta kernel ni
@@ -474,5 +594,85 @@ mod tests {
             );
         }
         assert!(n > 0, "el objeto empotrado no tiene programas");
+    }
+
+    /// Toda sonda de `tracepoint/syscalls/sys_enter_*` declara su contexto como
+    /// `struct syscall_trace_enter`, y toda `sys_exit_*`, como
+    /// `struct syscall_trace_exit`: las estructuras REALES de esos tracepoints.
+    /// Con las de `raw_syscalls` (`trace_event_raw_sys_*`) CO-RE reubicaba los
+    /// argumentos al sitio equivocado en RHEL 9 y cada sonda leia el argumento
+    /// siguiente (visto en Rocky 9, FASE 1 del MP-16).
+    #[test]
+    fn las_sondas_de_syscalls_usan_la_estructura_de_su_tracepoint() {
+        let dir = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../drivers/linux/aegis-bpf/src"
+        );
+        let mut vistas = 0;
+        for entrada in std::fs::read_dir(dir).expect("fuentes de las sondas") {
+            let ruta = entrada.expect("entrada").path();
+            if !ruta.to_string_lossy().ends_with(".bpf.c") {
+                continue;
+            }
+            let fuente = std::fs::read_to_string(&ruta).expect("fuente legible");
+            let lineas: Vec<&str> = fuente.lines().collect();
+            for (i, l) in lineas.iter().enumerate() {
+                let esperada = if l.starts_with("SEC(\"tracepoint/syscalls/sys_enter_") {
+                    "(struct syscall_trace_enter *ctx)"
+                } else if l.starts_with("SEC(\"tracepoint/syscalls/sys_exit_") {
+                    "(struct syscall_trace_exit *ctx)"
+                } else {
+                    continue;
+                };
+                vistas += 1;
+                let firma = lineas.get(i + 1).copied().unwrap_or_default();
+                assert!(
+                    firma.contains(esperada),
+                    "{}:{}: {l} declara `{firma}`, y su contexto es {esperada}",
+                    ruta.display(),
+                    i + 2
+                );
+            }
+        }
+        assert!(vistas > 0, "no se encontro ninguna sonda de syscalls");
+    }
+
+    /// Las familias del kernel (`enum aegis_familia`, que indexa el mapa de
+    /// perdidas) son las del agente, en el mismo orden: si alguien anade o
+    /// reordena una en un lado y no en el otro, las perdidas se atribuirian a la
+    /// familia equivocada sin que nada fallara.
+    #[test]
+    fn las_familias_del_kernel_son_las_del_agente_en_el_mismo_orden() {
+        let cabecera = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../drivers/linux/aegis-bpf/include/aegis_bpf_common.h"
+        ))
+        .expect("la cabecera comun de las sondas");
+        let mut en_c: Vec<(String, usize)> = cabecera
+            .lines()
+            .filter_map(|l| {
+                let l = l.trim().trim_end_matches(',');
+                let (nombre, valor) = l.strip_prefix("AEGIS_FAM_")?.split_once(" = ")?;
+                if nombre == "_MAX" {
+                    return None;
+                }
+                Some((nombre.to_string(), valor.parse().ok()?))
+            })
+            .collect();
+        en_c.sort_by_key(|(_, v)| *v);
+        let esperado = [
+            (Familia::Ejecucion, "EJECUCION"),
+            (Familia::SalidaProceso, "SALIDA"),
+            (Familia::Ficheros, "FICHEROS"),
+            (Familia::Escrituras, "ESCRITURAS"),
+            (Familia::Renombrados, "RENOMBRADOS"),
+            (Familia::Ptrace, "PTRACE"),
+            (Familia::Red, "RED"),
+        ];
+        assert_eq!(en_c.len(), Familia::TODAS.len(), "{en_c:?}");
+        for (i, (f, nombre_c)) in esperado.iter().enumerate() {
+            assert_eq!(Familia::TODAS[i], *f, "orden de Familia::TODAS");
+            assert_eq!(en_c[i], (nombre_c.to_string(), i), "enum aegis_familia");
+        }
     }
 }

@@ -14,14 +14,12 @@
 
 #![deny(missing_docs)]
 
-pub mod behavior;
 pub mod capacidades;
 pub mod decode;
 pub mod edge_ml;
 pub mod error;
 pub mod graph;
-pub mod microsandbox;
-pub mod ransom;
+pub mod motores;
 pub mod scal;
 pub mod triage;
 
@@ -30,7 +28,7 @@ pub mod bpf;
 
 pub use error::{GraphError, TelemetryError};
 pub use graph::{ExecEvent, GraphConfig, ImageClass, ProcKey, ProcessGraph, TaintSet};
-pub use ransom::{RansomAction, RansomStage, RansomStats};
+pub use motores::secuestro::{RansomAction, RansomStage, RansomStats};
 pub use triage::{
     DiscardReason, Escalation, EscalationReason, TelemetryEvent, Triage, TriageConfig, Verdict,
 };
@@ -105,9 +103,18 @@ impl Pipeline {
     /// abortar el consumo por un registro malo dejaria de procesar todos los
     /// siguientes, que es peor que perder uno.
     pub fn ingest_raw(&self, bytes: &[u8]) -> Option<Escalation> {
+        self.decodificar(bytes).and_then(|ev| self.ingest(ev))
+    }
+
+    /// Decodifica un registro crudo del ABI y lo cuenta, sin triarlo.
+    ///
+    /// Es la entrada del bucle del agente: el evento decodificado va al
+    /// arbitro, que lo reparte a los motores (el triaje, entre ellos). Un
+    /// registro ilegible o de un tipo desconocido se cuenta y se descarta.
+    pub fn decodificar(&self, bytes: &[u8]) -> Option<TelemetryEvent> {
         self.stats.received.fetch_add(1, Ordering::Relaxed);
         match decode::decode(bytes) {
-            Ok(Some(ev)) => self.ingest(ev),
+            Ok(Some(ev)) => Some(ev),
             Ok(None) => {
                 self.stats.unknown_kind.fetch_add(1, Ordering::Relaxed);
                 None

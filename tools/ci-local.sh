@@ -41,6 +41,32 @@ if [ "$SOLO" != "--grupos" ] && [ ! -s "$AEGIS_BTF" ]; then
     exit 1
 fi
 
+# Espacio en disco ANTES de empezar. Una tanda completa escribe decenas de GiB
+# (compilaciones, discos de las microVM de la matriz); en WSL todo eso va a un
+# disco virtual que crece sobre C: y no se encoge solo. Con C: lleno la
+# distribucion entera se cayo a mitad de una tanda (FASE 0 del MP-15). Se mira
+# el sistema de ficheros de las compilaciones y, bajo WSL, el de Windows, que es
+# el que de verdad se agota; el minimo se puede subir con AEGIS_ESPACIO_MIN_GB.
+if [ "$SOLO" != "--grupos" ]; then
+    ESPACIO_MIN_GB="${AEGIS_ESPACIO_MIN_GB:-15}"
+    DIR_COMPILACION="${CARGO_TARGET_DIR:-target}"
+    mkdir -p "$DIR_COMPILACION"
+    VIGILAR=("$DIR_COMPILACION")
+    if grep -qi microsoft /proc/version 2>/dev/null && [ -d /mnt/c ]; then
+        VIGILAR+=(/mnt/c)
+    fi
+    for d in "${VIGILAR[@]}"; do
+        libre=$(df -Pk "$d" | awk 'NR==2 { print int($4 / 1048576) }')
+        if [ "$libre" -lt "$ESPACIO_MIN_GB" ]; then
+            printf '%sQuedan %s GiB libres en %s; la tanda necesita al menos %s.%s\n' \
+                "$ROJO" "$libre" "$d" "$ESPACIO_MIN_GB" "$FIN"
+            printf '    Libera espacio (p. ej. rm -rf %s/debug, que se recompila) y vuelve a lanzarla.\n' \
+                "$DIR_COMPILACION"
+            exit 1
+        fi
+    done
+fi
+
 # Donde van las salidas de cada comprobacion, PRIVADO de esta ejecucion.
 #
 # POR QUE NO UNA RUTA FIJA EN /tmp
@@ -1320,6 +1346,39 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fabric" ]; then
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
         sed 's/^/    | /' $LOGS/aegis-fabric-ci.log | tail -40
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
+# Contrato unico de motor y arbitro del agente (FASE 1 del MP-16): todo motor
+# entra por el trait de aegis-motor, con presupuesto de tiempo y memoria y
+# SinDatos con causa, y solo el arbitro lo invoca y combina. Se comprueba con
+# los motores reales del agente, y sobre el codigo: nadie llama a un motor ni
+# combina por su cuenta, y los crates de deteccion solo entran por src/motores/.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "motores" ]; then
+    printf '%s==>%s Motores · contrato unico y el arbitro como unico punto de entrada\n' "$GRIS" "$FIN"
+    if ./tools/verificar-motores.sh > $LOGS/aegis-motores-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-motores-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-motores-ci.log | tail -40
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
+# Trabajador confinado (FASE 1 del MP-16): los parsers de bytes hostiles corren
+# en un proceso aparte con seccomp, Landlock, sin red, uid propio, cgroup y
+# plazo. Confinamiento real como root, la invariante «ningun parser sin objetivo
+# de fuzzing» y el fuzzing de sus objetivos con el nightly fijado.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "trabajador" ]; then
+    printf '%s==>%s Trabajador · parsers confinados, fuzzing y confinamiento real\n' "$GRIS" "$FIN"
+    if ./tools/verificar-trabajador.sh > $LOGS/aegis-trabajador-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-trabajador-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-trabajador-ci.log | tail -60
         FALLOS=$((FALLOS + 1))
     fi
 fi

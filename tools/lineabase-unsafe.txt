@@ -54,6 +54,7 @@ aegis-sync           Baja su propia prioridad con `setpriority` para no competir
 aegis-syscallguard   Registros de depuracion (DRx) y contadores de la PMU para verificar el origen de cada syscall
 aegis-unpacker       Ejecuta y observa un binario empaquetado en memoria para encontrar su OEP
 aegis-vmi            Lee memoria fisica del invitado por EPT: introspeccion por debajo del sistema operativo
+aegis-trabajador     El trabajador se confina a si mismo: setrlimit, unshare(CLONE_NEWNET), setgroups/setresgid/setresuid y el cierre de descriptores heredados, llamadas sin envoltura segura; Landlock y seccomp los pone aegis-sandbox
 aegis-watchdog       Reinicio del proceso vigilado y consulta de su estado
 
 # NOTA sobre `aegis-e2e`: sus pruebas de integracion usan `unsafe` para fabricar

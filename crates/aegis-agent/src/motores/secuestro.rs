@@ -213,3 +213,78 @@ pub struct RansomMaintenance {
     /// Senuelos encontrados manipulados en el barrido en disco.
     pub tampered_canaries: usize,
 }
+
+/// La deteccion de secuestro de datos (ransomware), como motor del contrato.
+///
+/// Corre en el camino caliente por lo que explica la cabecera de este modulo:
+/// es O(1) por evento y tiene que decidir YA. Nace en solo-auditoria: el motor
+/// se construye sin respondedor, asi que `contain` no toca ningun proceso; la
+/// confirmacion llega al arbitro como juicio malicioso con su evidencia.
+pub struct MotorSecuestro {
+    etapa: RansomStage,
+    identidad: crate::motores::Identidad,
+}
+
+impl MotorSecuestro {
+    /// Sin señuelos desplegados y sin respondedor.
+    pub fn nuevo(identidad: crate::motores::Identidad) -> MotorSecuestro {
+        MotorSecuestro {
+            etapa: RansomStage::new(RansomwareEngine::new(
+                aegis_ransom::EngineConfig::default(),
+                aegis_ransom::HoneypotSet::default(),
+            )),
+            identidad,
+        }
+    }
+}
+
+impl aegis_motor::Motor<crate::motores::EventoAgente> for MotorSecuestro {
+    fn ficha(&self) -> aegis_motor::Ficha {
+        aegis_motor::Ficha {
+            nombre: "secuestro",
+            firma: aegis_entidad::Motor::Conductual,
+            camino: aegis_motor::Camino::Caliente,
+            presupuesto: aegis_motor::Presupuesto::caliente(300, 16 * 1024 * 1024),
+            requisitos: &[aegis_motor::Requisito::TelemetriaKernel],
+        }
+    }
+
+    fn evaluar(
+        &mut self,
+        ev: &crate::motores::EventoAgente,
+        _plazo: &aegis_motor::Plazo,
+    ) -> aegis_motor::Dictamen {
+        use aegis_entidad::{Confianza, Juicio, Senal, Severidad};
+        let Some(accion) = self.etapa.on_event(&ev.evento) else {
+            return aegis_motor::Dictamen::NoAplica;
+        };
+        let d = &accion.detection;
+        let entidad = aegis_entidad::entidad::proceso_por_clave(
+            &self.identidad.maquina,
+            self.identidad.boot,
+            d.actor,
+        );
+        aegis_motor::Dictamen::Senales(vec![Senal::nueva(
+            aegis_entidad::Motor::Conductual,
+            entidad,
+            Juicio::Malicioso,
+            Severidad::Critica,
+            Confianza::ALTA,
+            format!(
+                "secuestro de datos confirmado (pid {}): {:?}; contencion: {:?}",
+                d.pid, d.verdict, accion.containment
+            ),
+            d.detected_at_ns,
+        )])
+    }
+
+    fn memoria(&self) -> usize {
+        self.etapa.fds().tracked_fds() * 96
+            + self.etapa.fds().tracked_processes() * 128
+            + self.etapa.engine().tracker().tracked() * 256
+    }
+
+    fn mantener(&mut self, ahora_ns: u64) {
+        self.etapa.maintain(ahora_ns);
+    }
+}

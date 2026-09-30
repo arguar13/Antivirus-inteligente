@@ -209,6 +209,8 @@ struct Artefactos {
     agente: PathBuf,
     verificador: PathBuf,
     bpf: PathBuf,
+    /// Donde estan los demas instalables publicados de esa arquitectura.
+    dist: PathBuf,
 }
 
 fn artefactos(repo: &Repo, arq: &str) -> Artefactos {
@@ -217,6 +219,7 @@ fn artefactos(repo: &Repo, arq: &str) -> Artefactos {
         otra => {
             return Artefactos {
                 agente: repo.raiz.join(format!("dist-hermetico-{otra}/aegis-agent")),
+                dist: repo.raiz.join(format!("dist-hermetico-{otra}")),
                 verificador: repo.raiz.join(format!(
                     "drivers/linux/aegis-bpf/out-{otra}/aegis_bpf_verify_estatico"
                 )),
@@ -228,6 +231,7 @@ fn artefactos(repo: &Repo, arq: &str) -> Artefactos {
     };
     Artefactos {
         agente: repo.raiz.join(dist).join("aegis-agent"),
+        dist: repo.raiz.join(dist),
         verificador: repo.raiz.join(bpf).join("aegis_bpf_verify_estatico"),
         bpf: repo.raiz.join(bpf),
     }
@@ -276,6 +280,18 @@ fn preparar_carga(repo: &Repo, k: &Kernels, arq: &str, dir: &Path) -> Resultado<
     for p in &k.prueba {
         match p.tipo.as_str() {
             "instalable" => {
+                for extra in &p.acompanantes {
+                    let origen = a.dist.join(extra);
+                    if !origen.is_file() {
+                        return Err(format!(
+                            "prueba {}: falta el instalable {extra} para {arq} en {}: {remedio}",
+                            p.id,
+                            origen.display()
+                        )
+                        .into());
+                    }
+                    std::fs::copy(&origen, carga.join("bin").join(extra))?;
+                }
                 let _ = writeln!(
                     plan,
                     "prueba|{}|instalable|{}",
@@ -291,7 +307,9 @@ fn preparar_carga(repo: &Repo, k: &Kernels, arq: &str, dir: &Path) -> Resultado<
                 };
                 eprintln!("xtask: compilando la prueba {paquete}/{prueba} estatica para {arq}");
                 let exe = compilar_prueba_estatica(repo, arq, paquete, prueba, &p.caracteristicas)?;
-                std::fs::copy(&exe, carga.join("pruebas").join(&p.id))?;
+                let destino = carga.join("pruebas").join(&p.id);
+                std::fs::copy(&exe, &destino)?;
+                quitar_depuracion(&destino, arq);
                 let _ = writeln!(plan, "prueba|{}|cargo-test|{}", p.id, prueba);
             }
             otro => return Err(format!("prueba {}: tipo desconocido {otro}", p.id).into()),
@@ -300,8 +318,50 @@ fn preparar_carga(repo: &Repo, k: &Kernels, arq: &str, dir: &Path) -> Resultado<
     std::fs::write(carga.join("plan.txt"), plan)?;
 
     let img = dir.join(format!("carga-{arq}.img"));
-    imagen_ext4(&img, ETIQUETA, 256, Some(&carga))?;
+    imagen_ext4(&img, ETIQUETA, mib_para(&carga)?, Some(&carga))?;
     Ok(img)
+}
+
+/// Quita la informacion de depuracion de una prueba estatica antes de meterla en
+/// la carga: una prueba de integracion pesa 130 MB con ella y unos 20 sin ella,
+/// y la depuracion no sirve de nada dentro de la microVM. Si no hay `strip` para
+/// esa arquitectura se deja como esta: el disco de carga se dimensiona con lo que
+/// haya.
+fn quitar_depuracion(exe: &Path, arq: &str) {
+    let strip = match arq {
+        "aarch64" => "aarch64-linux-gnu-strip",
+        _ => "strip",
+    };
+    let _ = Command::new(strip)
+        .arg("--strip-debug")
+        .arg(exe)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// El tamaño del disco de carga, sacado de lo que hay que meter en el.
+///
+/// Era un numero fijo (256 MiB) y se quedo corto en cuanto el agente enlazo su
+/// trabajador y la matriz sumo pruebas estaticas: `mkfs.ext4` no cabia y la
+/// matriz entera no arrancaba (FASE 1 del MP-16). Un tercio de margen para los
+/// metadatos de ext4 y 32 MiB de suelo.
+fn mib_para(dir: &Path) -> Resultado<u64> {
+    fn bytes(d: &Path) -> std::io::Result<u64> {
+        let mut total = 0;
+        for e in std::fs::read_dir(d)? {
+            let e = e?;
+            let m = e.metadata()?;
+            total += if m.is_dir() {
+                bytes(&e.path())?
+            } else {
+                m.len()
+            };
+        }
+        Ok(total)
+    }
+    let b = bytes(dir)?;
+    Ok((b + b / 3) / (1024 * 1024) + 32)
 }
 
 /// Compila una prueba de integracion como binario ESTATICO para la microVM: la

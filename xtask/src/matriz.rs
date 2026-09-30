@@ -157,11 +157,15 @@ pub fn calcular(repo: &Repo) -> Resultado<Matriz> {
         let ejercidos = match p.tipo.as_str() {
             "instalable" => {
                 let bin = p.binario.as_deref().unwrap_or_default();
-                infos
-                    .iter()
-                    .find(|i| i.instalable.binario == bin)
-                    .map(|i| i.invoca.clone())
-                    .ok_or_else(|| format!("kernels.toml: {} no es un instalable", bin))?
+                let mut ejercidos = BTreeSet::new();
+                for b in std::iter::once(bin).chain(p.acompanantes.iter().map(String::as_str)) {
+                    let i = infos
+                        .iter()
+                        .find(|i| i.instalable.binario == b)
+                        .ok_or_else(|| format!("kernels.toml: {b} no es un instalable"))?;
+                    ejercidos.extend(i.invoca.iter().cloned());
+                }
+                ejercidos
             }
             "cargo-test" => {
                 let paquete = p.paquete.as_deref().unwrap_or_default();

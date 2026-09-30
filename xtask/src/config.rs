@@ -338,6 +338,11 @@ pub struct PruebaE2e {
     pub tipo: String,
     /// Para `instalable`: el binario.
     pub binario: Option<String>,
+    /// Para `instalable`: otros instalables que la prueba necesita junto al
+    /// binario (el watchdog que lo vigila, por ejemplo). Viajan a la microVM y
+    /// la matriz de capacidades les acredita lo que ejercen.
+    #[serde(default)]
+    pub acompanantes: Vec<String>,
     /// Para `cargo-test`: el paquete.
     pub paquete: Option<String>,
     /// Para `cargo-test`: el destino de prueba (`tests/<nombre>.rs`).

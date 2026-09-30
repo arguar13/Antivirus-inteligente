@@ -9,6 +9,7 @@
 # Deja:  drivers/linux/aegis-bpf/out-aarch64/*.bpf.o
 #        drivers/linux/aegis-bpf/out-aarch64/aegis_bpf_verify_estatico
 #        dist-hermetico-aarch64/aegis-agent
+#        dist-hermetico-aarch64/aegis-watchdog
 #
 # POR QUE ESTATICO CON GLIBC Y NO CON MUSL
 #
@@ -85,14 +86,23 @@ aarch64() {
     RUSTFLAGS="-C target-feature=+crt-static -L native=$lib -C link-arg=-l:libzstd.a" \
         cargo build --release --locked --target aarch64-unknown-linux-gnu \
             -p aegis-agent --bin aegis-agent --features estatico-sistema
+    # El watchdog: la prueba del trabajador confinado lo usa para demostrar que
+    # matar al trabajador no hace que reinicie al agente.
+    echo "==> watchdog estatico para arm64"
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    RUSTFLAGS="-C target-feature=+crt-static" \
+        cargo build --release --locked --target aarch64-unknown-linux-gnu \
+            -p aegis-watchdog --bin aegis-watchdog
     local dir_target="${CARGO_TARGET_DIR:-$RAIZ/target}"
     mkdir -p dist-hermetico-aarch64
-    cp "$dir_target/aarch64-unknown-linux-gnu/release/aegis-agent" dist-hermetico-aarch64/aegis-agent
-    if readelf -l dist-hermetico-aarch64/aegis-agent | grep -q INTERP; then
-        echo "FALLO: el agente arm64 no es estatico (tiene PT_INTERP)" >&2
-        exit 1
-    fi
-    file dist-hermetico-aarch64/aegis-agent 2>/dev/null || true
+    for b in aegis-agent aegis-watchdog; do
+        cp "$dir_target/aarch64-unknown-linux-gnu/release/$b" "dist-hermetico-aarch64/$b"
+        if readelf -l "dist-hermetico-aarch64/$b" | grep -q INTERP; then
+            echo "FALLO: $b de arm64 no es estatico (tiene PT_INTERP)" >&2
+            exit 1
+        fi
+        file "dist-hermetico-aarch64/$b" 2>/dev/null || true
+    done
     echo "artefactos aarch64 listos"
 }
 

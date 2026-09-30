@@ -158,7 +158,14 @@ pub fn familia_de_programa(nombre: &str) -> Option<Familia> {
     Some(match nombre {
         "aegis_tp_execve" => Familia::Ejecucion,
         "aegis_tp_process_exit" => Familia::SalidaProceso,
-        "aegis_tp_openat" | "aegis_tp_openat_exit" => Familia::Ficheros,
+        "aegis_tp_openat"
+        | "aegis_tp_openat_exit"
+        | "aegis_tp_open"
+        | "aegis_tp_open_exit"
+        | "aegis_tp_creat"
+        | "aegis_tp_creat_exit"
+        | "aegis_tp_openat2"
+        | "aegis_tp_openat2_exit" => Familia::Ficheros,
         "aegis_tp_write" => Familia::Escrituras,
         "aegis_tp_rename" | "aegis_tp_renameat2" => Familia::Renombrados,
         "aegis_tp_ptrace" => Familia::Ptrace,

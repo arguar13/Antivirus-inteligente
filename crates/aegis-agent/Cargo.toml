@@ -40,11 +40,6 @@ estatico-sistema = ["bpf", "libbpf-rs/static"]
 
 [dependencies]
 aegis-edgeml = { path = "../aegis-edgeml" }
-# Micro-sandbox de emulacion (FASE 56): cuando el agente ve un binario
-# desconocido, en vez de ejecutarlo en el host lo EMULA para observar su
-# comportamiento. Es Rust puro (solo thiserror), asi que no engorda la superficie
-# de ataque del agente.
-aegis-emu = { path = "../aegis-emu" }
 aegis-scal = { path = "../aegis-scal" }
 aegis-behavior = { path = "../aegis-behavior" }
 aegis-ipc = { path = "../aegis-ipc" }
@@ -52,6 +47,15 @@ aegis-ransom = { path = "../aegis-ransom" }
 aegis-harden = { path = "../aegis-harden" }
 aegis-kguard = { path = "../aegis-kguard" }
 aegis-ctl = { path = "../aegis-ctl" }
+# Contrato unico de motor y arbitro (FASE 1 del MP-16): todo motor del agente
+# entra por aqui y solo el arbitro lo invoca. aegis-entidad trae el modelo de
+# entidad y la regla de combinacion; ninguno de los dos arrastra crates nuevos.
+aegis-motor = { path = "../aegis-motor" }
+aegis-entidad = { path = "../aegis-entidad" }
+# El trabajador confinado donde corren los parsers de bytes no confiables
+# (FASE 1 del MP-16), y el latido que vigila aegis-watchdog.
+aegis-trabajador = { path = "../aegis-trabajador" }
+aegis-watchdog = { path = "../aegis-watchdog" }
 dashmap = "6"
 thiserror = "2"
 libbpf-rs = { version = "0.24", optional = true }

@@ -167,3 +167,31 @@ descripcion = "Una conexión TCP real llega del kernel con su dirección, su pue
 tipo = "cargo-test"
 paquete = "aegis-e2e"
 prueba = "red_en_vivo"
+
+[[prueba]]
+id = "ejecucion-en-vivo"
+descripcion = "Una ejecución llega del kernel con su ruta y sus argumentos exactos."
+tipo = "cargo-test"
+paquete = "aegis-e2e"
+prueba = "ejecucion_en_vivo"
+
+[[prueba]]
+id = "ficheros-en-vivo"
+descripcion = "Cada vía de apertura para escritura (open, creat, openat, openat2) llega del kernel con su ruta."
+tipo = "cargo-test"
+paquete = "aegis-e2e"
+prueba = "ficheros_en_vivo"
+
+[[prueba]]
+id = "prioridad-en-vivo"
+descripcion = "Con el ring saturado de aperturas de fichero, ninguna ejecución se pierde: la prioridad baja cede su sitio y la pérdida queda atribuida a su familia."
+tipo = "cargo-test"
+paquete = "aegis-e2e"
+prueba = "prioridad_en_vivo"
+
+[[prueba]]
+id = "trabajador-en-vivo"
+descripcion = "El trabajador confinado muere varias veces ejecutando ELF malformados y el agente sigue protegiendo: los eventos siguen llegando y el watchdog no lo reinicia."
+tipo = "instalable"
+binario = "aegis-agent"
+acompanantes = ["aegis-watchdog"]

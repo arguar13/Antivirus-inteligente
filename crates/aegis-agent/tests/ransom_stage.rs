@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use aegis_agent::ransom::{RansomAction, RansomStage};
+use aegis_agent::motores::secuestro::{RansomAction, RansomStage};
 use aegis_agent::{ProcKey, TelemetryEvent};
 use aegis_ransom::engine::{ContainmentOutcome, Responder};
 use aegis_ransom::honeypot::HoneypotConfig;

@@ -279,3 +279,112 @@ impl BehaviorBridge {
 fn es_registro(ruta: &str) -> bool {
     RUTAS_DE_REGISTRO.iter().any(|p| ruta.starts_with(p))
 }
+
+impl BehaviorBridge {
+    /// El actor del ABI que corresponde a una identidad de la capa.
+    ///
+    /// Recorre los conocidos: solo se llama cuando hay una valoracion que
+    /// atribuir, que es lo raro, no por evento.
+    pub fn actor_de(&self, key: ProcessKey) -> Option<ProcKey> {
+        self.conocidos
+            .iter()
+            .find_map(|(actor, k)| (*k == key).then_some(*actor))
+    }
+}
+
+/// Bytes que retiene cada nodo del grafo conductual (cota, no medida).
+const BYTES_POR_NODO_CONDUCTUAL: usize = 384;
+
+/// El grafo conductual por tecnicas ATT&CK, como motor del contrato unico.
+///
+/// Nace en solo-auditoria (regla 4 del MP-16): se construye con
+/// `autonomous: false`, asi que nunca recomienda aislar por su cuenta; su
+/// puntuacion llega al arbitro como juicio con evidencia y nada mas.
+pub struct MotorConducta {
+    puente: BehaviorBridge,
+    identidad: crate::motores::Identidad,
+    techo: usize,
+}
+
+impl MotorConducta {
+    /// Un motor con los limites por defecto del grafo, en solo-auditoria.
+    pub fn nuevo(identidad: crate::motores::Identidad) -> MotorConducta {
+        let config = EngineConfig {
+            autonomous: false,
+            ..EngineConfig::default()
+        };
+        let techo = config.limits.max_nodes * BYTES_POR_NODO_CONDUCTUAL * 2;
+        MotorConducta {
+            puente: BehaviorBridge::new(config),
+            identidad,
+            techo,
+        }
+    }
+}
+
+impl aegis_motor::Motor<crate::motores::EventoAgente> for MotorConducta {
+    fn ficha(&self) -> aegis_motor::Ficha {
+        aegis_motor::Ficha {
+            nombre: "conducta",
+            firma: aegis_entidad::Motor::Conductual,
+            camino: aegis_motor::Camino::Caliente,
+            presupuesto: aegis_motor::Presupuesto::caliente(500, self.techo),
+            requisitos: &[aegis_motor::Requisito::TelemetriaKernel],
+        }
+    }
+
+    fn evaluar(
+        &mut self,
+        ev: &crate::motores::EventoAgente,
+        _plazo: &aegis_motor::Plazo,
+    ) -> aegis_motor::Dictamen {
+        use aegis_entidad::{Confianza, Juicio, Senal, Severidad};
+        let valoraciones = self.puente.ingest(&ev.evento, ev.evento.ts_ns());
+        if valoraciones.is_empty() {
+            return aegis_motor::Dictamen::NoAplica;
+        }
+        let mut senales = Vec::with_capacity(valoraciones.len());
+        for v in valoraciones {
+            let entidad = match self.puente.actor_de(v.key) {
+                Some(actor) => aegis_entidad::entidad::proceso_por_clave(
+                    &self.identidad.maquina,
+                    self.identidad.boot,
+                    actor.0,
+                ),
+                None => ev.entidad.clone(),
+            };
+            let grave = v.score.total >= aegis_behavior::score::UMBRAL_AISLAMIENTO;
+            senales.push(Senal::nueva(
+                aegis_entidad::Motor::Conductual,
+                entidad,
+                if grave {
+                    Juicio::Malicioso
+                } else {
+                    Juicio::Sospechoso
+                },
+                if grave { Severidad::Alta } else { Severidad::Media },
+                Confianza::nueva(v.score.total.min(90)),
+                format!(
+                    "conducta: puntuacion {} (propia {}, heredada {}, cadena {}); tecnicas {:?}; cadenas {:?}",
+                    v.score.total,
+                    v.score.own,
+                    v.score.inherited,
+                    v.score.chain,
+                    v.score.techniques,
+                    v.score.chains
+                ),
+                ev.evento.ts_ns(),
+            ));
+        }
+        aegis_motor::Dictamen::Senales(senales)
+    }
+
+    fn memoria(&self) -> usize {
+        self.puente.engine().graph().len() * BYTES_POR_NODO_CONDUCTUAL
+            + self.puente.conocidos.len() * 32
+    }
+
+    fn mantener(&mut self, ahora_ns: u64) {
+        self.puente.maintain(ahora_ns);
+    }
+}

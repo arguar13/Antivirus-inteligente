@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Arc;
 
-use aegis_agent::behavior::{tecnicas_de_imagen, BehaviorBridge};
 use aegis_agent::graph::ProcKey;
+use aegis_agent::motores::conducta::{tecnicas_de_imagen, BehaviorBridge};
 use aegis_agent::triage::TelemetryEvent;
 use aegis_behavior::engine::EngineConfig;
 use aegis_behavior::score::Action;

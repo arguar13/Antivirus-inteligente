@@ -24,7 +24,7 @@ máquina.
 
 | Espacio de trabajo | Producto | Condicional | Biblioteca | Herramienta |
 |---|---:|---:|---:|---:|
-| Agente (`crates/`) | 1 | 0 | 69 | 1 |
+| Agente (`crates/`) | 6 | 0 | 66 | 1 |
 | Plano de control (`server/crates/`) | 0 | 0 | 19 | 1 |
 | Enjambre (`swarm-net/`) | 0 | 0 | 1 | 0 |
 
@@ -34,11 +34,11 @@ máquina.
 
 | Magnitud | Agente | Plano de control | Enjambre |
 |---|---:|---:|---:|
-| Crates | 71 | 20 | 1 |
-| Funciones de prueba | 3.297 | 1.216 | 6 |
-| Líneas de Rust | 229.762 | 92.627 | 555 |
+| Crates | 73 | 20 | 1 |
+| Funciones de prueba | 3.350 | 1.216 | 6 |
+| Líneas de Rust | 235.839 | 92.627 | 555 |
 
-Además: **3.798** líneas de C propio (sondas eBPF y driver de Windows, sin contar el `vmlinux.h` generado), **56** verificadores `tools/verificar-*.sh`, **39** dependencias directas del agente con su justificación en [`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y **5** ejecutables instalables.
+Además: **3.962** líneas de C propio (sondas eBPF y driver de Windows, sin contar el `vmlinux.h` generado), **58** verificadores `tools/verificar-*.sh`, **39** dependencias directas del agente con su justificación en [`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y **5** ejecutables instalables.
 
 ## Por qué otro antivirus
 
@@ -108,7 +108,7 @@ proceso que puede estar comprometido o simplemente tener un fallo:
 ```mermaid
 flowchart LR
     subgraph endpoint["Endpoint Linux"]
-        aegis_agent["<b>aegis-agent</b><br/>El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje.<br/><i>invoca 9 crates</i>"]
+        aegis_agent["<b>aegis-agent</b><br/>El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje.<br/><i>invoca 21 crates</i>"]
         aegisctl["<b>aegisctl</b><br/>CLI de administración local sobre el socket de control del agente.<br/><i>invoca 1 crate</i>"]
         aegis_watchdog["<b>aegis-watchdog</b><br/>Supervisor: reinicia el agente ante caída, cuelgue o exceso de memoria.<br/><i>invoca 2 crates</i>"]
         aegis_fleet["<b>aegis-fleet</b><br/>Demostración autocontenida del canal de flota (gRPC sobre mTLS): hoy no se conecta al servidor real.<br/><i>invoca 2 crates</i>"]
@@ -150,7 +150,7 @@ scripts de construcción, la matriz y este documento.
 
 | Ejecutable | Lado | Qué es | Crates que enlaza | Crates que invoca |
 |---|---|---|---:|---:|
-| `aegis-agent` | endpoint | El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje. | 14 | 9 |
+| `aegis-agent` | endpoint | El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje. | 23 | 21 |
 | `aegisctl` | endpoint | CLI de administración local sobre el socket de control del agente. | 5 | 1 |
 | `aegis-watchdog` | endpoint | Supervisor: reinicia el agente ante caída, cuelgue o exceso de memoria. | 2 | 2 |
 | `aegis-fleet` | endpoint | Demostración autocontenida del canal de flota (gRPC sobre mTLS): hoy no se conecta al servidor real. | 2 | 2 |
@@ -218,10 +218,10 @@ Corre en cada endpoint, con privilegios.
 
 | Crate | Qué hace | Capa | Estado | Pruebas | `forbid(unsafe)` |
 |---|---|---|---|---:|:---:|
-| [`aegis-agent`](crates/aegis-agent) | Agente de deteccion de AegisCore: consumidor de telemetria, grafo de linaje y triaje | E/S | Producto | 70 | — |
+| [`aegis-agent`](crates/aegis-agent) | Agente de deteccion de AegisCore: consumidor de telemetria, grafo de linaje y triaje | E/S | Producto | 75 | — |
 | [`aegis-attest`](crates/aegis-attest) | Atestacion remota con raiz de confianza en el TPM 2.0 (FASE 49) | motores | Biblioteca | 27 | sí |
 | [`aegis-audit`](crates/aegis-audit) | Registro local de auditoria cifrado con rotacion automatica | plataforma | Biblioteca | 9 | sí |
-| [`aegis-behavior`](crates/aegis-behavior) | Motor conductual de AegisCore: grafo dirigido de procesos, tecnicas MITRE ATT&CK y puntuacion de riesgo | motores | Biblioteca | 22 | sí |
+| [`aegis-behavior`](crates/aegis-behavior) | Motor conductual de AegisCore: grafo dirigido de procesos, tecnicas MITRE ATT&CK y puntuacion de riesgo | motores | Producto | 22 | sí |
 | [`aegis-captura`](crates/aegis-captura) | Captura de trafico indexada por entidad con retencion selectiva por veredicto y reproduccion determinista | motores | Biblioteca | 88 | sí |
 | [`aegis-cloudnative`](crates/aegis-cloudnative) | AegisCloudNative: deteccion de escape de contenedor (Deepce/Traitor) a partir de setns/unshare/capset/bpf/mount, con el decisor en Rust puro y el enganche eBPF declarado gated | motores | Biblioteca | 13 | sí |
 | [`aegis-confinar`](crates/aegis-confinar) | Confinamiento derivado del comportamiento: aprende lo que un proceso hace de verdad, lo ensaya en modo permisivo, lo impone solo con confirmacion, y se retira solo si rompe algo | motores | Biblioteca | 39 | sí |
@@ -229,9 +229,9 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-custodia`](crates/aegis-custodia) | Cadena de custodia verificable para la evidencia forense de una flota | motores | Biblioteca | 67 | sí |
 | [`aegis-deception`](crates/aegis-deception) | Servicios senuelo de red y deteccion de reconocimiento sin falsos positivos | motores | Biblioteca | 117 | — |
 | [`aegis-decompile`](crates/aegis-decompile) | Decompilador determinista a pseudo-C (FASE 100): elevacion a IR SSA, reconstruccion de tipos y pseudo-C con evidencia, sobre el grafo de aegis-disasm | motores | Biblioteca | 26 | sí |
-| [`aegis-disasm`](crates/aegis-disasm) | Desensamblado multiarquitectura, grafo de flujo de control y deduccion de capacidades con evidencia | motores | Biblioteca | 164 | sí |
+| [`aegis-disasm`](crates/aegis-disasm) | Desensamblado multiarquitectura, grafo de flujo de control y deduccion de capacidades con evidencia | motores | Biblioteca | 166 | sí |
 | [`aegis-disectores`](crates/aegis-disectores) | Disectores de protocolo del sensor de red: empresariales, industriales y de nube, con cobertura declarada | motores | Biblioteca | 195 | sí |
-| [`aegis-e2e`](crates/aegis-e2e) | Pruebas de integracion de extremo a extremo de AegisCore | herramienta | Herramienta | 16 | sí |
+| [`aegis-e2e`](crates/aegis-e2e) | Pruebas de integracion de extremo a extremo de AegisCore | herramienta | Herramienta | 19 | sí |
 | [`aegis-edgeml`](crates/aegis-edgeml) | Inferencia TinyML en el borde: deteccion de zero-day por comportamiento, sin nube (FASE 53) | motores | Biblioteca | 6 | sí |
 | [`aegis-emu`](crates/aegis-emu) | Micro-sandbox de emulacion x86-64 en memoria: desempaqueta binarios desconocidos y observa su comportamiento sin ejecutarlos en el host | motores | Biblioteca | 39 | sí |
 | [`aegis-emular`](crates/aegis-emular) | Emulacion con MMU de permisos reales, entorno sintetico sin salida al sistema (por tipo), ejecucion simbolica acotada sobre la IR de la FASE 100 y desempaquetado generico por observacion (FASE 102) | motores | Biblioteca | 24 | sí |
@@ -262,6 +262,7 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-memhunter`](crates/aegis-memhunter) | AegisMemHunter: analisis de VAD y de la tabla de paginas (PTE) para delatar codigo sin fichero, inyeccion reflexiva y module stomping, sin leer la memoria del proceso | motores | Biblioteca | 39 | — |
 | [`aegis-mesh`](crates/aegis-mesh) | Malla P2P de la red local: propagacion cifrada y autenticada de vacunas entre agentes | E/S | Biblioteca | 19 | — |
 | [`aegis-ml`](crates/aegis-ml) | Extraccion de atributos estaticos PE/ELF e inferencia local ONNX para AegisCore | motores | Biblioteca | 22 | sí |
+| [`aegis-motor`](crates/aegis-motor) | Contrato unico de motor de deteccion y arbitro del agente: presupuesto por motor, SinDatos con causa y un solo punto de entrada | motores | Producto | 17 | sí |
 | [`aegis-net`](crates/aegis-net) | IDS de red y filtro XDP de AegisCore | motores | Biblioteca | 54 | — |
 | [`aegis-parser`](crates/aegis-parser) | AegisQL: lexer, parser y validador del lenguaje de consulta de telemetria de AegisCore | núcleo | Biblioteca | 82 | sí |
 | [`aegis-patron`](crates/aegis-patron) | Motor de patrones propio (FASE 101): compatible con la sintaxis YARA, de coste acotado por tipo, tri-estado, determinista y sin retroceso. Sustituye a yara-x en el arbol del agente | núcleo | Biblioteca | 35 | sí |
@@ -270,7 +271,7 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-presupuesto`](crates/aegis-presupuesto) | Presupuesto de memoria del agente: reparto por host, regimenes y obligacion desde el kernel | núcleo | Biblioteca | 50 | sí |
 | [`aegis-procedencia`](crates/aegis-procedencia) | Procedencia del propio producto: construccion reproducible, atestacion verificada en el endpoint antes de aplicar, y registro de transparencia propio verificable sin conexion | núcleo | Biblioteca | 15 | sí |
 | [`aegis-ptguard`](crates/aegis-ptguard) | Trazado de ejecucion por hardware (Intel PT) para detectar ROP/JOP (FASE 51) | motores | Biblioteca | 12 | — |
-| [`aegis-ransom`](crates/aegis-ransom) | Motor de deteccion y contencion de ransomware en tiempo real | motores | Biblioteca | 22 | sí |
+| [`aegis-ransom`](crates/aegis-ransom) | Motor de deteccion y contencion de ransomware en tiempo real | motores | Producto | 22 | sí |
 | [`aegis-resp`](crates/aegis-resp) | Motor de respuesta activa de AegisCore: terminacion, cuarentena y aislamiento | plataforma | Biblioteca | 22 | — |
 | [`aegis-rollback`](crates/aegis-rollback) | Reversion de ransomware: copia-sombra cifrada y restauracion en milisegundos (FASE 50) | motores | Biblioteca | 6 | — |
 | [`aegis-sandbox`](crates/aegis-sandbox) | Aislamiento preventivo de procesos con Landlock y seccomp-bpf | plataforma | Biblioteca | 30 | — |
@@ -282,12 +283,13 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-swarm`](crates/aegis-swarm) | Enjambre autonomo: nucleo sans-io del protocolo de reparto de inteligencia y ordenes de contencion entre agentes aislados del plano de control | motores | Biblioteca | 75 | sí |
 | [`aegis-sync`](crates/aegis-sync) | Sincronizacion diferencial de indicadores de compromiso con arboles de Merkle | núcleo | Biblioteca | 8 | — |
 | [`aegis-syscallguard`](crates/aegis-syscallguard) | Deteccion de syscalls directas respaldada por hardware (PMU/DRx) y verificacion cruzada del origen de cada syscall | motores | Biblioteca | 15 | — |
+| [`aegis-trabajador`](crates/aegis-trabajador) | Proceso trabajador confinado (seccomp, Landlock, sin red, uid propio, cgroup y plazo) donde corren los parsers de bytes no confiables del agente | motores | Producto | 24 | — |
 | [`aegis-unpacker`](crates/aegis-unpacker) | Desempaquetado dinamico en memoria: detecta el OEP de un binario empaquetado y extrae el codigo real | motores | Biblioteca | 7 | — |
 | [`aegis-update`](crates/aegis-update) | Actualizacion firmada (hibrida Ed25519+ML-DSA-65) con rollback atomico | plataforma | Biblioteca | 18 | sí |
 | [`aegis-vmi`](crates/aegis-vmi) | Introspeccion de maquina virtual (VMI) DEFENSIVA: EPT y lectura de estructuras del kernel desde memoria fisica para detectar rootkits por debajo del SO | plataforma | Biblioteca | 29 | — |
 | [`aegis-volcado`](crates/aegis-volcado) |  | motores | Biblioteca | 54 | sí |
 | [`aegis-vuln`](crates/aegis-vuln) | Escaner de postura y vulnerabilidades del host para AegisCore | motores | Biblioteca | 49 | sí |
-| [`aegis-watchdog`](crates/aegis-watchdog) | Watchdog de alta disponibilidad del agente y el driver | E/S | Biblioteca | 8 | — |
+| [`aegis-watchdog`](crates/aegis-watchdog) | Watchdog de alta disponibilidad del agente y el driver | E/S | Producto | 10 | — |
 | [`aegis-wire`](crates/aegis-wire) | Diseccion semantica de protocolos: convierte trafico crudo en hechos, con reensamblado TCP resistente a evasion | motores | Biblioteca | 194 | sí |
 
 ### Plano de control — `server/crates/`
@@ -432,6 +434,7 @@ Corre en cada endpoint, con privilegios.
 | 103 | [AegisReal: la escala, de verdad (FASE 111)](docs/103-escala.md) |
 | 107 | [AegisSupremacy: la demostración sobre las 63 categorías (FASE 112)](docs/107-supremacia.md) |
 | 108 | [AegisTruth: verdad, CI remoto y matriz de kernels (FASE 0 del MP-15)](docs/108-verdad.md) |
+| 109 | [La columna vertebral del agente (FASE 1 del MP-16)](docs/109-columna-vertebral.md) |
 
 ## Desarrollo
 

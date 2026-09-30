@@ -27,7 +27,7 @@ conformes = [
     "aegis-disectores", "aegis-captura", "aegis-estado", "aegis-custodia",
     "aegis-invitado", "aegis-almacen", "aegis-almacen-pcap", "aegis-consola",
     "aegis-tejido", "aegis-flujo", "aegis-rango", "aegis-conocimiento",
-    "aegis-postura",
+    "aegis-postura", "aegis-motor", "aegis-trabajador",
     # Siglas y nombres propios de formato
     "aegis-pe", "aegis-macho", "aegis-ipc", "aegis-pqc", "aegis-ml",
     "aegis-scal", "aegis-vmi", "aegis-ips", "aegis-sbom", "aegis-itdr",
@@ -117,7 +117,6 @@ lexico_ingles = [
 # Módulos en inglés que ya existían en la FASE 0: el plan de traducción. Solo
 # puede menguar. Lo genera y lo comprueba `cargo xtask nombres`.
 pendientes = [
-    "aegis-agent/behavior",
     "aegis-agent/decode",
     "aegis-agent/edge_ml",
     "aegis-agent/graph",
