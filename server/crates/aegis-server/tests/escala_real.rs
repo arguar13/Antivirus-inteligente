@@ -29,6 +29,28 @@ use aegis_server::almacen::{Almacen, NuevaAlerta};
 use chrono::Utc;
 use sqlx::Row;
 
+/// Las dos pruebas de este fichero se ejecutan UNA DETRAS DE OTRA. La de la purga
+/// mide el WAL que escribe cada operacion, y el WAL es de toda la base: la ingesta
+/// de la otra prueba, corriendo a la vez, lo contaminaria.
+static EN_SERIE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Posicion actual del WAL.
+async fn lsn_actual(pool: &sqlx::PgPool) -> String {
+    sqlx::query_scalar::<_, String>("SELECT pg_current_wal_lsn()::text")
+        .fetch_one(pool)
+        .await
+        .expect("pg_current_wal_lsn")
+}
+
+/// Bytes de WAL escritos desde `lsn`.
+async fn wal_desde(pool: &sqlx::PgPool, lsn: &str) -> f64 {
+    sqlx::query_scalar::<_, f64>("SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), $1::pg_lsn)::float8")
+        .bind(lsn)
+        .fetch_one(pool)
+        .await
+        .expect("pg_wal_lsn_diff")
+}
+
 fn url_pg() -> String {
     std::env::var("AEGIS_TEST_PG_URL")
         .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
@@ -70,6 +92,7 @@ fn percentil_ns(muestras: &mut [u128], p: f64) -> u128 {
 
 #[tokio::test]
 async fn cero_perdida_contada_en_los_dos_extremos_contra_postgres_real() {
+    let _serie = EN_SERIE.lock().await;
     let Some(a) = almacen().await else {
         eprintln!("OMITIDA: no hay PostgreSQL (AEGIS_TEST_PG_URL). La medida real se declara.");
         return;
@@ -178,6 +201,7 @@ async fn cero_perdida_contada_en_los_dos_extremos_contra_postgres_real() {
 
 #[tokio::test]
 async fn la_purga_es_metadato_no_un_barrido_de_filas() {
+    let _serie = EN_SERIE.lock().await;
     // La purga de la FASE 75 (aegis-scale::particion::sql_soltar) es
     // DETACH PARTITION + DROP, nunca DELETE. La diferencia importa: DROP de una
     // particion es O(1) en metadato y no toca las filas, asi que no compite con la
@@ -221,7 +245,19 @@ async fn la_purga_es_metadato_no_un_barrido_de_filas() {
         .expect("llenar particion");
     }
 
+    // Lo que se mide es el WAL que escribe cada operacion, no su tiempo de reloj.
+    //
+    // POR QUE NO EL TIEMPO. Antes se comparaban dos cronometros de una sola
+    // operacion sobre veinte mil filas. El DROP hace fsync del catalogo, y con el
+    // disco ocupado —un runner de CI, un disco virtual recien compactado— ese fsync
+    // costaba mas que borrar veinte mil filas en memoria: la prueba fallaba sin que
+    // la propiedad fuera falsa (FASE 0 del MP-15). El WAL, en cambio, es
+    // determinista: un DELETE registra CADA fila que borra; un DETACH+DROP solo
+    // cambia el catalogo, sea cual sea el tamano de la particion. Eso ES «purga por
+    // metadato, no barrido», dicho sin depender de la carga de la maquina.
+
     // Purga como la FASE 75: DETACH + DROP de p1. Metadato.
+    let antes = lsn_actual(pool).await;
     let t_purga = std::time::Instant::now();
     sqlx::query(&format!(
         "ALTER TABLE {esquema}.eventos DETACH PARTITION {esquema}.eventos_p1"
@@ -234,8 +270,10 @@ async fn la_purga_es_metadato_no_un_barrido_de_filas() {
         .await
         .expect("drop");
     let purga_us = t_purga.elapsed().as_micros();
+    let wal_purga = wal_desde(pool, &antes).await;
 
     // Un DELETE equivalente sobre p2: barrido de filas.
+    let antes = lsn_actual(pool).await;
     let t_delete = std::time::Instant::now();
     let borradas = sqlx::query(&format!("DELETE FROM {esquema}.eventos_p2"))
         .execute(pool)
@@ -243,17 +281,19 @@ async fn la_purga_es_metadato_no_un_barrido_de_filas() {
         .expect("delete")
         .rows_affected();
     let delete_us = t_delete.elapsed().as_micros();
+    let wal_delete = wal_desde(pool, &antes).await;
 
     eprintln!(
-        "purga FASE 75: DETACH+DROP {purga_us}us vs DELETE de {borradas} filas {delete_us}us"
+        "purga FASE 75: DETACH+DROP {wal_purga} B de WAL ({purga_us}us) vs DELETE de \
+         {borradas} filas {wal_delete} B de WAL ({delete_us}us)"
     );
     assert_eq!(borradas, 20000, "el DELETE si recorre las filas");
-    // La purga por metadato no recorre filas: sobre datos iguales, es mas barata.
-    // (Es una desigualdad honesta: a escala pequena el margen es menor, pero el
-    // DELETE crece con las filas y el DROP no.)
+    // Sobre datos iguales, el barrido escribe en el WAL al menos diez veces lo que
+    // la purga por metadato (en la practica, cientos de veces).
     assert!(
-        purga_us <= delete_us,
-        "DETACH+DROP ({purga_us}us) deberia costar como mucho lo que el DELETE ({delete_us}us)"
+        wal_delete >= 10.0 * wal_purga,
+        "DETACH+DROP escribio {wal_purga} B de WAL y el DELETE {wal_delete} B: la purga \
+         deberia ser metadato, no un barrido de filas"
     );
 
     sqlx::query(&format!("DROP SCHEMA {esquema} CASCADE"))
