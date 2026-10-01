@@ -331,6 +331,7 @@ pub fn planificar(pid: i32) -> Result<PlanEnganche, L7Error> {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     const MAPS: &str = "\
 55b8c0a00000-55b8c0a23000 r-xp 00004000 fe:00 151521   /usr/bin/curl
@@ -416,7 +417,10 @@ mod pruebas {
     fn resuelve_los_puntos_de_enganche_en_la_openssl_real() {
         let ruta = Path::new("/usr/lib/x86_64-linux-gnu/libssl.so.3");
         if !ruta.exists() {
-            eprintln!("OMITIDA: no hay OpenSSL 3 en esta maquina");
+            omitir(
+                "no hay OpenSSL 3 en esta maquina",
+                Requisito::Herramienta("libssl3"),
+            );
             return;
         }
         let b = Binario::desde_fichero(ruta).expect("analisis");
@@ -476,17 +480,34 @@ mod pruebas {
     #[test]
     fn encuentra_donde_enganchar_en_un_proceso_que_usa_tls() {
         if !Path::new("/usr/bin/curl").exists() {
-            eprintln!("OMITIDA: no hay curl en esta maquina");
+            omitir(
+                "no hay curl en esta maquina",
+                Requisito::Herramienta("curl"),
+            );
             return;
         }
+        // Un servidor local que acepta la conexion y nunca contesta: curl se
+        // queda esperando el saludo TLS, VIVO y con sus bibliotecas mapeadas,
+        // hasta que se le mata. Contra un puerto cerrado terminaba en
+        // milisegundos y la prueba casi nunca llegaba a observarlo: se omitia
+        // por una carrera propia, no por la maquina.
+        let Ok(escucha) = std::net::TcpListener::bind("127.0.0.1:0") else {
+            omitir("no se pudo abrir un puerto local", Requisito::Entorno);
+            return;
+        };
+        let Ok(dir) = escucha.local_addr() else {
+            omitir("no se pudo leer el puerto local", Requisito::Entorno);
+            return;
+        };
+        let url = format!("https://127.0.0.1:{}/", dir.port());
         // `--max-time` acota por si acaso; el proceso se mata igualmente.
         let hijo = std::process::Command::new("/usr/bin/curl")
-            .args(["-s", "--max-time", "20", "https://127.0.0.1:1/"])
+            .args(["-s", "--max-time", "20", url.as_str()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn();
         let Ok(mut hijo) = hijo else {
-            eprintln!("OMITIDA: no se pudo lanzar curl");
+            omitir("no se pudo lanzar curl", Requisito::Herramienta("curl"));
             return;
         };
         // Se le da margen para que el enlazador dinamico mapee sus bibliotecas.
@@ -502,14 +523,18 @@ mod pruebas {
         }
         let _ = hijo.kill();
         let _ = hijo.wait();
+        drop(escucha);
 
         if !plan.hay_donde_enganchar() {
             // curl puede estar compilado contra una pila que no cubrimos, o
             // haber terminado antes de mapear. Se DICE en vez de fallar.
-            eprintln!(
-                "OMITIDA: no se pudo observar a curl con sus bibliotecas mapeadas \
-                 (examinados sin simbolos: {})",
-                plan.examinados_sin_simbolos
+            omitir(
+                &format!(
+                    "no se pudo observar a curl con sus bibliotecas mapeadas \
+                     (examinados sin simbolos: {})",
+                    plan.examinados_sin_simbolos
+                ),
+                Requisito::Entorno,
             );
             return;
         }
