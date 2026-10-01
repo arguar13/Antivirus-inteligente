@@ -30,10 +30,12 @@
     <label for="usuario">Operador</label>
     <input id="usuario" name="usuario" autocomplete="username" required
            placeholder="operador@empresa" spellcheck="false">
+    <label for="clave">Clave</label>
+    <input id="clave" name="clave" type="password" autocomplete="current-password" required>
     <button type="submit">Entrar</button>
     <button type="button" id="btn-demo" class="secundario acceso-demo">Ver demostración</button>
     <p id="error-acceso" class="error" hidden></p>
-    <p class="acceso-pie">La sesión se abre contra el plano de control por mTLS.<br>La demostración carga datos sintéticos, sin tocar la flota.</p>
+    <p class="acceso-pie">La sesión se abre contra el plano de control con usuario y clave.<br>La demostración carga datos sintéticos, sin tocar la flota.</p>
   </form>
 </section>
 

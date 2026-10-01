@@ -72,10 +72,12 @@ async function api(ruta, opciones = {}) {
 $('#form-acceso').addEventListener('submit', async (e) => {
   e.preventDefault();
   const usuario = $('#usuario').value.trim();
+  const clave = $('#clave').value;
   const err = $('#error-acceso');
   err.hidden = true;
   try {
-    const r = await api('/api/sesion', { method: 'POST', body: JSON.stringify({ usuario }) });
+    const r = await api('/api/sesion', { method: 'POST', body: JSON.stringify({ usuario, clave }) });
+    $('#clave').value = '';
     app.token = r.token;
     app.usuario = usuario;
     sessionStorage.setItem('aegis_token', r.token);

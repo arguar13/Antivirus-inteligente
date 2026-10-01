@@ -39,11 +39,14 @@
 //! # Lo que este modulo genera y lo que NO
 //!
 //! Genera el SQL: las particiones, sus indices y las sentencias de purga. **No
-//! las ejecuta**: eso lo hace el arranque del servidor contra su base de datos.
-//! La separacion permite probar la logica —que no queden huecos, que no se solape
-//! nada, que la purga tire exactamente lo que toca— sin necesitar PostgreSQL, y
-//! ademas deja el SQL a la vista para que un administrador lo revise antes de
-//! que corra sobre su produccion.
+//! las ejecuta, y el servidor TAMPOCO lo usa** (H-19). El particionado real del
+//! plano de control son las funciones de `server/migrations/0011_particionado_real.sql`
+//! (`alertas` por `recibido_en`, `eventos_normalizados` por `ocurrio_en`, sin
+//! corte por inquilino), que `aegis_server::particiones` llama al arrancar y cada
+//! hora. [`TABLAS`] y [`sql_soltar`] no casan con ese esquema —`alertas` no
+//! tiene `creado_en` ni `inquilino`, y `DETACH ... CONCURRENTLY` no puede ir
+//! dentro de un bloque de transaccion—, asi que su SQL no se debe ejecutar tal
+//! cual. Lo que si vale es la logica del calendario, probada sin PostgreSQL.
 
 use aegis_ingest::tiempo::{civil_desde_dias, instante_utc, NS};
 

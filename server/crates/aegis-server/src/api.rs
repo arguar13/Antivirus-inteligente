@@ -1,12 +1,21 @@
 //! API REST de administracion (axum), la que consume el panel web.
 //!
-//! # Autenticacion
+//! # Autenticacion (H-24, H-02)
 //!
-//! Toda ruta salvo `/salud` y `/api/sesion` exige una sesion valida en la
-//! cabecera `Authorization: Bearer <token>`, resuelta contra Redis. Las
-//! acciones que TOCAN un endpoint (aislar, liberar) quedan ademas registradas
-//! con el usuario que las ordeno: una accion destructiva sobre la maquina de
-//! alguien no puede ser anonima.
+//! La sesion se exige por CONSTRUCCION y no ruta a ruta. Todas las rutas se
+//! declaran en un unico sitio (`declarar`), que ademas las enumera
+//! (`rutas_declaradas`), y el enrutador aplica la capa `exigir_sesion` a todas
+//! ellas. Una ruta solo queda abierta si esta en [`RUTAS_PUBLICAS`], que es
+//! minima: la sonda de salud y el inicio de sesion. Antes cada manejador llamaba
+//! a mano a la comprobacion y cinco se quedaron sin ella, una de escritura: una
+//! ruta nueva nacia abierta.
+//!
+//! La sesion se emite SOLO contra una credencial verificada
+//! ([`crate::credenciales`]); antes bastaba con escribir un nombre.
+//!
+//! Las acciones que TOCAN un endpoint (aislar, liberar) quedan ademas
+//! registradas con el usuario que las ordeno: una accion destructiva sobre la
+//! maquina de alguien no puede ser anonima.
 
 use std::sync::Arc;
 
@@ -52,83 +61,229 @@ pub struct EstadoApi {
     pub remediacion: Option<Arc<crate::remediacion::MotorVivo>>,
 }
 
+/// Rutas que NO exigen sesion, como `(metodo, patron)` tal y como las casa el
+/// enrutador. Es la UNICA excepcion a la autenticacion de la API, y es minima a
+/// proposito:
+///
+/// - `GET /salud`: la sonda del balanceador, que no tiene credenciales. Solo
+///   devuelve el estado de las dependencias, ningun dato de la flota.
+/// - `POST /api/sesion`: el inicio de sesion, que por definicion se pide sin
+///   sesion y exige credencial (ver `abrir_sesion`).
+///
+/// La reputacion k-anonima deja de ser publica. Recorriendo el millon de cubos,
+/// un anonimo aprenderia que hashes conoce el producto como maliciosos: un
+/// oraculo de evasion. Los agentes la consultaran por el canal mTLS de flota.
+///
+/// `tests/api_sesion.rs` fija esta lista: ampliarla es una decision revisada.
+pub const RUTAS_PUBLICAS: &[(&str, &str)] = &[("GET", "/salud"), ("POST", "/api/sesion")];
+
+/// Unica ruta que acepta el token en la consulta: el API de WebSocket del
+/// navegador no permite cabeceras en el handshake (ver `websocket`).
+const RUTA_WS: &str = "/api/ws";
+
+/// Una ruta declarada en el enrutador.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RutaDeclarada {
+    /// Metodo HTTP, en mayusculas.
+    pub metodo: &'static str,
+    /// Patron tal y como lo casa axum, con los parametros entre llaves.
+    pub patron: &'static str,
+}
+
+/// El enrutador en construccion y, a la vez, la lista de lo que declara.
+///
+/// Es el UNICO modo de anadir una ruta a la API: lo que se declara aqui es
+/// exactamente lo que recorre la prueba de 401 (`tests/api_sesion.rs`).
+struct Declaracion {
+    enrutador: Router<EstadoApi>,
+    rutas: Vec<RutaDeclarada>,
+}
+
+impl Declaracion {
+    /// Declara `patron` con sus `metodos` y su manejador.
+    fn ruta(
+        mut self,
+        patron: &'static str,
+        metodos: &[&'static str],
+        manejador: axum::routing::MethodRouter<EstadoApi>,
+    ) -> Declaracion {
+        for &metodo in metodos {
+            self.rutas.push(RutaDeclarada { metodo, patron });
+        }
+        self.enrutador = self.enrutador.route(patron, manejador);
+        self
+    }
+}
+
+/// Declara TODAS las rutas de la API. Es el unico sitio donde se anaden.
+fn declarar() -> Declaracion {
+    Declaracion {
+        enrutador: Router::new(),
+        rutas: Vec::new(),
+    }
+    // Publicas (ver RUTAS_PUBLICAS). El DELETE de /api/sesion exige sesion.
+    .ruta("/salud", &["GET"], get(salud))
+    .ruta(
+        "/api/sesion",
+        &["POST", "DELETE"],
+        post(abrir_sesion).delete(cerrar_sesion),
+    )
+    // Inventario y alertas
+    .ruta("/api/resumen", &["GET"], get(resumen))
+    .ruta("/api/agentes", &["GET"], get(listar_agentes))
+    .ruta("/api/agentes/{cn}", &["GET"], get(obtener_agente))
+    .ruta("/api/agentes/{cn}/comando", &["GET"], get(tomar_comando))
+    .ruta("/api/alertas", &["GET"], get(listar_alertas))
+    .ruta(
+        "/api/agentes/{cn}/alertas",
+        &["GET"],
+        get(listar_alertas_de_agente),
+    )
+    // Respuesta de un clic
+    .ruta("/api/agentes/{cn}/aislar", &["POST"], post(aislar))
+    .ruta("/api/agentes/{cn}/liberar", &["POST"], post(liberar))
+    // Politica global y motor de reglas
+    .ruta("/api/politicas", &["POST"], post(publicar_politica))
+    .ruta(
+        "/api/reglas",
+        &["GET", "POST"],
+        get(listar_reglas).post(crear_regla),
+    )
+    .ruta(
+        "/api/reglas/{id}",
+        &["DELETE"],
+        axum::routing::delete(borrar_regla),
+    )
+    .ruta(
+        "/api/reglas/{id}/activa",
+        &["POST"],
+        post(fijar_regla_activa),
+    )
+    // Inteligencia y linaje
+    .ruta("/api/stix/objetos", &["GET"], get(listar_objetos_stix))
+    .ruta("/api/grafos", &["GET"], get(listar_grafos))
+    .ruta("/api/grafos/{id}", &["GET"], get(obtener_grafo))
+    // Casos (FASE 76). El ciclo de vida del incidente: de alerta a cierre.
+    //
+    // `verificar` esta en la API a proposito y no en una herramienta de
+    // administracion: un rastro que solo se comprueba cuando alguien
+    // sospecha es un rastro que nadie comprueba.
+    .ruta("/api/casos", &["GET"], get(listar_casos))
+    .ruta("/api/casos/{id}", &["GET"], get(obtener_caso))
+    .ruta(
+        "/api/casos/{id}/estado",
+        &["POST"],
+        post(cambiar_estado_caso),
+    )
+    .ruta("/api/casos/{id}/cerrar", &["POST"], post(cerrar_caso))
+    .ruta("/api/casos/{id}/tareas", &["POST"], post(crear_tarea_caso))
+    .ruta(
+        "/api/casos/{id}/tareas/{tarea}/cerrar",
+        &["POST"],
+        post(cerrar_tarea_caso),
+    )
+    .ruta("/api/casos/{id}/auditoria", &["GET"], get(rastro_caso))
+    .ruta(
+        "/api/casos/{id}/auditoria/verificar",
+        &["GET"],
+        get(verificar_caso),
+    )
+    .ruta(
+        "/api/casos/{id}/auditoria/anclar",
+        &["POST"],
+        post(anclar_caso),
+    )
+    .ruta("/api/soc/metricas", &["GET"], get(metricas_soc))
+    // Caceria distribuida AegisQL (FASE 43)
+    .ruta(
+        "/api/cacerias",
+        &["GET", "POST"],
+        get(listar_cacerias).post(lanzar_caza),
+    )
+    .ruta("/api/cacerias/{id}", &["GET"], get(obtener_caza))
+    .ruta("/api/cacerias/{id}/cerrar", &["POST"], post(cerrar_caza))
+    .ruta("/api/aegisql/esquema", &["GET"], get(esquema_aegisql))
+    // Micro-segmentacion Zero-Trust (FASE 44)
+    .ruta(
+        "/api/cuarentena",
+        &["GET", "POST"],
+        get(listar_cuarentena).post(ordenar_cuarentena),
+    )
+    .ruta(
+        "/api/agentes/{cn}/cuarentena",
+        &["POST"],
+        post(cuarentena_de_enjambre),
+    )
+    .ruta(
+        "/api/cuarentena/difusion",
+        &["GET"],
+        get(difusion_cuarentena),
+    )
+    // Respuesta automatica: ITDR -> AI-RO (FASES 58 + 64)
+    .ruta(
+        "/api/agentes/{cn}/itdr/telemetria",
+        &["POST"],
+        post(ingerir_identidad),
+    )
+    .ruta("/api/remediaciones", &["GET"], get(listar_remediaciones))
+    // Heuristicas globales: APT distribuida (FASE 45)
+    .ruta(
+        "/api/heuristicas",
+        &["GET", "POST"],
+        get(listar_heuristicas).post(crear_heuristica),
+    )
+    .ruta(
+        "/api/heuristicas/{id}/activa",
+        &["POST"],
+        post(fijar_heuristica_activa),
+    )
+    .ruta("/api/correlaciones", &["GET"], get(listar_correlaciones))
+    .ruta(
+        "/api/correlaciones/{id}",
+        &["GET"],
+        get(obtener_correlacion),
+    )
+    .ruta(
+        "/api/correlaciones/{id}/cerrar",
+        &["POST"],
+        post(cerrar_correlacion),
+    )
+    // Tiempo real (el token puede ir en la consulta: ver `token_de`)
+    .ruta("/api/ws", &["GET"], get(websocket))
+    // Reputacion k-anonima (con sesion: ver RUTAS_PUBLICAS)
+    .ruta(
+        "/api/reputacion/{prefijo}",
+        &["GET"],
+        get(consultar_reputacion),
+    )
+    .ruta("/api/reputacion", &["POST"], post(registrar_reputacion))
+}
+
+/// Todas las rutas declaradas de la API, para las pruebas y la documentacion.
+pub fn rutas_declaradas() -> Vec<RutaDeclarada> {
+    declarar().rutas
+}
+
+/// Indica si `(metodo, patron)` esta en [`RUTAS_PUBLICAS`].
+pub fn es_publica(metodo: &str, patron: &str) -> bool {
+    RUTAS_PUBLICAS
+        .iter()
+        .any(|&(m, p)| m == metodo && p == patron)
+}
+
 /// Construye el enrutador de la API.
+///
+/// La capa de sesion se aplica con `route_layer` sobre el enrutador ENTERO:
+/// corre despues de casar la ruta (asi conoce su patron) y antes del manejador
+/// y de sus extractores. Una ruta nueva queda protegida sin que nadie tenga que
+/// acordarse.
 pub fn enrutador(estado: EstadoApi) -> Router {
-    Router::new()
-        // Publicas
-        .route("/salud", get(salud))
-        .route("/api/sesion", post(abrir_sesion).delete(cerrar_sesion))
-        // Inventario y alertas
-        .route("/api/resumen", get(resumen))
-        .route("/api/agentes", get(listar_agentes))
-        .route("/api/agentes/{cn}", get(obtener_agente))
-        .route("/api/agentes/{cn}/comando", get(tomar_comando))
-        .route("/api/alertas", get(listar_alertas))
-        .route("/api/agentes/{cn}/alertas", get(listar_alertas_de_agente))
-        // Respuesta de un clic
-        .route("/api/agentes/{cn}/aislar", post(aislar))
-        .route("/api/agentes/{cn}/liberar", post(liberar))
-        // Ingesta del colector de identidad (eventos 4769 normalizados): el motor
-        // ITDR corre en vivo y el orquestador remedia solo las detecciones criticas.
-        // Politica global y motor de reglas
-        .route("/api/politicas", post(publicar_politica))
-        .route("/api/reglas", get(listar_reglas).post(crear_regla))
-        .route("/api/reglas/{id}", axum::routing::delete(borrar_regla))
-        .route("/api/reglas/{id}/activa", post(fijar_regla_activa))
-        // Inteligencia y linaje
-        .route("/api/stix/objetos", get(listar_objetos_stix))
-        .route("/api/grafos", get(listar_grafos))
-        .route("/api/grafos/{id}", get(obtener_grafo))
-        // --- Caceria distribuida AegisQL (FASE 43) ---
-        // Casos (FASE 76). El ciclo de vida del incidente: de alerta a cierre.
-        //
-        // `verificar` esta en la API a proposito y no en una herramienta de
-        // administracion: un rastro que solo se comprueba cuando alguien
-        // sospecha es un rastro que nadie comprueba.
-        .route("/api/casos", get(listar_casos))
-        .route("/api/casos/{id}", get(obtener_caso))
-        .route("/api/casos/{id}/estado", post(cambiar_estado_caso))
-        .route("/api/casos/{id}/cerrar", post(cerrar_caso))
-        .route("/api/casos/{id}/tareas", post(crear_tarea_caso))
-        .route(
-            "/api/casos/{id}/tareas/{tarea}/cerrar",
-            post(cerrar_tarea_caso),
-        )
-        .route("/api/casos/{id}/auditoria", get(rastro_caso))
-        .route("/api/casos/{id}/auditoria/verificar", get(verificar_caso))
-        .route("/api/casos/{id}/auditoria/anclar", post(anclar_caso))
-        .route("/api/soc/metricas", get(metricas_soc))
-        .route("/api/cacerias", get(listar_cacerias).post(lanzar_caza))
-        .route("/api/cacerias/{id}", get(obtener_caza))
-        .route("/api/cacerias/{id}/cerrar", post(cerrar_caza))
-        .route("/api/aegisql/esquema", get(esquema_aegisql))
-        // --- Micro-segmentacion Zero-Trust (FASE 44) ---
-        .route(
-            "/api/cuarentena",
-            get(listar_cuarentena).post(ordenar_cuarentena),
-        )
-        .route("/api/agentes/{cn}/cuarentena", post(cuarentena_de_enjambre))
-        .route("/api/cuarentena/difusion", get(difusion_cuarentena))
-        // --- Respuesta automatica: ITDR -> AI-RO (FASES 58 + 64) ---
-        .route("/api/agentes/{cn}/itdr/telemetria", post(ingerir_identidad))
-        .route("/api/remediaciones", get(listar_remediaciones))
-        // --- Heuristicas globales: APT distribuida (FASE 45) ---
-        .route(
-            "/api/heuristicas",
-            get(listar_heuristicas).post(crear_heuristica),
-        )
-        .route(
-            "/api/heuristicas/{id}/activa",
-            post(fijar_heuristica_activa),
-        )
-        .route("/api/correlaciones", get(listar_correlaciones))
-        .route("/api/correlaciones/{id}", get(obtener_correlacion))
-        .route("/api/correlaciones/{id}/cerrar", post(cerrar_correlacion))
-        // Tiempo real
-        .route("/api/ws", get(websocket))
-        // Reputacion k-anonima
-        .route("/api/reputacion/{prefijo}", get(consultar_reputacion))
-        .route("/api/reputacion", post(registrar_reputacion))
+    declarar()
+        .enrutador
+        .route_layer(axum::middleware::from_fn_with_state(
+            estado.clone(),
+            exigir_sesion,
+        ))
         .with_state(estado)
 }
 
@@ -161,33 +316,161 @@ async fn salud(State(estado): State<EstadoApi>) -> axum::response::Response {
 }
 
 /// Credenciales para abrir sesion.
+///
+/// Sin `Debug` a proposito: la clave no puede acabar en un registro.
 #[derive(Deserialize)]
 struct Credenciales {
-    /// Nombre del administrador.
+    /// Nombre del operador.
     usuario: String,
+    /// Clave del operador; solo vive durante esta peticion.
+    clave: String,
 }
 
-/// Abre una sesion de administracion.
+/// Abre una sesion de administracion contra una credencial VERIFICADA (H-02).
 ///
-/// NOTA DE ALCANCE: la verificacion de credenciales real (LDAP, OIDC) es del
-/// despliegue corporativo; aqui se emite la sesion contra el proveedor de
-/// identidad que el despliegue coloque delante. Lo que este modulo garantiza es
-/// que TODA ruta de administracion exige una sesion emitida y viva.
+/// La clave se comprueba contra el derivado PBKDF2 de `operadores`
+/// ([`crate::credenciales`]). Clave erronea y usuario inexistente dan la MISMA
+/// respuesta y cuestan lo mismo. Los fallos se cuentan por usuario en Redis y,
+/// pasado el cupo, se responde 429 hasta que caduca la ventana, aunque la clave
+/// sea la correcta.
 async fn abrir_sesion(
     State(estado): State<EstadoApi>,
     Json(cred): Json<Credenciales>,
-) -> impl IntoResponse {
-    if cred.usuario.trim().is_empty() {
+) -> axum::response::Response {
+    let usuario = cred.usuario.trim().to_string();
+    if usuario.is_empty() || cred.clave.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": "usuario vacio"})),
+            Json(serde_json::json!({"error": "usuario y clave son obligatorios"})),
         )
             .into_response();
     }
-    match estado.cache.abrir_sesion(&cred.usuario).await {
+    if usuario.len() > crate::credenciales::LONGITUD_MAXIMA_USUARIO
+        || cred.clave.len() > crate::credenciales::LONGITUD_MAXIMA_CLAVE
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "credenciales desmesuradas"})),
+        )
+            .into_response();
+    }
+    match estado.cache.fallos_acceso(&usuario).await {
+        Ok(n) if n >= crate::cache::MAX_FALLOS_ACCESO => {
+            tracing::warn!(usuario = %usuario, fallos = n, "inicio de sesion frenado por intentos fallidos");
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({"error": "demasiados intentos fallidos; espera antes de reintentar"})),
+            )
+                .into_response();
+        }
+        Ok(_) => {}
+        Err(e) => return error_500(e).into_response(),
+    }
+    let guardado =
+        match crate::credenciales::hash_de_operador(estado.servicio.almacen().pool(), &usuario)
+            .await
+        {
+            Ok(h) => h,
+            Err(e) => return error_500(e).into_response(),
+        };
+    let clave = cred.clave;
+    // PBKDF2 es trabajo de CPU deliberado (centenares de ms): fuera del runtime.
+    let valida = tokio::task::spawn_blocking(move || {
+        crate::credenciales::comprobar(&clave, guardado.as_deref())
+    })
+    .await
+    .unwrap_or(false);
+    if !valida {
+        let _ = estado.cache.contar_fallo_acceso(&usuario).await;
+        tracing::warn!(usuario = %usuario, "inicio de sesion rechazado: credencial invalida");
+        return no_autorizado("credenciales invalidas");
+    }
+    let _ = estado.cache.limpiar_fallos_acceso(&usuario).await;
+    if let Err(e) =
+        crate::credenciales::registrar_acceso(estado.servicio.almacen().pool(), &usuario).await
+    {
+        tracing::warn!(error = %e, "no se pudo anotar el ultimo acceso del operador");
+    }
+    match estado.cache.abrir_sesion(&usuario).await {
         Ok(token) => (StatusCode::OK, Json(serde_json::json!({"token": token}))).into_response(),
         Err(e) => error_500(e).into_response(),
     }
+}
+
+/// Usuario de la sesion que valido la capa `exigir_sesion`.
+///
+/// Queda en las extensiones de la peticion para los manejadores que lo
+/// necesiten.
+#[derive(Debug, Clone)]
+pub struct Operador(pub String);
+
+/// Capa que exige sesion a toda ruta que no este en [`RUTAS_PUBLICAS`].
+///
+/// Si falta el patron casado —no deberia ocurrir con `route_layer`— no hay
+/// excepcion posible y se exige sesion: la capa falla cerrada.
+async fn exigir_sesion(
+    State(estado): State<EstadoApi>,
+    mut peticion: axum::extract::Request,
+    siguiente: axum::middleware::Next,
+) -> axum::response::Response {
+    let patron = peticion
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|m| m.as_str().to_owned())
+        .unwrap_or_default();
+    if es_publica(peticion.method().as_str(), &patron) {
+        return siguiente.run(peticion).await;
+    }
+    let Some(token) = token_de(&peticion, &patron) else {
+        return no_autorizado("falta Authorization: Bearer <token>");
+    };
+    match estado.cache.usuario_de_sesion(&token).await {
+        Ok(Some(usuario)) => {
+            peticion.extensions_mut().insert(Operador(usuario));
+            siguiente.run(peticion).await
+        }
+        Ok(None) => no_autorizado("sesion invalida o caducada"),
+        Err(e) => error_500(e).into_response(),
+    }
+}
+
+/// Token de la peticion: la cabecera `Authorization: Bearer`, o, SOLO en el
+/// handshake de WebSocket de [`RUTA_WS`], el parametro `token` de la consulta.
+fn token_de(peticion: &axum::extract::Request, patron: &str) -> Option<String> {
+    let portador = peticion
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .filter(|t| !t.is_empty());
+    if let Some(t) = portador {
+        return Some(t.to_string());
+    }
+    let es_websocket = patron == RUTA_WS
+        && peticion
+            .headers()
+            .get(header::UPGRADE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+    if !es_websocket {
+        return None;
+    }
+    peticion
+        .uri()
+        .query()?
+        .split('&')
+        .find_map(|par| par.strip_prefix("token="))
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+}
+
+/// Respuesta 401 con su motivo.
+fn no_autorizado(motivo: &'static str) -> axum::response::Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({"error": motivo})),
+    )
+        .into_response()
 }
 
 /// Extrae y valida la sesion de la cabecera `Authorization`.

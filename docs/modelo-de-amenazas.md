@@ -85,9 +85,9 @@ contenido de ficheros. Un fallo aquí es ejecución de código como root.
 
 | ID | Amenaza | Control | Estado | Evidencia | Plan |
 |---|---|---|---|---|---|
-| AM-3.1 | Suplantar a un agente ante el servidor | mTLS mutuo con la CA de flota | **existente** | `server/crates/aegis-server/src/ca.rs` | — |
+| AM-3.1 | Suplantar a un agente ante el servidor | mTLS mutuo con la CA de flota, en el transporte nativo y en gRPC; la identidad sale solo del certificado | **existente** | `server/crates/aegis-server/src/ca.rs`, `server/crates/aegis-server/src/grpc.rs` | El certificado del servidor no rota (H-39) |
 | AM-3.2 | Suplantar al servidor ante el agente | mTLS en el cliente de flota | **no-aplica** | — | El instalable `aegis-fleet` es una demostración que no se conecta al servidor real |
-| AM-3.3 | Entrar en la API de administración | Sesión con token Bearer en Redis | **ausente** | `server/crates/aegis-server/src/api.rs` | **Crítico.** `abrir_sesion` emite sesión a cualquier usuario no vacío, sin credenciales. Solo lo contiene que escuche en `127.0.0.1` por defecto |
+| AM-3.3 | Entrar en la API de administración | Sesión obligatoria por construcción en toda ruta `/api` (capa única con lista pública mínima), emitida solo contra una credencial verificada (PBKDF2) y con freno a los intentos fallidos | **existente** | `server/crates/aegis-server/src/api.rs`, `server/crates/aegis-server/src/credenciales.rs`, `server/crates/aegis-server/tests/api_sesion.rs` | La API sigue en HTTP plano (AM-3.4): fuera de loopback la clave viaja en claro |
 | AM-3.4 | Escuchar o alterar la API en tránsito | TLS en la API | **ausente** | `server/crates/aegis-server/src/config.rs` | La API sirve HTTP plano; hace falta TLS propio o terminación declarada |
 | AM-3.5 | Cosechar tráfico para descifrarlo en el futuro | Capa post-cuántica híbrida | **parcial** | `server/crates/aegis-server/src/pqc.rs` | El servidor la enlaza; no está ejercida de extremo a extremo con un agente real |
 | AM-3.6 | Atacar al agente por la red | El agente no abre puertos; control solo por socket Unix `0600` | **existente** | `crates/aegis-ctl/src/lib.rs` | — |

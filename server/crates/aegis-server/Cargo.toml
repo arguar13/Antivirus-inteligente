@@ -90,6 +90,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# PBKDF2-HMAC-SHA256 para las claves de los operadores (H-02). `ring` ya esta
+# en el arbol (rustls y tonic con `ring`): declararlo no anade ningun crate.
+ring = "0.17"
+# Aceptador TLS de la superficie gRPC (H-01): entrega a tonic la MISMA
+# configuracion rustls del transporte nativo (`aegis_fleet::tls`). Ya esta en
+# el arbol por tonic y fleet-simulator, con las mismas features.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 
 [build-dependencies]
 tonic-build = "0.13"
@@ -106,6 +113,9 @@ tokio-stream = { version = "0.1", features = ["net"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 sha2 = "0.10"
+# PEM de las identidades de prueba para el cliente TLS de tonic. Ya esta en el
+# arbol (aegis-fleet lo usa): no anade ningun crate.
+pem = "3"
 # Omitir una prueba por falta de PostgreSQL, Redis o datos se dice, se cuenta
 # y, en make ci, falla (H-10/H-20).
 aegis-prueba = { path = "../../../crates/aegis-prueba" }

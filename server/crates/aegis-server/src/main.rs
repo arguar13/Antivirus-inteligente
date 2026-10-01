@@ -8,7 +8,7 @@
 //! | Transporte | Quien lo usa | Formato |
 //! |---|---|---|
 //! | Nativo de flota (mTLS) | los agentes REALES de AegisCore | protobuf con enmarcado de gRPC sobre TLS mutuo crudo |
-//! | gRPC estandar (HTTP/2) | integraciones de terceros, conectores de SIEM | gRPC canonico |
+//! | gRPC estandar (HTTP/2) | integraciones de terceros, conectores de SIEM | gRPC canonico, SOLO mTLS con la CA de flota |
 //! | REST (HTTP) | el panel web de administracion | JSON |
 //!
 //! Los tres desembocan en el MISMO nucleo de dominio ([`dominio::ServicioFlota`]),
@@ -34,7 +34,7 @@ use aegis_server::config::Config;
 use aegis_server::dominio::ServicioFlota;
 use aegis_server::error::ErrorServidor;
 use aegis_server::notificador::Notificador;
-use aegis_server::{api, ca, flota, grpc, pb};
+use aegis_server::{api, ca, flota, grpc, particiones};
 
 /// Validez del certificado del propio plano de control.
 const VALIDEZ_CERT_SERVIDOR_SEG: u64 = 24 * 3600;
@@ -42,6 +42,12 @@ const VALIDEZ_CERT_SERVIDOR_SEG: u64 = 24 * 3600;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     iniciar_trazas();
+
+    // Orden de administracion: alta de un operador de la consola (H-02).
+    if std::env::args().nth(1).as_deref() == Some("alta-operador") {
+        return alta_operador(std::env::args().nth(2)).await;
+    }
+
     let cfg = Config::desde_entorno()?;
     tracing::info!("plano de control de AegisCore arrancando");
 
@@ -52,6 +58,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_conexiones = cfg.pg_max_conexiones,
         "PostgreSQL listo y migrado"
     );
+
+    // --- Particiones mensuales (migracion 0011, H-19) ----------------------
+    //
+    // ANTES de aceptar nada que escriba: una alerta cuyo mes no tiene hija se
+    // rechaza. Si esto falla, el servidor NO arranca, porque un plano de control
+    // que acepta conexiones y no puede guardar lo que recibe pierde evidencia.
+    // Despues se repite cada hora (y ahi un fallo se registra y se reintenta:
+    // hay tres meses de hijas creadas por adelantado).
+    let politica_particiones = particiones::Politica::desde_entorno()?;
+    let informe = particiones::mantener(&almacen, politica_particiones).await?;
+    tracing::info!(
+        creadas = informe.creadas,
+        purgadas = informe.purgadas,
+        retencion_meses = ?politica_particiones.retencion_meses,
+        "particiones mensuales al dia"
+    );
+    let tarea_particiones =
+        tokio::spawn(particiones::correr(almacen.clone(), politica_particiones));
 
     let cache = Cache::conectar(&cfg.redis_url).await?;
     cache.ping().await?;
@@ -105,19 +129,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let flota_en_ejecucion = servidor_flota.escuchar(&cfg.flota_addr)?;
     tracing::info!(direccion = %flota_en_ejecucion.direccion(), "transporte nativo de flota escuchando (mTLS)");
 
-    // --- Superficie gRPC estandar ------------------------------------------
-    let grpc_servicio = grpc::ServicioGrpc::nuevo(servicio.clone());
-    let grpc_addr = cfg.grpc_addr;
-    let tarea_grpc = tokio::spawn(async move {
-        tracing::info!(direccion = %grpc_addr, "superficie gRPC estandar escuchando");
-        if let Err(e) = tonic::transport::Server::builder()
-            .add_service(pb::aegis_fleet_server::AegisFleetServer::new(grpc_servicio))
-            .serve(grpc_addr)
-            .await
-        {
-            tracing::error!(error = %e, "la superficie gRPC se detuvo");
+    // --- Superficie gRPC estandar: SOLO mTLS (H-01) -------------------------
+    //
+    // La configuracion TLS es la MISMA que la del transporte nativo
+    // (`aegis_fleet::tls::config_servidor`, la CA de flota como unica raiz de
+    // confianza) y la identidad sale solo del certificado. Si no se puede
+    // construir, la superficie NO se levanta y se dice: nunca se sirve en claro.
+    let tarea_grpc = match grpc::configurar_mtls(Some(&id_servidor), Some(&ca.cert_der())) {
+        Ok(tls) => {
+            let escucha_grpc = tokio::net::TcpListener::bind(cfg.grpc_addr)
+                .await
+                .map_err(|e| ErrorServidor::Io {
+                    op: "bind grpc",
+                    source: e,
+                })?;
+            let grpc_servicio = grpc::ServicioGrpc::nuevo(servicio.clone());
+            tracing::info!(
+                direccion = %cfg.grpc_addr,
+                "superficie gRPC estandar escuchando (solo mTLS con la CA de flota)"
+            );
+            Some(tokio::spawn(async move {
+                if let Err(e) = grpc::servir(escucha_grpc, grpc_servicio, tls).await {
+                    tracing::error!(error = %e, "la superficie gRPC se detuvo");
+                }
+            }))
         }
-    });
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "superficie gRPC NO arrancada: exige mTLS con la CA de flota y no se sirve en claro"
+            );
+            None
+        }
+    };
 
     // --- Salida de auditoria hacia el SIEM del cliente (FASE 46) -----------
     //
@@ -207,10 +251,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     esperar_senal().await;
     tracing::info!("senal de parada recibida; cerrando");
     tarea_correlador.abort();
-    tarea_grpc.abort();
+    tarea_particiones.abort();
+    if let Some(t) = &tarea_grpc {
+        t.abort();
+    }
     tarea_api.abort();
     flota_en_ejecucion.parar();
     tracing::info!("plano de control detenido");
+    Ok(())
+}
+
+/// `aegis-server alta-operador <usuario>`: da de alta un operador de la
+/// consola, o le cambia la clave (H-02).
+///
+/// La clave se lee de la ENTRADA ESTANDAR (primera linea) y nunca de un
+/// argumento: los argumentos se ven en `ps` y quedan en el historial.
+///
+/// ```text
+/// printf '%s\n' "$CLAVE" | aegis-server alta-operador admin
+/// ```
+async fn alta_operador(usuario: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    use aegis_server::credenciales;
+
+    let usuario = usuario
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+        .ok_or("uso: aegis-server alta-operador <usuario>   (la clave, por la entrada estandar)")?;
+    let mut linea = String::new();
+    std::io::stdin().read_line(&mut linea)?;
+    let clave = linea.trim_end_matches(['\n', '\r']);
+    credenciales::validar_alta(&usuario, clave)?;
+
+    let cfg = Config::desde_entorno()?;
+    let almacen = Almacen::conectar(&cfg.pg_url, 2).await?;
+    almacen.migrar().await?;
+    let hash = credenciales::derivar(clave)?;
+    credenciales::alta_operador(almacen.pool(), &usuario, &hash).await?;
+    tracing::info!(usuario = %usuario, "operador dado de alta");
     Ok(())
 }
 

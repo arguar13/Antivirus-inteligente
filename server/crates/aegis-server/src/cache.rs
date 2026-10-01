@@ -32,6 +32,12 @@ const TTL_REPUTACION_SEG: u64 = 3600;
 /// Tiempo de vida de una sesion del panel.
 const TTL_SESION_SEG: u64 = 8 * 3600;
 
+/// Ventana, deslizante, de la cuenta de inicios de sesion fallidos.
+const VENTANA_FALLOS_SEG: u64 = 15 * 60;
+
+/// Inicios de sesion fallidos por usuario dentro de la ventana antes de frenar.
+pub const MAX_FALLOS_ACCESO: u64 = 10;
+
 /// Cliente de cache.
 #[derive(Clone)]
 pub struct Cache {
@@ -163,5 +169,44 @@ impl Cache {
         let mut c = self.conexion.clone();
         let borradas: i64 = c.del(Self::clave_sesion(token)).await?;
         Ok(borradas > 0)
+    }
+
+    // -----------------------------------------------------------------------
+    // Freno a los inicios de sesion fallidos (H-02)
+    // -----------------------------------------------------------------------
+
+    /// Clave de la cuenta de fallos de un usuario.
+    fn clave_fallos(usuario: &str) -> String {
+        format!("acceso_fallos:{}", usuario.to_lowercase())
+    }
+
+    /// Fallos de inicio de sesion de `usuario` en la ventana vigente.
+    pub async fn fallos_acceso(&self, usuario: &str) -> Resultado<u64> {
+        let mut c = self.conexion.clone();
+        let n: Option<u64> = c.get(Self::clave_fallos(usuario)).await?;
+        Ok(n.unwrap_or(0))
+    }
+
+    /// Cuenta un fallo y renueva la ventana, atomicamente.
+    ///
+    /// INCR y EXPIRE van en la misma transaccion: por separado, una caida entre
+    /// los dos dejaria una cuenta sin caducidad, es decir, un bloqueo eterno.
+    pub async fn contar_fallo_acceso(&self, usuario: &str) -> Resultado<u64> {
+        let mut c = self.conexion.clone();
+        let clave = Self::clave_fallos(usuario);
+        let (n, _): (u64, i64) = redis::pipe()
+            .atomic()
+            .incr(&clave, 1u64)
+            .expire(&clave, VENTANA_FALLOS_SEG as i64)
+            .query_async(&mut c)
+            .await?;
+        Ok(n)
+    }
+
+    /// Borra la cuenta de fallos tras un inicio de sesion correcto.
+    pub async fn limpiar_fallos_acceso(&self, usuario: &str) -> Resultado<()> {
+        let mut c = self.conexion.clone();
+        let _: i64 = c.del(Self::clave_fallos(usuario)).await?;
+        Ok(())
     }
 }

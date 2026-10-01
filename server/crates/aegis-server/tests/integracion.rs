@@ -539,72 +539,168 @@ async fn un_impostor_con_otra_ca_no_llega_a_tocar_la_base_de_datos() {
 }
 
 // ---------------------------------------------------------------------------
-// Superficie gRPC estandar (tonic)
+// Superficie gRPC estandar (tonic), SOLO mTLS (H-01)
 // ---------------------------------------------------------------------------
 
+/// PEM de un DER, para la configuracion TLS del cliente de tonic.
+fn pem_de(etiqueta: &str, der: &[u8]) -> String {
+    pem::encode(&pem::Pem::new(etiqueta, der.to_vec()))
+}
+
+/// Levanta la superficie gRPC con la configuracion de produccion: mTLS con la
+/// CA dada, por `grpc::configurar_mtls` y `grpc::servir`.
+async fn levantar_grpc_mtls(
+    servicio: Arc<ServicioFlota>,
+    ca: &AutoridadCertificadora,
+) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+    let id_srv = ca.emitir("control-plane", 3600).unwrap();
+    let tls = aegis_server::grpc::configurar_mtls(Some(&id_srv), Some(&ca.cert_der())).unwrap();
+    let escucha = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dir = escucha.local_addr().unwrap();
+    let servicio_grpc = aegis_server::grpc::ServicioGrpc::nuevo(servicio);
+    let tarea = tokio::spawn(async move {
+        let _ = aegis_server::grpc::servir(escucha, servicio_grpc, tls).await;
+    });
+    (dir, tarea)
+}
+
+/// Cliente gRPC canonico (el de un tercero) que confia en la CA de la flota y,
+/// si se le da, presenta una identidad.
+async fn cliente_grpc(
+    dir: std::net::SocketAddr,
+    ca: &AutoridadCertificadora,
+    identidad: Option<&aegis_fleet::pki::Identidad>,
+) -> Result<
+    aegis_server::pb::aegis_fleet_client::AegisFleetClient<tonic::transport::Channel>,
+    tonic::transport::Error,
+> {
+    let mut tls = tonic::transport::ClientTlsConfig::new()
+        .ca_certificate(tonic::transport::Certificate::from_pem(ca.cert_pem()))
+        // El certificado de servidor que emite la CA lleva el SAN «localhost».
+        .domain_name("localhost");
+    if let Some(id) = identidad {
+        let clave = id.clave.como_rustls().unwrap();
+        tls = tls.identity(tonic::transport::Identity::from_pem(
+            pem_de("CERTIFICATE", id.cert_der.as_ref()),
+            pem_de("PRIVATE KEY", clave.secret_der()),
+        ));
+    }
+    let canal = tonic::transport::Channel::from_shared(format!("https://{dir}"))
+        .unwrap()
+        .tls_config(tls)?
+        .connect()
+        .await?;
+    Ok(aegis_server::pb::aegis_fleet_client::AegisFleetClient::new(
+        canal,
+    ))
+}
+
+/// Intenta enrolar `cn` con la identidad dada y comprueba que NO entra: ni la
+/// llamada prospera ni el rechazo lo da el manejador (tiene que darlo el TLS).
+async fn no_entra_por_grpc(
+    dir: std::net::SocketAddr,
+    ca: &AutoridadCertificadora,
+    identidad: Option<&aegis_fleet::pki::Identidad>,
+    cn: &str,
+) {
+    // Si el handshake ya falla, no hay cliente: rechazado, que es lo esperado.
+    if let Ok(mut cliente) = cliente_grpc(dir, ca, identidad).await {
+        // En TLS 1.3 el cliente da el handshake por bueno antes de que el
+        // servidor rechace su certificado: el rechazo llega en la primera
+        // lectura, y la llamada tiene que fallar ahi.
+        let r = cliente
+            .enrolar(aegis_server::pb::SolicitudEnrolamiento {
+                id_agente: cn.to_string(),
+                hostname: "no-deberia-entrar".to_string(),
+                ..Default::default()
+            })
+            .await;
+        let e =
+            r.expect_err("sin certificado valido de la CA de flota la llamada no puede prosperar");
+        assert!(
+            !e.message()
+                .contains("sin certificado de cliente verificado"),
+            "el rechazo tiene que ocurrir en el handshake TLS, no en el manejador: {e:?}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn la_superficie_grpc_estandar_atiende_a_una_integracion_de_terceros() {
+async fn grpc_sin_certificado_de_la_flota_se_rechaza_en_el_handshake() {
     let Some(almacen) = almacen_de_pruebas().await else {
         omitir("no hay PostgreSQL", Requisito::Postgresql);
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let ca = AutoridadCertificadora::nueva("CA de la flota").unwrap();
+    let (dir, tarea) = levantar_grpc_mtls(servicio, &ca).await;
 
-    // Se levanta la superficie gRPC canonica en un puerto efimero.
-    let escucha = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let dir = escucha.local_addr().unwrap();
-    let servicio_grpc = aegis_server::grpc::ServicioGrpc::nuevo(servicio);
-    let servidor = tokio::spawn(async move {
-        let _ = tonic::transport::Server::builder()
-            .add_service(aegis_server::pb::aegis_fleet_server::AegisFleetServer::new(
-                servicio_grpc,
-            ))
-            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(escucha))
-            .await;
-    });
+    // Sin certificado de cliente.
+    let cn_anonimo = cn_unico("grpc-sin-certificado");
+    no_entra_por_grpc(dir, &ca, None, &cn_anonimo).await;
 
-    let cn = cn_unico("integracion");
-    let mut cliente =
-        aegis_server::pb::aegis_fleet_client::AegisFleetClient::connect(format!("http://{dir}"))
-            .await
-            .expect("conectar por gRPC");
+    // Con un certificado de OTRA autoridad.
+    let pirata = AutoridadCertificadora::nueva("CA Pirata").unwrap();
+    let cn_pirata = cn_unico("grpc-pirata");
+    let id_pirata = pirata.emitir(&cn_pirata, 3600).unwrap();
+    no_entra_por_grpc(dir, &ca, Some(&id_pirata), &cn_pirata).await;
 
-    // Sin identidad, la llamada se rechaza: no se escribe en el inventario a
-    // partir de lo que diga el CUERPO del mensaje, que lo controla quien envia.
-    let anonima = cliente
-        .latir(tonic::Request::new(aegis_server::pb::Latido {
-            id_agente: cn.clone(),
-            ..Default::default()
-        }))
-        .await;
-    assert!(
-        anonima.is_err(),
-        "una llamada sin identidad debe rechazarse"
-    );
-    assert_eq!(anonima.unwrap_err().code(), tonic::Code::Unauthenticated);
+    for cn in [&cn_anonimo, &cn_pirata] {
+        assert!(
+            almacen.obtener_agente(cn, 300).await.is_err(),
+            "{cn} no puede existir en el inventario"
+        );
+    }
+    tarea.abort();
+}
 
-    // Con identidad (la que inyectaria el proxy que autentica), funciona.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn grpc_la_identidad_sale_del_certificado_y_no_de_la_cabecera() {
+    let Some(almacen) = almacen_de_pruebas().await else {
+        omitir("no hay PostgreSQL", Requisito::Postgresql);
+        return;
+    };
+    let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
+    let ca = AutoridadCertificadora::nueva("CA de la flota").unwrap();
+    let (dir, tarea) = levantar_grpc_mtls(servicio, &ca).await;
+
+    // El agente A, con SU certificado valido, intenta hacerse pasar por B por
+    // las dos vias que antes existian o podrian existir: la cabecera de
+    // identidad del proxy y el identificador del cuerpo.
+    let cn_a = cn_unico("grpc-agente-a");
+    let cn_b = cn_unico("grpc-agente-b");
+    let id_a = ca.emitir(&cn_a, 3600).unwrap();
+    let mut cliente = cliente_grpc(dir, &ca, Some(&id_a))
+        .await
+        .expect("con un certificado valido de la flota se conecta");
+
     let mut peticion = tonic::Request::new(aegis_server::pb::SolicitudEnrolamiento {
-        id_agente: cn.clone(),
-        hostname: "sonda-de-terceros".to_string(),
+        id_agente: cn_b.clone(),
+        hostname: "suplantacion".to_string(),
         version_agente: "9.9.9".to_string(),
         huella_cert: vec![1, 2, 3],
     });
     peticion
         .metadata_mut()
-        .insert("x-aegis-agente", cn.parse().unwrap());
-    let respuesta = cliente.enrolar(peticion).await.expect("enrolar por gRPC");
+        .insert("x-aegis-agente", cn_b.parse().unwrap());
+    let respuesta = cliente
+        .enrolar(peticion)
+        .await
+        .expect("A se enrola con su certificado");
     assert!(respuesta.into_inner().aceptado);
 
-    // Y aterriza en la MISMA base de datos que el transporte nativo: los dos
-    // caminos desembocan en el mismo nucleo de dominio.
+    // La identidad efectiva es la del certificado: el registro es de A...
     let vista = almacen
-        .obtener_agente(&cn, 300)
+        .obtener_agente(&cn_a, 300)
         .await
-        .expect("en inventario");
-    assert_eq!(vista.hostname, "sonda-de-terceros");
-
-    servidor.abort();
+        .expect("A tiene que estar en el inventario");
+    assert_eq!(vista.hostname, "suplantacion");
+    // ...y B no existe.
+    assert!(
+        almacen.obtener_agente(&cn_b, 300).await.is_err(),
+        "ni la cabecera ni el cuerpo pueden dar identidad"
+    );
+    tarea.abort();
 }
 
 // ---------------------------------------------------------------------------
