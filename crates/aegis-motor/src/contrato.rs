@@ -87,6 +87,12 @@ pub enum Requisito {
     TrabajadorConfinado,
     /// Virtualizacion (`/dev/kvm`).
     Kvm,
+    /// Leer el mapa, la tabla de paginas y la memoria de otros procesos
+    /// (CAP_SYS_PTRACE, y Yama por debajo de 3).
+    MemoriaAjena,
+    /// Los kfuncs de tareas en el kernel (`bpf_iter_task_*` y
+    /// `bpf_task_from_pid`).
+    KfuncsTareas,
 }
 
 impl Requisito {
@@ -98,6 +104,8 @@ impl Requisito {
             Requisito::BpfLsm => "bpf-lsm",
             Requisito::TrabajadorConfinado => "trabajador-confinado",
             Requisito::Kvm => "kvm",
+            Requisito::MemoriaAjena => "memoria-ajena",
+            Requisito::KfuncsTareas => "kfuncs-tareas",
         }
     }
 }
@@ -262,6 +270,11 @@ pub trait Motor<E>: Send {
     /// viejo es peor que no olvidar, pero mejor que quedarse ciego entero.
     fn aligerar(&mut self) {}
 
-    /// Mantenimiento periodico, fuera del camino caliente.
-    fn mantener(&mut self, _ahora_ns: u64) {}
+    /// Mantenimiento periodico, fuera del camino caliente, y la entrega de lo
+    /// que el motor termino de mirar DESPUES del evento (camino frio): cada
+    /// dictamen va con la entidad a la que se refiere, y el arbitro lo combina
+    /// igual que lo de [`crate::Arbitro::aportar`].
+    fn mantener(&mut self, _ahora_ns: u64) -> Vec<(Eid, Dictamen)> {
+        Vec::new()
+    }
 }

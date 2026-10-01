@@ -50,6 +50,9 @@ pub struct Omitido {
     pub motivo: String,
 }
 
+/// Longitud maxima del ultimo motivo de «sin datos» que se guarda por motor.
+pub const MAX_MOTIVO: usize = 240;
+
 /// Lo que se publica de cada motor.
 #[derive(Debug, Clone)]
 pub struct EstadoMotor {
@@ -65,6 +68,11 @@ pub struct EstadoMotor {
     pub senales: u64,
     /// Veces que no pudo mirar, por causa.
     pub sin_datos: BTreeMap<&'static str, u64>,
+    /// El motivo de la ultima vez que no pudo mirar, dicho por el motor. Un
+    /// contador sin motivo no deja actuar a nadie: «sin datos: 1» en un kernel
+    /// que tiene los kfuncs no dice si fallo la carga, el barrido o la
+    /// numeracion (FASE 2 del MP-16). Acotado a [`MAX_MOTIVO`] bytes.
+    pub ultimo_sin_datos: Option<String>,
     /// Evaluaciones que se pasaron de su tiempo.
     pub excesos: u64,
     /// Veces que se le suspendio.
@@ -97,6 +105,15 @@ impl<E> Registrado<E> {
 
     fn contar_sin_datos(&mut self, causa: &Causa) {
         *self.estado.sin_datos.entry(causa.clave()).or_insert(0) += 1;
+        let mut m = causa.to_string();
+        if m.len() > MAX_MOTIVO {
+            let mut corte = MAX_MOTIVO;
+            while !m.is_char_boundary(corte) {
+                corte -= 1;
+            }
+            m.truncate(corte);
+        }
+        self.estado.ultimo_sin_datos = Some(m);
     }
 
     fn mudo(&self, entidad: &Eid, causa: &Causa, cuando_ns: u64) -> Senal {
@@ -177,6 +194,7 @@ impl<E: Evento> Arbitro<E> {
             evaluaciones: 0,
             senales: 0,
             sin_datos: BTreeMap::new(),
+            ultimo_sin_datos: None,
             excesos: 0,
             suspensiones: 0,
             suspendido: false,
@@ -382,15 +400,26 @@ impl<E: Evento> Arbitro<E> {
         }
     }
 
-    /// Mantenimiento periodico: el de cada motor, y olvidar lo caducado.
-    pub fn mantener(&mut self, ahora_ns: u64) {
+    /// Mantenimiento periodico: el de cada motor, lo que entregan del camino
+    /// frio y olvidar lo caducado. Devuelve los veredictos que cambiaron.
+    pub fn mantener(&mut self, ahora_ns: u64) -> Vec<Veredicto> {
+        let mut entregas: Vec<(&'static str, Eid, Dictamen)> = Vec::new();
         for r in &mut self.motores {
-            r.motor.mantener(ahora_ns);
+            for (e, d) in r.motor.mantener(ahora_ns) {
+                entregas.push((r.ficha.nombre, e, d));
+            }
             r.estado.memoria = r.motor.memoria();
+        }
+        let mut veredictos = Vec::new();
+        for (motor, e, d) in entregas {
+            if let Some(v) = self.aportar(motor, &e, d, ahora_ns) {
+                veredictos.push(v);
+            }
         }
         let vida = self.config.vida_ns;
         self.expedientes
             .retain(|_, x| ahora_ns.saturating_sub(x.visto_ns) <= vida);
+        veredictos
     }
 
     /// El estado de cada motor registrado.
@@ -672,6 +701,14 @@ mod pruebas {
         let e = &a.estado()[0];
         assert_eq!(e.evaluaciones, 2);
         assert_eq!(e.sin_datos.get("suspendido"), Some(&1));
+        // El contador va con su motivo, para que alguien pueda actuar.
+        assert!(
+            e.ultimo_sin_datos
+                .as_deref()
+                .is_some_and(|m| m.contains("suspendido")),
+            "{:?}",
+            e.ultimo_sin_datos
+        );
     }
 
     #[test]
