@@ -122,7 +122,7 @@ Dependencias que hoy suben de capa ([`tools/config/capas.toml`](../tools/config/
 | `aegis-audit` | plataforma | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-behavior` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/conducta.rs:23](../crates/aegis-agent/src/motores/conducta.rs#L23) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | p99_evaluacion (ns) | — |
 | `aegis-captura` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-case` | núcleo | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/api.rs:1857](../server/crates/aegis-server/src/api.rs#L1857) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
+| `aegis-case` | núcleo | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/api.rs:2140](../server/crates/aegis-server/src/api.rs#L2140) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-cloudnative` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-confinar` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-conocimiento` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
@@ -170,8 +170,8 @@ Dependencias que hoy suben de capa ([`tools/config/capas.toml`](../tools/config/
 | `aegis-ml` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-ransom/src/engine.rs:286](../crates/aegis-ransom/src/engine.rs#L286) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-motor` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/main.rs:31](../crates/aegis-agent/src/main.rs#L31) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | p99_camino_caliente (ns) | — |
 | `aegis-net` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-orchestrator` | motores | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/main.rs:156](../server/crates/aegis-server/src/main.rs#L156) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-parser` | núcleo | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/api.rs:1083](../server/crates/aegis-server/src/api.rs#L1083) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
+| `aegis-orchestrator` | motores | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/main.rs:200](../server/crates/aegis-server/src/main.rs#L200) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
+| `aegis-parser` | núcleo | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/api.rs:1366](../server/crates/aegis-server/src/api.rs#L1366) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-patron` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-scan/src/yara.rs:24](../crates/aegis-scan/src/yara.rs#L24) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-pe` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-macho/src/macho.rs:27](../crates/aegis-macho/src/macho.rs#L27) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-pipeline` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |

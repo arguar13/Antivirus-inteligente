@@ -35,8 +35,8 @@ máquina.
 | Magnitud | Agente | Plano de control | Enjambre |
 |---|---:|---:|---:|
 | Crates | 74 | 20 | 1 |
-| Funciones de prueba | 3.378 | 1.216 | 6 |
-| Líneas de Rust | 238.636 | 92.686 | 555 |
+| Funciones de prueba | 3.402 | 1.237 | 6 |
+| Líneas de Rust | 239.819 | 94.618 | 561 |
 
 Además: **3.962** líneas de C propio (sondas eBPF y driver de Windows, sin contar el `vmlinux.h` generado), **58** verificadores `tools/verificar-*.sh`, **39** dependencias directas del agente con su justificación en [`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y **5** ejecutables instalables.
 
@@ -281,7 +281,7 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-scan`](crates/aegis-scan) | Motor de deteccion profunda de AegisCore: YARA sobre ficheros y memoria de procesos | motores | Biblioteca | 27 | sí |
 | [`aegis-selfdefense`](crates/aegis-selfdefense) | Autodefensa legitima: OTP firmado del Control Plane, decision de tamper, clasificacion ELAM y requisitos PPL | motores | Biblioteca | 51 | sí |
 | [`aegis-sensor`](crates/aegis-sensor) | Telemetria de kernel sin carreras y con perdida declarada por familia (FASE 103): un sensor que pierde, lo dice y lo cuenta, degrada por presupuesto diciendolo, y no decide sobre datos que pudieron cambiar | plataforma | Biblioteca | 13 | sí |
-| [`aegis-swarm`](crates/aegis-swarm) | Enjambre autonomo: nucleo sans-io del protocolo de reparto de inteligencia y ordenes de contencion entre agentes aislados del plano de control | motores | Biblioteca | 75 | sí |
+| [`aegis-swarm`](crates/aegis-swarm) | Enjambre autonomo: nucleo sans-io del protocolo de reparto de inteligencia y ordenes de contencion entre agentes aislados del plano de control | motores | Biblioteca | 99 | sí |
 | [`aegis-sync`](crates/aegis-sync) | Sincronizacion diferencial de indicadores de compromiso con arboles de Merkle | núcleo | Biblioteca | 8 | — |
 | [`aegis-syscallguard`](crates/aegis-syscallguard) | Deteccion de syscalls directas respaldada por hardware (PMU/DRx) y verificacion cruzada del origen de cada syscall | motores | Biblioteca | 15 | — |
 | [`aegis-trabajador`](crates/aegis-trabajador) | Proceso trabajador confinado (seccomp, Landlock, sin red, uid propio, cgroup y plazo) donde corren los parsers de bytes no confiables del agente | motores | Producto | 24 | — |
@@ -313,7 +313,7 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-rango`](server/crates/aegis-rango) | AegisRange (FASE 99): emulacion de adversario benigna y reversible, solo en un rango declarado, con medida automatica y reproducible de la cobertura de deteccion del arbitro y huecos declarados por tecnica | motores | Biblioteca | 11 | sí |
 | [`aegis-ruleforge`](server/crates/aegis-ruleforge) | La fabrica de contenido: compila el corpus mundial de deteccion en artefactos firmados | motores | Biblioteca | 181 | sí |
 | [`aegis-scale`](server/crates/aegis-scale) | Plano de control para 100.000 agentes: particionado de flota, conexiones, base de datos y actualizacion progresiva | E/S | Biblioteca | 62 | sí |
-| [`aegis-server`](server/crates/aegis-server) | Plano de control de AegisCore: ingesta de flota gRPC/mTLS y API de administracion | E/S | Biblioteca | 125 | sí |
+| [`aegis-server`](server/crates/aegis-server) | Plano de control de AegisCore: ingesta de flota gRPC/mTLS y API de administracion | E/S | Biblioteca | 146 | sí |
 | [`aegis-share`](server/crates/aegis-share) | Plataforma STIX/TAXII de inteligencia con difusion controlada, federacion y procedencia reversible | núcleo | Biblioteca | 124 | sí |
 | [`aegis-tejido`](server/crates/aegis-tejido) | El tejido de AegisFabric: inventario de veredictos, traduccion a la escala unica y el circuito completo de extremo a extremo | E/S | Biblioteca | 38 | sí |
 | [`fleet-simulator`](server/crates/fleet-simulator) | Generador de carga: simula una flota de miles de agentes contra el plano de control | herramienta | Herramienta | 11 | sí |
