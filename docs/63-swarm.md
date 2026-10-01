@@ -41,7 +41,7 @@ de último recurso, no un consenso.
 |---|---|---|
 | **Orden** (aislar, matar, cuarentena, revocar tickets) | sólo el plano de control | firma híbrida válida + época monótona + dentro de su ventana |
 | **Artefacto** (reglas YARA, modelos) | sólo el plano de control | firma del descriptor + hash de cada trozo + hash del conjunto |
-| **Observación** («vi este hash hacer esto») | cualquier par, con su identidad de matriculación | **K pares distintos** dentro de una ventana |
+| **Observación** («vi este hash hacer esto») | cualquier par matriculado, con la credencial que le firmó el plano de control | **K identidades autenticadas distintas** dentro de una ventana |
 
 Una observación **no manda nada**: es evidencia. Lo que la convierte en acción es
 el corroboro, y eso transforma «un endpoint comprometido mueve a la flota» en
@@ -54,10 +54,32 @@ contra un adversario que ya controla K equipos, y no se debe vender como si lo
 hiciera. Lo que sí hace, y es mucho, es que un solo equipo comprometido no pueda
 mover nada, que es el caso abrumadoramente más común.
 
-Y descansa entero sobre una propiedad: la identidad del origen es el **CN de
-matriculación**, autenticado por el transporte, no un campo que el par rellene. Si
-el par pudiera elegir su nombre, fabricaría K identidades desde una máquina y el
-quorum no valdría nada.
+Y descansa entero sobre una propiedad: un testigo es un **CN de matriculación
+autenticado criptográficamente**, nunca un campo que el par rellene. Si el par
+pudiera elegir su nombre, fabricaría K identidades desde una máquina y el quorum
+no valdría nada — y así fue hasta H-04: el quorum contaba el campo `origen` que
+declara el emisor, y la firma del sobre no se miraba.
+
+Cómo se autentica sin plano de control durante el corte:
+
+- Al matricular un agente, el plano de control le firma una **credencial de par**
+  (`crates/aegis-swarm/src/credencial.rs`): CN, clave pública híbrida Ed25519 +
+  ML-DSA-65 del agente y vigencia (30 días como mucho), con la misma clave con la
+  que firma órdenes y artefactos. No hay criptografía nueva.
+- Cada observación viaja con la credencial de su emisor y con la firma del emisor
+  sobre `contexto ‖ huella(credencial) ‖ observación`. `vista_en` va dentro de lo
+  firmado.
+- El receptor comprueba las dos firmas, exige que el origen declarado sea el CN de
+  la credencial —si no, es una **suplantación** con firma buena y el culpable
+  queda identificado— y descarta lo que esté fuera de la ventana de corroboro. Lo
+  único que llega al quorum es un `Testigo`, un tipo que no se puede construir
+  desde un texto.
+- El `PeerId` de libp2p **no** cuenta: es efímero y sólo reparte la cuota de tasa.
+
+Límites: una credencial robada vale hasta que caduca (no hay revocación que viaje
+por el enjambre), y K equipos comprometidos siguen bastando. La credencial da voz
+para aportar evidencia, no autoridad: no firma órdenes, y levantar un aislamiento
+sigue sin viajar por el enjambre (invariante 10).
 
 ## 63.4 El ataque central: reproducir una orden auténtica
 
@@ -186,6 +208,7 @@ levantar una red y acabarían sin probarse.
 | Un endpoint comprometido fabricando órdenes | **sí** | firma con su propia clave y se rechaza |
 | Un reenviador cambiando el sujeto en tránsito | **sí** | rompe la firma |
 | Una sola máquina gritando mil veces | **sí** | se queda en un testigo |
+| Una máquina fabricando K identidades (Sybil, H-04) | **sí** | `tests/sybil.rs`: nombres declarados, credenciales acuñadas fuera del plano de control o copiadas de la red y observaciones reinyectadas fuera de su ventana no suman ni un testigo |
 | Inundación, duplicados, saltos, memoria | **sí** | construidos contra el núcleo |
 | Trozo envenenado y trozo que miente el tamaño | **sí** | rechazados al llegar |
 | Entrada hostil arbitraria | **sí** | barrido determinista; ninguna entrada provoca pánico |

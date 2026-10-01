@@ -56,7 +56,8 @@ pub enum ErrorEnjambre {
     #[error("accion de orden desconocida: {0}")]
     AccionDesconocida(u8),
 
-    /// La firma no verifica bajo la clave del plano de control.
+    /// La firma no verifica: la del plano de control (ordenes, artefactos,
+    /// credenciales de par) o la del par sobre su observacion.
     #[error("firma invalida: {0}")]
     FirmaInvalida(String),
 
@@ -91,6 +92,19 @@ pub enum ErrorEnjambre {
         recibida: u64,
         /// Epoca que ya se conocia.
         vigente: u64,
+    },
+
+    /// Un par matriculado firmo una observacion con un origen que no es el suyo.
+    ///
+    /// No es ruido de red: la firma es buena, asi que quien la emitio tiene una
+    /// credencial de verdad y la esta usando para pasar por otro. Es el intento
+    /// de Sybil de un equipo comprometido, y queda identificado.
+    #[error("origen suplantado: declara {declarado} y firma {autenticado}")]
+    OrigenSuplantado {
+        /// El origen que declara el mensaje.
+        declarado: String,
+        /// El CN de la credencial que firma.
+        autenticado: String,
     },
 
     /// Un trozo de artefacto que no encaja con lo que se estaba reensamblando.

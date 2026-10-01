@@ -23,13 +23,18 @@
 //! que reimplementar: malla con grado controlado, *heartbeat* que la repara
 //! cuando un par se cae, y propagación que no degenera en difusión total.
 //!
-//! # La identidad del par la pone el transporte, no el mensaje
+//! # Dos identidades distintas, y ninguna la elige el mensaje
 //!
-//! Al núcleo se le pasa el `PeerId` de libp2p, que está **autenticado por el
-//! apretón de manos Noise**: un par no puede hacerse pasar por otro. Si la
-//! identidad viniera dentro del mensaje, cualquiera podría gastarle la cuota a
-//! un vecino o inflar el quorum fingiendo ser K equipos. El corroboro de
-//! [`aegis_swarm::quorum`] descansa entero sobre esa propiedad.
+//! Al núcleo se le pasa el `PeerId` de libp2p del vecino que ENTREGÓ el
+//! mensaje, autenticado por el apretón de manos Noise. Sirve para **repartir la
+//! cuota de tasa**: un vecino no puede gastarle la cuota a otro.
+//!
+//! **No sirve para contar testigos**, y el núcleo no lo usa para eso: el
+//! `PeerId` es efímero (`with_new_identity`), mDNS acepta a cualquiera de la red
+//! local y en una malla quien entrega casi nunca es quien emitió. El corroboro de
+//! [`aegis_swarm::quorum`] cuenta la identidad de la **credencial de par** que el
+//! plano de control firmó al matricular ([`aegis_swarm::credencial`]), que viaja
+//! con cada observación y se verifica en cualquier salto (H-04).
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -108,7 +113,8 @@ pub fn comportamiento(
         .heartbeat_interval(LATIDO)
         // Estricta: sólo se acepta lo que viene firmado por el par que lo envía.
         // Es lo que hace que el `PeerId` que se le pasa al núcleo signifique
-        // algo, y de eso depende el quorum entero.
+        // algo para la cuota de tasa. El quorum NO depende de él: cuenta la
+        // credencial de par que viaja dentro de cada observación.
         .validation_mode(gossipsub::ValidationMode::Strict)
         .max_transmit_size(MAX_MENSAJE)
         .message_id_fn(id_de_mensaje)

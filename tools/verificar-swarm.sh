@@ -23,7 +23,9 @@
 #      quedan fuera por CLASE. Es la doctrina de la FASE 23 —solo se anade
 #      proteccion, jamas se quita— llevada de los indicadores a las ordenes.
 #   4. Una observacion no manda: es evidencia. Hacen falta K pares DISTINTOS.
-#      Un equipo comprometido gritando mil veces no mueve nada.
+#      Un equipo comprometido gritando mil veces no mueve nada. Y DISTINTOS por
+#      identidad AUTENTICADA —la credencial que el plano de control firmo al
+#      matricular—, nunca por el nombre que declare el mensaje (H-04).
 #
 # Y LO QUE NO ES UN MURO AUNQUE LO PARECIA: el transporte libp2p. No se da por
 # bueno porque compile; se levantan DOS NODOS REALES por loopback, con Noise,
@@ -54,7 +56,8 @@ fi
 
 echo "==> AegisSwarm: el quorum (una maquina comprometida no mueve a la flota)"
 if cargo test -p aegis-swarm --quiet quorum:: >/tmp/aegis-swarm-quorum.log 2>&1; then
-    echo "    ${VERDE}OK${FIN} (un solo par repitiendo mil veces se queda en UN testigo; dos"
+    echo "    ${VERDE}OK${FIN} (un solo testigo repitiendo mil veces, o declarando mil nombres,"
+    echo "    ${VERDE}  ${FIN} se queda en UNO; dos"
     echo "    ${VERDE}  ${FIN} comprometidos tampoco bastan; los testigos tienen que coincidir en la"
     echo "    ${VERDE}  ${FIN} ventana, porque tres equipos que vieron algo en marzo, junio y octubre"
     echo "    ${VERDE}  ${FIN} no son tres testigos del mismo incidente; y una inundacion de"
@@ -62,6 +65,20 @@ if cargo test -p aegis-swarm --quiet quorum:: >/tmp/aegis-swarm-quorum.log 2>&1;
 else
     echo "    ${ROJO}FALLO${FIN}: el quorum no aguanta"
     sed 's/^/    | /' /tmp/aegis-swarm-quorum.log | tail -30
+    exit 1
+fi
+
+echo "==> AegisSwarm: el Sybil de H-04 (un nodo no fabrica testigos), con claves reales"
+if cargo test -p aegis-swarm --quiet --test sybil >/tmp/aegis-swarm-sybil.log 2>&1; then
+    echo "    ${VERDE}OK${FIN} (un testigo es una credencial que firmo el plano de control: un nodo"
+    echo "    ${VERDE}  ${FIN} que declara N nombres se queda en UNO y cada suplantacion queda"
+    echo "    ${VERDE}  ${FIN} identificada; credenciales acunadas fuera del plano o copiadas de la"
+    echo "    ${VERDE}  ${FIN} red no suman; una observacion autentica reinyectada fuera de su"
+    echo "    ${VERDE}  ${FIN} ventana no cuenta y rejuvenecerla rompe la firma; y la credencial"
+    echo "    ${VERDE}  ${FIN} de un par no firma ordenes)"
+else
+    echo "    ${ROJO}FALLO${FIN}: el quorum cuenta identidades que no estan autenticadas (H-04)"
+    sed 's/^/    | /' /tmp/aegis-swarm-sybil.log | tail -30
     exit 1
 fi
 

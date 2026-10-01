@@ -34,7 +34,7 @@
 //! |---|---|---|
 //! | [`orden::Orden`] | **sólo el plano de control** (ningún agente tiene su clave) | firma híbrida válida + época monótona + dentro de su ventana |
 //! | [`artefacto::Descriptor`] (reglas YARA, modelos) | **sólo el plano de control** | firma válida del descriptor + hash de cada trozo + hash del conjunto |
-//! | [`observacion::Observacion`] | cualquier par, con su identidad de matriculación | **K pares distintos** viendo lo mismo dentro de una ventana ([`quorum`]) |
+//! | [`observacion::Observacion`] | cualquier par matriculado, con la [`credencial::Credencial`] que le firmó el plano de control | **K identidades autenticadas distintas** viendo lo mismo dentro de una ventana ([`quorum`]); el nombre que declare el mensaje no cuenta |
 //!
 //! Una observación **no manda nada**: es evidencia. Lo que convierte evidencia
 //! en acción es el corroboro, y eso transforma «un endpoint comprometido mueve a
@@ -82,6 +82,7 @@
 //! | Reglas de confianza de las tres clases | **sí** | con claves reales, incluida la híbrida post-cuántica |
 //! | Reproducción de una orden antigua y auténtica | **sí** | se emite de verdad y la época la corta |
 //! | Una sola máquina comprometida gritando | **sí** | mil observaciones y no mueve nada |
+//! | Una máquina fabricando K identidades (Sybil, H-04) | **sí** | `tests/sybil.rs`: una credencial es un testigo; nombres declarados, credenciales acuñadas fuera del plano de control o copiadas de la red y observaciones reinyectadas fuera de su ventana no suman |
 //! | Inundación, duplicados, saltos, memoria | **sí** | construidos contra el núcleo |
 //! | Trozo envenenado y trozo que miente el tamaño | **sí** | rechazados al llegar |
 //! | Entrada hostil arbitraria | **sí** | barrido determinista; ninguna entrada provoca pánico |
@@ -104,6 +105,7 @@
 #![deny(missing_docs)]
 
 pub mod artefacto;
+pub mod credencial;
 pub mod enjambre;
 pub mod error;
 pub mod mensaje;
@@ -112,6 +114,7 @@ pub mod orden;
 pub mod quorum;
 
 pub use artefacto::{ClaseArtefacto, Descriptor, Reensamblado, Trozo};
+pub use credencial::{Credencial, Testigo};
 pub use enjambre::{
     ConfigEnjambre, Contadores, Enjambre, EstadoEnlace, MotivoDescarte, Salida, SALTOS_POR_DEFECTO,
 };

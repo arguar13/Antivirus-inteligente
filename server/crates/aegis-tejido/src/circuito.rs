@@ -73,11 +73,13 @@ use aegis_share::difusion::{Canal, Destino, Difusor};
 use aegis_share::marcado::Tlp;
 use aegis_share::stix::Paquete;
 use aegis_share::taxii::{Cliente, Coleccion, Servidor};
+use aegis_swarm::credencial::{Credencial, CTX_CREDENCIAL};
 use aegis_swarm::enjambre::{ConfigEnjambre, Enjambre, EstadoEnlace, Salida as SalidaEnjambre};
 use aegis_swarm::mensaje::{Sobre, TipoMensaje};
-use aegis_swarm::observacion::Observacion;
+use aegis_swarm::observacion::{Observacion, CTX_OBSERVACION};
 use aegis_sync::ioc::{Ioc, IocKind};
-use aegis_update::signature::{ClaveActualizacion, UpdateKey};
+use aegis_update::signature::ClaveActualizacion;
+use aegis_update::ClaveFirmaHibrida;
 use aegis_wire::hecho::Hecho;
 use aegis_wire::motor::{ConfigMotor, Motor as MotorWire};
 
@@ -947,9 +949,18 @@ fn fase_taxii(sha: &str, v: &Veredicto) -> Result<(usize, Tlp), ErrorCircuito> {
 /// Es la invariante de la FASE 68 ejercida: el enjambre transporta autoridad, no la
 /// concede. Lo que llega no es una orden; es evidencia que exige K testigos, y el
 /// agente decide con el mismo criterio con el que decide ante una deteccion propia.
+///
+/// Y los K testigos son K identidades AUTENTICADAS (H-04): el plano de control
+/// matriculo a los tres agentes ANTES del corte, firmandoles una credencial, y el
+/// agente aislado la verifica con la clave publica del plano que lleva grabada. Lo
+/// que cuenta es esa identidad, nunca el nombre que declare el mensaje. Una orden
+/// que se colara aqui seguiria necesitando la firma del plano de control, que
+/// durante el corte nadie puede producir.
 fn fase_enjambre(sha: &str) -> usize {
+    // Semillas fijas: el recorrido tiene que salir igual hoy que mañana.
+    let plano = ClaveFirmaHibrida::desde_semillas(&[68u8; 32], &[86u8; 32]);
     let mut agente = Enjambre::nuevo(ConfigEnjambre {
-        clave_plano_control: clave_inservible(),
+        clave_plano_control: ClaveActualizacion::Hibrida(Box::new(plano.clave_verificacion())),
         saltos: 3,
         tasa: 100,
         umbral_corroboro: 3,
@@ -960,24 +971,12 @@ fn fase_enjambre(sha: &str) -> usize {
 
     let mut corroborados = 0;
     for (i, par) in ["agente-11", "agente-24", "agente-37"].iter().enumerate() {
-        let o = Observacion {
-            origen: (*par).to_string(),
-            indicador: Ioc {
-                kind: IocKind::FileSha256,
-                value: sha.to_string(),
-            },
-            tecnica: "T1204.002".into(),
-            confianza: 80,
-            vista_en: 1_741_078_900 + u64::try_from(i).unwrap_or(0),
+        let semilla = 11 + u8::try_from(i).unwrap_or(0);
+        let vista_en = 1_741_078_900 + u64::try_from(i).unwrap_or(0);
+        let Some(sobre) = observacion_matriculada(&plano, par, semilla, sha, vista_en) else {
+            continue;
         };
-        let sobre = Sobre {
-            tipo: TipoMensaje::Observacion,
-            saltos: 3,
-            cuerpo: o.a_bytes(),
-            // Una observacion NO lleva firma del plano de control: no manda nada.
-            firma: Vec::new(),
-        };
-        for s in agente.recibir(par, &sobre.a_bytes(), 1_741_078_901) {
+        for s in agente.recibir(par, &sobre, 1_741_078_901) {
             if matches!(s, SalidaEnjambre::Corroborado { .. }) {
                 corroborados += 1;
             }
@@ -986,17 +985,58 @@ fn fase_enjambre(sha: &str) -> usize {
     corroborados
 }
 
-/// Una clave de plano de control que no verifica nada.
+/// Lo que hace un agente matriculado al contar al enjambre lo que vio.
 ///
-/// Es **lo correcto** para esta parada: el circuito ejerce el camino del corte, en
-/// el que el agente no tiene forma de hablar con el plano de control. Si una orden
-/// se colara por aqui, esta clave garantiza que su firma no valida — que es
-/// exactamente lo que tiene que pasar.
-fn clave_inservible() -> ClaveActualizacion {
-    ClaveActualizacion::Clasica(
-        UpdateKey::from_bytes(&[0u8; 32])
-            .expect("una clave de ceros es un punto valido para este uso"),
-    )
+/// Al matricularlo, el plano de control le firmo una credencial con su CN y su
+/// clave publica hibrida; el agente firma la observacion con su clave privada y
+/// la manda junto a esa credencial. Asi un receptor aislado cuenta testigos por
+/// identidad autenticada, que es lo que impide que un solo equipo comprometido se
+/// haga pasar por K (H-04).
+///
+/// `semilla` deriva la clave del agente de forma determinista: es un recorrido
+/// reproducible, no una matriculacion de produccion. Devuelve `None` solo si una
+/// firma falla, que con contextos fijos no ocurre.
+#[must_use]
+pub fn observacion_matriculada(
+    plano: &ClaveFirmaHibrida,
+    cn: &str,
+    semilla: u8,
+    sha: &str,
+    vista_en: u64,
+) -> Option<Vec<u8>> {
+    let clave = ClaveFirmaHibrida::desde_semillas(&[semilla; 32], &[semilla ^ 0x5A; 32]);
+    let mut credencial = Credencial {
+        cn: cn.to_string(),
+        clave_par: clave.clave_verificacion().a_bytes().to_vec(),
+        valida_desde: vista_en.saturating_sub(86_400),
+        valida_hasta: vista_en.saturating_add(7 * 86_400),
+        firma_plano: Vec::new(),
+    };
+    credencial.firma_plano = plano
+        .firmar(&credencial.bytes_firmados(), CTX_CREDENCIAL)
+        .ok()?
+        .a_bytes();
+    let o = Observacion {
+        origen: cn.to_string(),
+        indicador: Ioc {
+            kind: IocKind::FileSha256,
+            value: sha.to_string(),
+        },
+        tecnica: "T1204.002".into(),
+        confianza: 80,
+        vista_en,
+    };
+    let firma = clave
+        .firmar(&o.bytes_firmados(&credencial), CTX_OBSERVACION)
+        .ok()?
+        .a_bytes();
+    let sobre = Sobre {
+        tipo: TipoMensaje::Observacion,
+        saltos: 3,
+        cuerpo: aegis_swarm::observacion::empaquetar(&credencial, &o),
+        firma,
+    };
+    Some(sobre.a_bytes())
 }
 
 /// Teje el linaje: red → fichero → proceso → identidad → respuesta.

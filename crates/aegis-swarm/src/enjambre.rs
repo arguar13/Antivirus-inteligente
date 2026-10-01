@@ -29,7 +29,16 @@
 //! 3. **Deduplicacion** — lo ya visto ni se procesa ni se reenvia. Es lo que
 //!    corta los caminos redundantes de la inundacion.
 //! 4. **Autenticidad** — al final, y segun la clase: firma del plano de control
-//!    para ordenes y artefactos, firma del par para observaciones.
+//!    para ordenes y artefactos; para observaciones, credencial del par firmada
+//!    por el plano de control MAS la firma del par ([`crate::credencial`]).
+//!
+//! # Quien atestigua no es quien entrega
+//!
+//! El `de` que recibe [`Enjambre::recibir`] es el vecino que ENTREGO el mensaje
+//! segun el transporte. Sirve para repartir la cuota de tasa y para nada mas: en
+//! una malla el que entrega casi nunca es el que emitio, y el `PeerId` de libp2p
+//! es efimero. El testigo que cuenta el quorum sale de la credencial verificada;
+//! ni `de` ni el campo `origen` del mensaje suman un testigo (H-04).
 //!
 //! # El aislamiento, que es el caso para el que existe la fase
 //!
@@ -51,7 +60,7 @@ use aegis_update::signature::ClaveActualizacion;
 use crate::artefacto::{Descriptor, Reensamblado, Trozo};
 use crate::error::ErrorEnjambre;
 use crate::mensaje::{Sobre, TipoMensaje};
-use crate::observacion::Observacion;
+use crate::observacion::{self, Observacion};
 use crate::orden::Orden;
 use crate::quorum::{Corroboro, Veredicto};
 
@@ -109,6 +118,11 @@ pub enum MotivoDescarte {
     TrozoInvalido,
     /// No quedan ranuras de reensamblado.
     SinRanura,
+    /// Un par matriculado firmo una observacion con un origen que no es el suyo.
+    ///
+    /// Es la senal mas util de la lista: la firma es buena, asi que quien intenta
+    /// el Sybil tiene una credencial de verdad y queda identificado por ella.
+    Suplantacion,
 }
 
 /// Lo que el enjambre decide que hay que hacer.
@@ -123,7 +137,7 @@ pub enum Salida {
     Corroborado {
         /// La observacion que cerro el quorum.
         observacion: Box<Observacion>,
-        /// Quienes lo vieron.
+        /// CN autenticados de quienes lo vieron (uno por credencial verificada).
         testigos: Vec<String>,
     },
     /// Un artefacto quedo completo y verificado.
@@ -296,7 +310,8 @@ impl Enjambre {
     ///
     /// `de` es la identidad **autenticada por el transporte** del par que lo
     /// entrego, no un campo del mensaje: si viniera dentro, cualquiera se haria
-    /// pasar por otro para gastarle la cuota.
+    /// pasar por otro para gastarle la cuota. Solo reparte la cuota: no es un
+    /// testigo del quorum (ver la doctrina del modulo).
     pub fn recibir(&mut self, de: &str, bytes: &[u8], ahora: u64) -> Vec<Salida> {
         // 1. TASA, antes de cualquier criptografia.
         if self.se_pasa_de_tasa(de, ahora) {
@@ -378,14 +393,21 @@ impl Enjambre {
     }
 
     fn recibir_observacion(&mut self, sobre: &Sobre, ahora: u64) -> Vec<Salida> {
-        let o = match Observacion::desde_bytes(&sobre.cuerpo) {
-            Ok(o) => o,
-            Err(_) => return vec![self.descartar(MotivoDescarte::Malformado)],
+        // El testigo sale de aqui y solo de aqui: credencial firmada por el plano
+        // de control, firma del par, origen = CN autenticado y dentro de la
+        // ventana. Lo que no pase no llega al quorum ni se reenvia.
+        let verificada = observacion::verificar(
+            &self.config.clave_plano_control,
+            &sobre.cuerpo,
+            &sobre.firma,
+            ahora,
+            self.corroboro.ventana_seg,
+        );
+        let (testigo, o) = match verificada {
+            Ok(v) => v,
+            Err(e) => return vec![self.descartar(motivo_de(&e))],
         };
-        if o.validar().is_err() {
-            return vec![self.descartar(MotivoDescarte::Malformado)];
-        }
-        match self.corroboro.incorporar(&o, ahora) {
+        match self.corroboro.incorporar(&testigo, &o, ahora) {
             Veredicto::Corroborado {
                 observacion,
                 testigos,
@@ -480,10 +502,27 @@ impl Enjambre {
     }
 }
 
+/// Traduce el porque de un rechazo a su motivo de telemetria.
+fn motivo_de(e: &ErrorEnjambre) -> MotivoDescarte {
+    match e {
+        ErrorEnjambre::FirmaInvalida(_) => MotivoDescarte::FirmaInvalida,
+        ErrorEnjambre::OrigenSuplantado { .. } => MotivoDescarte::Suplantacion,
+        ErrorEnjambre::Caducada { .. } | ErrorEnjambre::DelFuturo { .. } => {
+            MotivoDescarte::Caducado
+        }
+        ErrorEnjambre::AccionNoPropagable(_) => MotivoDescarte::ClaseProhibida,
+        ErrorEnjambre::EpocaSuperada { .. } => MotivoDescarte::Reproduccion,
+        _ => MotivoDescarte::Malformado,
+    }
+}
+
 #[cfg(test)]
 mod pruebas {
     use super::*;
+    use crate::credencial::{Credencial, CTX_CREDENCIAL};
+    use crate::observacion::CTX_OBSERVACION;
     use crate::orden::Accion;
+    use aegis_pqc::firma_hibrida::ClaveFirmaHibrida;
 
     /// Clave que no verifica nada: sirve para los caminos que no dependen de la
     /// criptografia (tasa, deduplicacion, formato). Los caminos que SI dependen
@@ -505,6 +544,124 @@ mod pruebas {
         }
     }
 
+    /// Un plano de control y pares matriculados, con claves hibridas de verdad.
+    ///
+    /// Hace falta para todo lo que tiene que LLEGAR al quorum o reenviarse: una
+    /// observacion sin credencial valida se descarta antes.
+    struct Flota {
+        plano: ClaveFirmaHibrida,
+    }
+
+    struct Par {
+        clave: ClaveFirmaHibrida,
+        credencial: Credencial,
+    }
+
+    impl Flota {
+        fn nueva() -> Flota {
+            Flota {
+                plano: ClaveFirmaHibrida::desde_semillas(&[42u8; 32], &[99u8; 32]),
+            }
+        }
+
+        fn config(&self) -> ConfigEnjambre {
+            ConfigEnjambre {
+                clave_plano_control: ClaveActualizacion::Hibrida(Box::new(
+                    self.plano.clave_verificacion(),
+                )),
+                ..config()
+            }
+        }
+
+        /// Lo que hace el plano de control al matricular: firma la credencial.
+        fn matricular(&self, cn: &str, semilla: u8) -> Par {
+            let clave = ClaveFirmaHibrida::desde_semillas(&[semilla; 32], &[semilla ^ 0x5A; 32]);
+            let mut credencial = Credencial {
+                cn: cn.to_string(),
+                clave_par: clave.clave_verificacion().a_bytes().to_vec(),
+                valida_desde: 0,
+                valida_hasta: 86_400,
+                firma_plano: Vec::new(),
+            };
+            credencial.firma_plano = self
+                .plano
+                .firmar(&credencial.bytes_firmados(), CTX_CREDENCIAL)
+                .expect("el plano de control firma")
+                .a_bytes();
+            Par { clave, credencial }
+        }
+    }
+
+    impl Par {
+        /// Una observacion firmada por este par. `origen` es lo que DECLARA, que
+        /// puede no ser su CN: es justo lo que hace un Sybil.
+        fn sobre(&self, origen: &str, valor: &str, vista_en: u64, saltos: u8) -> Vec<u8> {
+            use aegis_sync::ioc::{Ioc, IocKind};
+            let o = Observacion {
+                origen: origen.to_string(),
+                indicador: Ioc {
+                    kind: IocKind::FileSha256,
+                    value: valor.to_string(),
+                },
+                tecnica: "T1486".to_string(),
+                confianza: 90,
+                vista_en,
+            };
+            let firma = self
+                .clave
+                .firmar(&o.bytes_firmados(&self.credencial), CTX_OBSERVACION)
+                .expect("el par firma")
+                .a_bytes();
+            Sobre {
+                tipo: TipoMensaje::Observacion,
+                saltos,
+                cuerpo: observacion::empaquetar(&self.credencial, &o),
+                firma,
+            }
+            .a_bytes()
+        }
+    }
+
+    fn corroboro_de(s: &[Salida]) -> Option<Vec<String>> {
+        s.iter().find_map(|x| match x {
+            Salida::Corroborado { testigos, .. } => Some(testigos.clone()),
+            _ => None,
+        })
+    }
+
+    /// Una observacion con una credencial que el plano de control NO firmo y sin
+    /// firma de par: llega hasta la criptografia y cae ahi.
+    fn obs_sin_firma(origen: &str, valor: &str, saltos: u8) -> Vec<u8> {
+        use aegis_sync::ioc::{Ioc, IocKind};
+        let credencial = Credencial {
+            cn: origen.to_string(),
+            clave_par: vec![0u8; 32],
+            valida_desde: 0,
+            valida_hasta: 3600,
+            firma_plano: vec![0u8; 64],
+        };
+        let o = Observacion {
+            origen: origen.to_string(),
+            indicador: Ioc {
+                kind: IocKind::FileSha256,
+                value: valor.to_string(),
+            },
+            tecnica: "T1486".to_string(),
+            confianza: 90,
+            vista_en: 0,
+        };
+        Sobre {
+            tipo: TipoMensaje::Observacion,
+            saltos,
+            cuerpo: observacion::empaquetar(&credencial, &o),
+            firma: vec![0u8; 64],
+        }
+        .a_bytes()
+    }
+
+    /// Observacion con el formato ANTERIOR, sin credencial: sirve para las
+    /// cotas que actuan antes de la criptografia (tasa, deduplicacion, memoria).
+    /// Al analizarla se descarta por formato, sin gastar una verificacion.
     fn obs_sobre(origen: &str, valor: &str, saltos: u8) -> Vec<u8> {
         use aegis_sync::ioc::{Ioc, IocKind};
         let o = Observacion {
@@ -613,26 +770,57 @@ mod pruebas {
     /// reenvian los tres y saturan la red local.
     #[test]
     fn los_saltos_se_agotan_y_el_reenvio_para() {
-        let mut e = Enjambre::nuevo(config());
-        let s = e.recibir("a", &obs_sobre("e1", "h1", 3), 0);
-        assert!(s.iter().any(|x| matches!(x, Salida::Reenviar(_))));
+        let flota = Flota::nueva();
+        let e1 = flota.matricular("e1", 1);
+        let mut e = Enjambre::nuevo(flota.config());
+        let s = e.recibir("a", &e1.sobre("e1", "h1", 0, 3), 0);
+        assert!(s.iter().any(|x| matches!(x, Salida::Reenviar(_))), "{s:?}");
 
         // Con un salto restante ya no se reenvia: este es el ultimo.
-        let s = e.recibir("a", &obs_sobre("e2", "h2", 1), 0);
+        let s = e.recibir("a", &e1.sobre("e1", "h2", 0, 1), 0);
         assert!(
             !s.iter().any(|x| matches!(x, Salida::Reenviar(_))),
             "un mensaje sin saltos no se reenvia: {s:?}"
         );
 
         // Y con cero tampoco, sin restar por debajo de cero.
-        let s = e.recibir("a", &obs_sobre("e3", "h3", 0), 0);
+        let s = e.recibir("a", &e1.sobre("e1", "h3", 0, 0), 0);
+        assert!(!s.iter().any(|x| matches!(x, Salida::Reenviar(_))));
+    }
+
+    /// Lo que no se autentica ni cuenta ni se reenvia: la malla no amplifica
+    /// basura. Sin credencial cae por formato; con una credencial que el plano
+    /// de control no firmo, cae por firma.
+    #[test]
+    fn una_observacion_sin_credencial_valida_ni_cuenta_ni_se_reenvia() {
+        let mut e = Enjambre::nuevo(config());
+        let s = e.recibir("a", &obs_sobre("e1", "h1", 3), 0);
+        assert!(
+            matches!(
+                s.first(),
+                Some(Salida::Descartado(MotivoDescarte::Malformado))
+            ),
+            "{s:?}"
+        );
+        assert!(!s.iter().any(|x| matches!(x, Salida::Reenviar(_))));
+
+        let s = e.recibir("a", &obs_sin_firma("e1", "h1", 3), 0);
+        assert!(
+            matches!(
+                s.first(),
+                Some(Salida::Descartado(MotivoDescarte::FirmaInvalida))
+            ),
+            "{s:?}"
+        );
         assert!(!s.iter().any(|x| matches!(x, Salida::Reenviar(_))));
     }
 
     #[test]
     fn el_reenvio_lleva_un_salto_menos() {
-        let mut e = Enjambre::nuevo(config());
-        let s = e.recibir("a", &obs_sobre("e1", "h", 3), 0);
+        let flota = Flota::nueva();
+        let e1 = flota.matricular("e1", 1);
+        let mut e = Enjambre::nuevo(flota.config());
+        let s = e.recibir("a", &e1.sobre("e1", "h", 0, 3), 0);
         let reenvio = s
             .iter()
             .find_map(|x| match x {
@@ -644,27 +832,54 @@ mod pruebas {
         assert_eq!(sobre.saltos, 2);
     }
 
-    /// TRES PARES DISTINTOS, SIN PLANO DE CONTROL: el caso que justifica la fase.
+    /// PUERTA H-04 (Sybil). Esta prueba demostraba el fallo: el mismo vecino
+    /// `"v"` mandaba origenes `e1`, `e2` y `e3` y cerraba el quorum el solo,
+    /// porque se contaba el campo declarado. Ahora `v` tiene UNA credencial y
+    /// firma con ella declarando tres nombres ajenos: las tres son suplantaciones
+    /// y la suya propia es un solo testigo. Si el quorum vuelve a contar
+    /// `origen`, esta prueba cae.
     #[test]
-    fn tres_pares_distintos_corroboran_y_el_nucleo_lo_saca_una_vez() {
-        let mut e = Enjambre::nuevo(config());
+    fn puerta_h04_un_nodo_con_varias_identidades_declaradas_no_alcanza_el_quorum() {
+        let flota = Flota::nueva();
+        let v = flota.matricular("v", 7);
+        let mut e = Enjambre::nuevo(flota.config());
         e.declarar_enlace(EstadoEnlace::Aislado);
-        assert!(e
-            .recibir("v", &obs_sobre("e1", "hash", 3), 0)
-            .iter()
-            .all(|s| !matches!(s, Salida::Corroborado { .. })));
-        assert!(e
-            .recibir("v", &obs_sobre("e2", "hash", 3), 0)
-            .iter()
-            .all(|s| !matches!(s, Salida::Corroborado { .. })));
-        let s = e.recibir("v", &obs_sobre("e3", "hash", 3), 0);
-        let c = s
-            .iter()
-            .find_map(|x| match x {
-                Salida::Corroborado { testigos, .. } => Some(testigos.clone()),
-                _ => None,
-            })
-            .expect("el tercer par distinto cierra el quorum");
+
+        for origen in ["e1", "e2", "e3"] {
+            let s = e.recibir("v", &v.sobre(origen, "hash", 0, 3), 0);
+            assert!(
+                matches!(
+                    s.first(),
+                    Some(Salida::Descartado(MotivoDescarte::Suplantacion))
+                ),
+                "firmar como {origen} con la credencial de v: {s:?}"
+            );
+            assert!(corroboro_de(&s).is_none());
+        }
+        let s = e.recibir("v", &v.sobre("v", "hash", 0, 3), 0);
+        assert!(corroboro_de(&s).is_none(), "un nodo cerro el quorum: {s:?}");
+        assert_eq!(e.contadores().de(MotivoDescarte::Suplantacion), 3);
+    }
+
+    /// TRES PARES MATRICULADOS DISTINTOS, SIN PLANO DE CONTROL: el caso que
+    /// justifica la fase. Y los entrega todos el MISMO vecino: quien reenvia no
+    /// importa, importa quien firmo.
+    #[test]
+    fn tres_pares_matriculados_corroboran_aunque_los_entregue_el_mismo_vecino() {
+        let flota = Flota::nueva();
+        let pares = [
+            flota.matricular("e1", 1),
+            flota.matricular("e2", 2),
+            flota.matricular("e3", 3),
+        ];
+        let mut e = Enjambre::nuevo(flota.config());
+        e.declarar_enlace(EstadoEnlace::Aislado);
+
+        let s1 = e.recibir("v", &pares[0].sobre("e1", "hash", 0, 3), 0);
+        let s2 = e.recibir("v", &pares[1].sobre("e2", "hash", 0, 3), 0);
+        assert!(corroboro_de(&s1).is_none() && corroboro_de(&s2).is_none());
+        let s3 = e.recibir("v", &pares[2].sobre("e3", "hash", 0, 3), 0);
+        let c = corroboro_de(&s3).expect("el tercer par distinto cierra el quorum");
         assert_eq!(c, vec!["e1", "e2", "e3"]);
     }
 
@@ -682,10 +897,13 @@ mod pruebas {
             "el aislamiento no puede rebajar el quorum"
         );
 
-        // Y en la practica: dos pares siguen sin bastar estando aislado.
-        e.recibir("v", &obs_sobre("e1", "h", 3), 0);
-        let s = e.recibir("v", &obs_sobre("e2", "h", 3), 0);
-        assert!(!s.iter().any(|x| matches!(x, Salida::Corroborado { .. })));
+        // Y en la practica: dos pares matriculados siguen sin bastar aislado.
+        let flota = Flota::nueva();
+        let mut e = Enjambre::nuevo(flota.config());
+        e.declarar_enlace(EstadoEnlace::Aislado);
+        e.recibir("v", &flota.matricular("e1", 1).sobre("e1", "h", 0, 3), 0);
+        let s = e.recibir("v", &flota.matricular("e2", 2).sobre("e2", "h", 0, 3), 0);
+        assert!(corroboro_de(&s).is_none(), "{s:?}");
     }
 
     #[test]
@@ -778,7 +996,7 @@ mod pruebas {
             tasa: 2,
             ..config()
         });
-        e.recibir("a", &obs_sobre("e1", "h", 3), 0);
+        e.recibir("a", &obs_sobre("e1", "h", 3), 0); // sin credencial: malformado
         e.recibir("a", &obs_sobre("e1", "h", 3), 0); // duplicado
         for i in 0..10 {
             e.recibir("a", &obs_sobre("e1", &format!("x{i}"), 3), 0); // tasa

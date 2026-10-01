@@ -34,9 +34,10 @@ use aegis_swarm::mensaje::{Sobre, TipoMensaje};
 use aegis_swarm::observacion::Observacion;
 use aegis_swarm::orden::{Accion, Orden};
 use aegis_sync::ioc::{Ioc, IocKind};
-use aegis_tejido::circuito::{enriquecer_sin_salida, T0};
+use aegis_tejido::circuito::{enriquecer_sin_salida, observacion_matriculada, T0};
 use aegis_tejido::traduccion;
 use aegis_update::signature::{ClaveActualizacion, UpdateKey};
+use aegis_update::ClaveFirmaHibrida;
 
 /// El resumen de la muestra que el agente aislado tiene delante.
 const SHA: &str = "9f2b1c7e3a4d5068b19c2e4f7a8d0b3c6e15f92a4d7b0c38e6a1f45d29b7c803";
@@ -154,29 +155,30 @@ fn el_enriquecimiento_degrada_sin_mentir() {
 /// Tres pares distintos ven el mismo indicador y el agente aislado lo corrobora.
 /// No es una orden: es evidencia que la politica local usa con el mismo criterio
 /// con el que usa una deteccion propia.
+///
+/// Los tres se matricularon ANTES del corte: el plano de control les firmo una
+/// credencial, y el agente aislado la verifica con la clave publica que lleva
+/// grabada. La clave privada del plano no hace falta durante el corte; lo que
+/// cuenta el quorum son identidades autenticadas, no nombres declarados (H-04).
 #[test]
 fn la_flota_se_corrobora_sin_consola() {
-    let mut agente = agente_aislado();
+    let plano = ClaveFirmaHibrida::desde_semillas(&[68u8; 32], &[86u8; 32]);
+    let mut agente = Enjambre::nuevo(ConfigEnjambre {
+        clave_plano_control: ClaveActualizacion::Hibrida(Box::new(plano.clave_verificacion())),
+        saltos: 3,
+        tasa: 100,
+        umbral_corroboro: 3,
+        ventana_corroboro_seg: 3600,
+    });
+    agente.declarar_enlace(EstadoEnlace::Aislado);
     let mut corroboros = 0;
 
     for (i, par) in ["agente-11", "agente-24", "agente-37"].iter().enumerate() {
-        let o = Observacion {
-            origen: (*par).to_string(),
-            indicador: Ioc {
-                kind: IocKind::FileSha256,
-                value: SHA.to_string(),
-            },
-            tecnica: "T1204.002".into(),
-            confianza: 80,
-            vista_en: 1_741_078_900 + u64::try_from(i).unwrap_or(0),
-        };
-        let sobre = Sobre {
-            tipo: TipoMensaje::Observacion,
-            saltos: 3,
-            cuerpo: o.a_bytes(),
-            firma: Vec::new(),
-        };
-        for s in agente.recibir(par, &sobre.a_bytes(), 1_741_078_901) {
+        let semilla = 11 + u8::try_from(i).unwrap_or(0);
+        let vista_en = 1_741_078_900 + u64::try_from(i).unwrap_or(0);
+        let sobre = observacion_matriculada(&plano, par, semilla, SHA, vista_en)
+            .expect("el par matriculado firma su observacion");
+        for s in agente.recibir(par, &sobre, 1_741_078_901) {
             if let SalidaEnjambre::Corroborado {
                 observacion,
                 testigos,
