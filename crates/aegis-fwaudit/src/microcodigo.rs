@@ -447,6 +447,7 @@ pub fn evaluar(cpu: &Result<Cpu, String>, referencia: &Result<Referencia, String
 #[cfg(test)]
 mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     /// Construye una actualizacion de Intel REAL byte a byte, con su suma bien.
     fn intel(
@@ -663,9 +664,12 @@ mod pruebas {
     fn los_ficheros_reales_de_intel_suman_cero_todos() {
         let dir = Path::new("/lib/firmware/intel-ucode");
         let Ok(e) = std::fs::read_dir(dir) else {
-            eprintln!(
-                "NO APLICABLE: {} no existe (paquete intel-microcode no instalado)",
-                dir.display()
+            omitir(
+                &format!(
+                    "{} no existe (paquete intel-microcode no instalado)",
+                    dir.display()
+                ),
+                Requisito::Herramienta("intel-microcode"),
             );
             return;
         };
@@ -696,6 +700,7 @@ mod pruebas {
     #[test]
     fn la_cpu_real_de_esta_maquina_contra_su_microcodigo_del_fabricante() {
         let Ok(t) = std::fs::read_to_string("/proc/cpuinfo") else {
+            omitir("/proc/cpuinfo no se puede leer", Requisito::Entorno);
             return;
         };
         let c = analizar_cpuinfo(&t);

@@ -17,13 +17,17 @@ use std::time::{Duration, Instant};
 use aegis_agent::bpf;
 use aegis_agent::decode::decode;
 use aegis_agent::TelemetryEvent;
+use aegis_prueba::{omitir, Requisito};
 
 const MARCA: &str = "aegis-marca-de-ejecucion";
 
 #[test]
 fn una_ejecucion_llega_con_su_ruta_y_sus_argumentos() {
     if let Err(e) = bpf::preflight() {
-        eprintln!("SALTADA: el entorno no soporta la telemetria eBPF: {e}");
+        omitir(
+            &format!("el entorno no soporta la telemetria eBPF: {e}"),
+            Requisito::Ebpf,
+        );
         return;
     }
     let verdadero = ["/bin/true", "/usr/bin/true"]

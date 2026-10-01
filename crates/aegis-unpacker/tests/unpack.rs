@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_scan::yara::YaraEngine;
 use aegis_unpacker::{desempaquetar, TraceConfig};
 
@@ -66,11 +67,17 @@ fn compilar_stub() -> Option<PathBuf> {
 #[test]
 fn el_desempaquetado_saca_a_la_luz_codigo_que_el_disco_esconde() {
     if !aegis_unpacker::soportado() {
-        eprintln!("OMITIDA: sin seccomp no se puede confinar el desempaquetado");
+        omitir(
+            "sin seccomp no se puede confinar el desempaquetado",
+            Requisito::Seccomp,
+        );
         return;
     }
     let Some(stub) = compilar_stub() else {
-        eprintln!("OMITIDA: no hay compilador de C para el empaquetador de prueba");
+        omitir(
+            "no hay compilador de C (o no compila) para el empaquetador de prueba",
+            Requisito::Herramienta("cc"),
+        );
         return;
     };
 
@@ -129,6 +136,10 @@ fn un_binario_que_no_se_autoextrae_no_bloquea_el_desempaquetador() {
     // que rendirse limpiamente al agotar su presupuesto o al terminar el
     // proceso, nunca colgarse.
     if !aegis_unpacker::soportado() {
+        omitir(
+            "sin seccomp no se puede confinar el desempaquetado",
+            Requisito::Seccomp,
+        );
         return;
     }
     let cfg = TraceConfig {
@@ -150,9 +161,17 @@ fn el_proceso_desempaquetado_no_queda_vivo() {
     // Desempaquetar ejecuta codigo posiblemente malicioso: no puede quedar ni un
     // proceso vivo despues, pase lo que pase.
     if !aegis_unpacker::soportado() {
+        omitir(
+            "sin seccomp no se puede confinar el desempaquetado",
+            Requisito::Seccomp,
+        );
         return;
     }
     let Some(stub) = compilar_stub() else {
+        omitir(
+            "no hay compilador de C (o no compila) para el empaquetador de prueba",
+            Requisito::Herramienta("cc"),
+        );
         return;
     };
     let cfg = TraceConfig::default();

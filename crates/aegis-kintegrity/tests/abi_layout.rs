@@ -9,6 +9,8 @@
 
 use std::process::Command;
 
+use aegis_prueba::{omitir, Requisito};
+
 /// Offset que el compilador de C calcula para un campo, o `None` si no se pudo.
 fn offsets_de_c() -> Option<std::collections::HashMap<String, usize>> {
     let dir = raiz_crate();
@@ -61,7 +63,10 @@ fn el_layout_de_c_y_el_de_rust_coinciden() {
     let Some(c) = offsets_de_c() else {
         // Sin compilador de C no se puede cotejar. No es un pase: es un salto
         // explicito, igual que en el resto de la puerta de ABI del proyecto.
-        eprintln!("OMITIDA: no hay compilador de C para cotejar el layout");
+        omitir(
+            "no hay compilador de C (o no compila la sonda) para cotejar el layout",
+            Requisito::Herramienta("cc"),
+        );
         return;
     };
 

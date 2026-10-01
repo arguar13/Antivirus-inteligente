@@ -830,6 +830,7 @@ fn leer_enlace_exe(pid: i32) -> String {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     fn sh(guion: &str) -> Config {
         let mut c = Config::nueva(PathBuf::from("/bin/sh"));
@@ -850,6 +851,10 @@ mod pruebas {
     #[test]
     fn una_muestra_que_ejecuta_deja_su_rastro() {
         if !hay_ptrace() {
+            omitir(
+                "no se puede trazar con ptrace (hace falta CAP_SYS_PTRACE)",
+                Requisito::Ptrace,
+            );
             return;
         }
         let mut v: Vec<Evento> = Vec::new();
@@ -875,6 +880,10 @@ mod pruebas {
         // morirse. Sin seguir a los hijos, la traza se queda en blanco justo
         // cuando empieza lo interesante.
         if !hay_ptrace() {
+            omitir(
+                "no se puede trazar con ptrace (hace falta CAP_SYS_PTRACE)",
+                Requisito::Ptrace,
+            );
             return;
         }
         let mut v: Vec<Evento> = Vec::new();
@@ -901,6 +910,10 @@ mod pruebas {
     #[test]
     fn escribir_un_fichero_se_distingue_de_leerlo() {
         if !hay_ptrace() {
+            omitir(
+                "no se puede trazar con ptrace (hace falta CAP_SYS_PTRACE)",
+                Requisito::Ptrace,
+            );
             return;
         }
         let dir = std::env::temp_dir().join(format!("aegis-traza-{}", std::process::id()));
@@ -943,6 +956,10 @@ mod pruebas {
         // bloqueado en waitpid y una comprobacion entre iteraciones no llegaria
         // nunca.
         if !hay_ptrace() {
+            omitir(
+                "no se puede trazar con ptrace (hace falta CAP_SYS_PTRACE)",
+                Requisito::Ptrace,
+            );
             return;
         }
         let mut cfg = sh("sleep 600");
@@ -975,6 +992,10 @@ mod pruebas {
         // Un bucle de llamadas llena el canal, la memoria y el informe. Al llegar
         // al tope se deja de emitir y se DICE cuanto se perdio.
         if !hay_ptrace() {
+            omitir(
+                "no se puede trazar con ptrace (hace falta CAP_SYS_PTRACE)",
+                Requisito::Ptrace,
+            );
             return;
         }
         let mut cfg = sh("for i in $(seq 1 400); do /bin/true; done");
@@ -1001,6 +1022,10 @@ mod pruebas {
         // se muere dejaria al hijo corriendo suelto dentro de la maquina que se
         // suponia contenida.
         if !hay_ptrace() {
+            omitir(
+                "no se puede trazar con ptrace (hace falta CAP_SYS_PTRACE)",
+                Requisito::Ptrace,
+            );
             return;
         }
         let mut cfg = sh("sleep 600 & sleep 600");
@@ -1013,6 +1038,10 @@ mod pruebas {
     #[test]
     fn un_programa_que_no_existe_no_cuelga_al_trazador() {
         if !hay_ptrace() {
+            omitir(
+                "no se puede trazar con ptrace (hace falta CAP_SYS_PTRACE)",
+                Requisito::Ptrace,
+            );
             return;
         }
         let mut cfg = Config::nueva(PathBuf::from("/no/existe/esto/de/aqui"));

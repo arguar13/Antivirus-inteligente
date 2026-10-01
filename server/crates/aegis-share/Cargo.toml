@@ -19,3 +19,8 @@ serde_json = "1"
 # El resumen del contenido de un artefacto, para que el descriptor que firma el
 # plano de control cubra lo que de verdad va dentro.
 sha2 = "0.10"
+
+[dev-dependencies]
+# Omitir una prueba por falta de PostgreSQL, Redis o datos se dice, se cuenta
+# y, en make ci, falla (H-10/H-20).
+aegis-prueba = { path = "../../../crates/aegis-prueba" }

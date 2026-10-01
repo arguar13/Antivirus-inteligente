@@ -556,6 +556,7 @@ impl Drop for Supervisado {
 mod pruebas {
     use super::*;
     use crate::seccomp::{compile_lista_blanca, ListaBlanca, Resto};
+    use aegis_prueba::{omitir, Requisito};
 
     fn filtro_aprendizaje() -> Vec<SockFilter> {
         compile_lista_blanca(&ListaBlanca {
@@ -575,7 +576,10 @@ mod pruebas {
                 assert_eq!(r as usize, std::mem::size_of::<RespSeccomp>());
                 assert_eq!(d as usize, std::mem::size_of::<DatosSeccomp>());
             }
-            Err(e) => eprintln!("NO APLICABLE: {e}"),
+            Err(e) => omitir(
+                &format!("el kernel no da los tamanos de seccomp_notif: {e}"),
+                Requisito::Seccomp,
+            ),
         }
     }
 

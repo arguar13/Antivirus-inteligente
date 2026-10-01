@@ -1230,6 +1230,7 @@ pub fn evaluar(esp: &Espacio, base: &LineaBase) -> Vec<Comprobacion> {
 #[cfg(test)]
 pub(crate) mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     /// Codifica un `PkgLength` que cubre `contenido` bytes MAS su propia
     /// codificacion, como exige la especificacion.
@@ -1524,7 +1525,7 @@ pub(crate) mod pruebas {
     fn la_dsdt_real_de_esta_maquina_se_decodifica_entera() {
         let c = crate::acpi::leer_tablas_del_sistema();
         if c.por_firma(b"DSDT").is_none() {
-            eprintln!("NO APLICABLE: sin DSDT");
+            omitir("esta maquina no expone la DSDT", Requisito::Acpi);
             return;
         }
         let smi = crate::tablas::decodificar(&c).fadt.map(|f| f.smi_cmd);

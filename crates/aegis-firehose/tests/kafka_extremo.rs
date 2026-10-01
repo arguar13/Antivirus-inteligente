@@ -17,6 +17,7 @@ use aegis_firehose::bomba::Bomba;
 use aegis_firehose::diario::{Config, Diario, MAX_REGISTRO};
 use aegis_firehose::kafka::{ConfigKafka, DestinoKafka};
 use aegis_firehose::reintento::Politica;
+use aegis_prueba::{omitir, Requisito};
 
 fn entorno() -> Option<(String, String)> {
     Some((
@@ -46,7 +47,10 @@ fn temporal() -> Temporal {
 #[test]
 fn la_auditoria_llega_al_corredor_y_el_diario_queda_vacio() {
     let Some((corredores, tema)) = entorno() else {
-        eprintln!("OMITIDA: no hay corredor de Kafka (ver tools/verificar-kafka.sh)");
+        omitir(
+            "no hay corredor de Kafka (ver tools/verificar-kafka.sh)",
+            Requisito::Kafka,
+        );
         return;
     };
     let t = temporal();

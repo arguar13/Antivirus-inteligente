@@ -138,7 +138,7 @@ fi
 echo "==> AegisFirmware+: el microcodigo REAL del fabricante, integro"
 if cargo test -p aegis-fwaudit --quiet --lib -- microcodigo::pruebas::los_ficheros_reales --nocapture \
     >"$TMP/ucode.log" 2>"$TMP/ucode.err"; then
-    L=$(grep -E 'microcodigo de Intel real|NO APLICABLE' "$TMP/ucode.err" | head -1)
+    L=$(grep -E 'microcodigo de Intel real|OMITIDA' "$TMP/ucode.err" | head -1)
     echo "    ${VERDE}OK${FIN} ${L}"
 else
     fallo "algun fichero del fabricante no suma cero" "$TMP/ucode.err"

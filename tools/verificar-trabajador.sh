@@ -40,7 +40,8 @@ else
 fi
 
 echo "==> Trabajador: confinamiento real contra el kernel (root)"
-if AEGIS_EXIGIR_ROOT=1 cargo test -q -p aegis-trabajador --features prueba-fallos \
+if AEGIS_EXIGIR="${AEGIS_EXIGIR:+$AEGIS_EXIGIR,}root" cargo test -q -p aegis-trabajador \
+    --features prueba-fallos \
     --test confinamiento_real -- --test-threads=1 > "$TMP/real.log" 2>&1; then
     echo "    ${VERDE}OK${FIN} ($(grep -h '^test result' "$TMP/real.log" | tail -1))"
     echo "    ${GRIS}Sin ficheros ni red desde dentro; panico, bomba de memoria y bucle${FIN}"

@@ -36,6 +36,9 @@ PAQUETES=(
     cloud-image-utils e2fsprogs
     # pruebas de integracion del plano de control
     postgresql redis-server
+    # testigos y material de las pruebas del agente: make ci no admite que se
+    # omitan por su falta (aegis_prueba, tools/config/omisiones.toml)
+    lld nftables python3 default-jre-headless
     # actions/checkout es JavaScript
     nodejs
 )
@@ -46,7 +49,7 @@ comprobar() {
     if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then ok "KVM"; else falta "KVM (/dev/kvm): la matriz de kernels no puede arrancar"; fi
     if [ -n "${HOME:-}" ]; then ok "HOME"; else falta "HOME sin definir (la unidad del runner necesita User=root)"; fi
     for b in clang qemu-system-x86_64 qemu-system-aarch64 cloud-localds mkfs.ext4 readelf nm \
-             psql redis-server node; do
+             psql redis-server node lld-link nft python3 java; do
         if command -v "$b" >/dev/null 2>&1; then ok "$b"; else falta "$b"; fi
     done
     for b in cargo rustup cargo-deny cargo-audit cargo-vet cargo-fuzz; do

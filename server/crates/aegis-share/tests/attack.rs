@@ -10,6 +10,7 @@
 //! Los ficheros los descarga `tools/verificar-conocimiento.sh` en
 //! `/opt/aegis-comparativa/attack`; sin ellos, la prueba se OMITE y lo dice.
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_share::stix::Paquete;
 use serde_json::Value;
 
@@ -21,7 +22,7 @@ fn attack_entero_ida_y_vuelta_sin_perder_nada() {
     for coleccion in ["enterprise-attack", "ics-attack", "mobile-attack"] {
         let ruta = format!("{DIR}/{coleccion}.json");
         let Ok(texto) = std::fs::read_to_string(&ruta) else {
-            eprintln!("OMITIDA: no esta {ruta}");
+            omitir(&format!("no esta {ruta}"), Requisito::Attack);
             return;
         };
         // La referencia: el documento analizado entero por serde_json.

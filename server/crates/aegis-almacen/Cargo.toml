@@ -37,3 +37,6 @@ thiserror = "2"
 # ejecutor REAL del endpoint sobre tablas REALES de la maquina.
 aegis-hunt = { path = "../../../crates/aegis-hunt" }
 aegis-estado = { path = "../../../crates/aegis-estado" }
+# Omitir una prueba por falta de PostgreSQL, Redis o datos se dice, se cuenta
+# y, en make ci, falla (H-10/H-20).
+aegis-prueba = { path = "../../../crates/aegis-prueba" }

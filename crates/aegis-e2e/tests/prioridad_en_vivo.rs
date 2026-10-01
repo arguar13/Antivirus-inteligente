@@ -25,6 +25,7 @@ use aegis_agent::bpf;
 use aegis_agent::capacidades::Familia;
 use aegis_agent::decode::decode;
 use aegis_agent::TelemetryEvent;
+use aegis_prueba::{omitir, Requisito};
 
 const EJECUCIONES: u64 = 200;
 const APERTURAS: usize = 20_000;
@@ -32,7 +33,10 @@ const APERTURAS: usize = 20_000;
 #[test]
 fn con_el_ring_saturado_ninguna_ejecucion_se_pierde() {
     if let Err(e) = bpf::preflight() {
-        eprintln!("SALTADA: el entorno no soporta la telemetria eBPF: {e}");
+        omitir(
+            &format!("el entorno no soporta la telemetria eBPF: {e}"),
+            Requisito::Ebpf,
+        );
         return;
     }
     let dir = std::env::temp_dir().join(format!("aegis-prioridad-{}", std::process::id()));
@@ -128,9 +132,10 @@ fn con_el_ring_saturado_ninguna_ejecucion_se_pierde() {
     let _ = std::fs::remove_dir_all(&dir);
 
     if !stats.plan.activos.iter().any(|a| a == "aegis_tp_openat") {
-        eprintln!(
-            "NO APLICA: la sonda de openat no esta activa en este kernel (declarado); \
-             sin ella no se puede saturar el ring con prioridad baja"
+        omitir(
+            "la sonda de openat no esta activa en este kernel (declarado); \
+             sin ella no se puede saturar el ring con prioridad baja",
+            Requisito::Sonda("aegis_tp_openat"),
         );
         return;
     }

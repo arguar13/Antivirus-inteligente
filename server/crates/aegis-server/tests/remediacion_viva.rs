@@ -21,6 +21,7 @@ use aegis_itdr::kerberos::{EventoKdc, TipoCifrado};
 use aegis_itdr::{ClaseAmenaza, Deteccion, Severidad};
 use aegis_orchestrator::{AccionRemediacion, EstadoPlaybook, Objetivo};
 use aegis_orchestrator::{EjecutorRemediacion, Orquestador};
+use aegis_prueba::{omitir, Requisito};
 use aegis_server::almacen::Almacen;
 use aegis_server::dominio::ServicioFlota;
 use aegis_server::itdr::TelemetriaIdentidad;
@@ -83,7 +84,10 @@ fn telemetria_golden(cuenta: &str) -> TelemetriaIdentidad {
 #[tokio::test]
 async fn dos_instancias_a_la_vez_solo_abren_una_remediacion() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL en {}", url_pg());
+        omitir(
+            &format!("no hay PostgreSQL en {}", url_pg()),
+            Requisito::Postgresql,
+        );
         return;
     };
     let cn = cn_unico("cerrojo");
@@ -126,7 +130,7 @@ async fn dos_instancias_a_la_vez_solo_abren_una_remediacion() {
 #[tokio::test]
 async fn tras_concluir_el_enfriamiento_impide_relanzar_y_luego_deja() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL");
+        omitir("no hay PostgreSQL", Requisito::Postgresql);
         return;
     };
     let cn = cn_unico("enfriamiento");
@@ -211,7 +215,7 @@ async fn tras_concluir_el_enfriamiento_impide_relanzar_y_luego_deja() {
 #[tokio::test]
 async fn el_ejecutor_real_marca_el_aislamiento_y_encola_la_orden() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL");
+        omitir("no hay PostgreSQL", Requisito::Postgresql);
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -263,7 +267,7 @@ async fn el_ejecutor_real_marca_el_aislamiento_y_encola_la_orden() {
 #[tokio::test]
 async fn un_endpoint_desconocido_falla_limpio_sin_abortar_el_playbook() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL");
+        omitir("no hay PostgreSQL", Requisito::Postgresql);
         return;
     };
     let ejecutor = EjecutorFlota::nuevo(almacen.clone());
@@ -321,7 +325,7 @@ async fn un_endpoint_desconocido_falla_limpio_sin_abortar_el_playbook() {
 #[tokio::test]
 async fn el_circuito_completo_de_identidad_a_flota_con_infraestructura_real() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL");
+        omitir("no hay PostgreSQL", Requisito::Postgresql);
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));

@@ -55,6 +55,11 @@ for c in enterprise-attack ics-attack mobile-attack; do
     fi
 done
 
+# Descargado, se EXIGE: una prueba que no lo encuentre falla en vez de omitirse
+# (H-10/H-20). Sin esto, las pruebas que corren sin --nocapture lo omitirian en
+# silencio, y el grep de OMITIDA de abajo solo ve las que lo llevan.
+export AEGIS_EXIGIR="${AEGIS_EXIGIR:+$AEGIS_EXIGIR,}attack"
+
 echo "==> AegisKnowledge: AUTOATAQUE — el conocimiento como via de envenenamiento"
 if (cd server && cargo test -p aegis-conocimiento --quiet --test envenenamiento -- --nocapture) \
     >"$TMP/veneno.log" 2>&1; then

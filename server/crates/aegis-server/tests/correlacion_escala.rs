@@ -23,6 +23,7 @@
 //! AEGIS_BENCH_CORRELACION=1 cargo test -p aegis-server --test correlacion_escala -- --nocapture
 //! ```
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_server::almacen::Almacen;
 use aegis_server::heuristicas::NuevaHeuristica;
 
@@ -67,11 +68,14 @@ const TOPE_MS: u128 = 3_000;
 #[tokio::test]
 async fn una_vuelta_de_correlacion_cabe_de_sobra_en_su_periodo() {
     if std::env::var("AEGIS_BENCH_CORRELACION").is_err() {
-        eprintln!("OMITIDA: exporta AEGIS_BENCH_CORRELACION=1 para medir");
+        omitir(
+            "exporta AEGIS_BENCH_CORRELACION=1 para medir",
+            Requisito::Medida("AEGIS_BENCH_CORRELACION"),
+        );
         return;
     }
     let Ok(almacen) = Almacen::conectar(&url_pg(), 8).await else {
-        eprintln!("OMITIDA: no hay PostgreSQL");
+        omitir("no hay PostgreSQL", Requisito::Postgresql);
         return;
     };
     almacen.migrar().await.unwrap();

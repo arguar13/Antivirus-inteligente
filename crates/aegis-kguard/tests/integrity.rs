@@ -11,6 +11,7 @@ use std::process::Command;
 
 use aegis_kguard::integrity::{self, IntegrityError, Manifest};
 use aegis_kguard::mapperms::{self, MapPermVerdict};
+use aegis_prueba::{omitir, Requisito};
 
 // ---------------------------------------------------------------------------
 // HMAC: vectores de prueba conocidos
@@ -148,7 +149,10 @@ fn lo_que_firma_python_lo_verifica_el_crate() {
     let firmar = match firmar {
         Ok(o) if o.status.success() => o,
         _ => {
-            eprintln!("python3 no disponible o fallo; se omite la interop");
+            omitir(
+                "python3 no disponible, o sign_bytecode.py fallo: la interop no se ejercio",
+                Requisito::Herramienta("python3"),
+            );
             let _ = std::fs::remove_dir_all(&dir);
             return;
         }

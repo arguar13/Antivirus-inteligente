@@ -19,6 +19,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_sbom::binario::{self, Metadatos};
 use aegis_sbom::componente::{Componente, Ecosistema, Procedencia};
 use aegis_sbom::telemetria::DelSistema;
@@ -41,7 +42,10 @@ fn tmp(n: &str) -> PathBuf {
 #[test]
 fn el_inventario_de_paquetes_coincide_con_dpkg_query() {
     if !Path::new("/var/lib/dpkg/status").exists() || !hay("dpkg-query") {
-        eprintln!("OMITIDA: la maquina no usa dpkg; el cotejo con el gestor no se hizo");
+        omitir(
+            "la maquina no usa dpkg: el cotejo con el gestor no se hizo",
+            Requisito::Herramienta("dpkg"),
+        );
         return;
     }
     let salida = Command::new("dpkg-query")
@@ -95,7 +99,10 @@ fn los_metadatos_de_cargo_auditable_coinciden_con_una_lectura_independiente() {
     let tiene =
         binario::secciones(binario).is_some_and(|s| s.iter().any(|x| x.nombre == ".dep-v0"));
     if !tiene || !hay("objcopy") || !hay("python3") {
-        eprintln!("OMITIDA: no hay un binario con .dep-v0, objcopy o python3");
+        omitir(
+            "no hay un binario con .dep-v0 (sudo-rs), objcopy o python3",
+            Requisito::Herramienta("sudo-rs"),
+        );
         return;
     }
     let d = tmp("auditable");
@@ -154,7 +161,10 @@ fn la_firma_de_openssl_coincide_con_la_version_de_su_paquete() {
             .find(|f| f.to_string_lossy().contains("libcrypto.so.3"))
             .map(|f| (c, f.clone()))
     }) else {
-        eprintln!("OMITIDA: no hay libcrypto.so.3 de un paquete");
+        omitir(
+            "no hay libcrypto.so.3 de un paquete",
+            Requisito::Herramienta("libssl3"),
+        );
         return;
     };
     let bytes = std::fs::read(std::fs::canonicalize(&lib).unwrap()).unwrap();
@@ -239,7 +249,10 @@ impl Drop for Escenario {
 
 fn escenario(nombre: &str, modo: &str) -> Option<Escenario> {
     if !hay("gcc") || !Path::new("/usr/include/zlib.h").exists() {
-        eprintln!("OMITIDA: sin gcc o sin cabeceras de zlib: la alcanzabilidad real no se probo");
+        omitir(
+            "sin gcc o sin cabeceras de zlib: la alcanzabilidad real no se probo",
+            Requisito::Herramienta("zlib1g-dev"),
+        );
         return None;
     }
     let dir = tmp(nombre);

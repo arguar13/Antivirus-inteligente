@@ -312,6 +312,7 @@ pub fn buscar_pe_embebido(bytes: &[u8]) -> Option<usize> {
 mod pruebas {
     use super::*;
     use crate::acpi::analizar_tabla;
+    use aegis_prueba::{omitir, Requisito};
     use std::path::Path;
 
     fn tabla_de(bytes: Vec<u8>, dinamica: bool) -> TablaAcpi {
@@ -467,7 +468,7 @@ mod pruebas {
     fn el_firmware_real_de_esta_maquina_no_produce_alertas_graves() {
         let c = crate::acpi::leer_tablas_del_sistema();
         if c.is_empty() {
-            eprintln!("OMITIDA: esta maquina no expone tablas ACPI");
+            omitir("esta maquina no expone tablas ACPI", Requisito::Acpi);
             return;
         }
         let a = auditar_conjunto(&c);
@@ -488,6 +489,7 @@ mod pruebas {
     fn el_informe_es_estable_entre_ejecuciones() {
         let c = crate::acpi::leer_tablas_del_sistema();
         if c.is_empty() {
+            omitir("esta maquina no expone tablas ACPI", Requisito::Acpi);
             return;
         }
         assert_eq!(auditar_conjunto(&c), auditar_conjunto(&c));

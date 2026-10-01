@@ -18,6 +18,7 @@ use aegis_net::packet::PacketBuilder;
 use aegis_net::segmentacion::{analizar_lista, BloqueoEntrante, BloqueoSaliente, Segmentador};
 use aegis_net::xdp::{XdpAction, XdpConfig, XdpFilter};
 use aegis_net::NetError;
+use aegis_prueba::{omitir, Requisito};
 
 /// El filtro XDP real, como capa de entrada del segmentador.
 struct EntradaXdp<'a>(&'a XdpFilter);
@@ -54,7 +55,7 @@ fn cargar() -> Option<XdpFilter> {
     match XdpFilter::load(&XdpConfig::default()) {
         Ok(f) => Some(f),
         Err(NetError::InsufficientPrivileges) => {
-            eprintln!("SALTADA: hacen falta CAP_BPF y CAP_NET_ADMIN");
+            omitir("hacen falta CAP_BPF y CAP_NET_ADMIN", Requisito::Root);
             None
         }
         Err(e) => panic!("no se pudo cargar el filtro XDP: {e}"),

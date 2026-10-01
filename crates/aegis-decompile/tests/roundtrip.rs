@@ -25,6 +25,7 @@ use std::process::Command;
 use aegis_decompile::decompilar::decompilar_x86_64;
 use aegis_decompile::emitir::emitir_compilable;
 use aegis_disasm::plazo::Plazo;
+use aegis_prueba::{omitir, Requisito};
 
 /// Una funcion del corpus: nombre, fuente C (la funcion se llama `orig`), y cuantos
 /// argumentos `long` toma.
@@ -125,8 +126,9 @@ fn simbolo(objeto: &[u8], nombre: &str) -> Option<(Vec<u8>, u64)> {
 #[test]
 fn redondeo_semantico_del_corpus() {
     let Some(cc) = compilador() else {
-        eprintln!(
-            "MURO: sin compilador de C en esta maquina; el redondeo semantico NO se ejercio."
+        omitir(
+            "sin compilador de C: el redondeo semantico NO se ejercio",
+            Requisito::Herramienta("cc"),
         );
         return;
     };

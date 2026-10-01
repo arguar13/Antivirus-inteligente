@@ -286,6 +286,7 @@ pub fn todas() -> &'static [(u32, &'static str)] {
 #[cfg(all(test, target_arch = "x86_64"))]
 mod pruebas_tabla {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     #[test]
     fn la_tabla_esta_ordenada_y_sin_repetidos() {
@@ -350,7 +351,10 @@ mod pruebas_tabla {
     fn la_tabla_casa_con_la_cabecera_del_kernel() {
         let ruta = "/usr/include/x86_64-linux-gnu/asm/unistd_64.h";
         let Ok(texto) = std::fs::read_to_string(ruta) else {
-            eprintln!("NO APLICABLE: {ruta} no existe en esta maquina");
+            omitir(
+                &format!("{ruta} no existe en esta maquina"),
+                Requisito::Herramienta("linux-libc-dev"),
+            );
             return;
         };
         let mut vistas = 0;

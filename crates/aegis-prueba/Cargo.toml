@@ -1,0 +1,22 @@
+[package]
+name = "aegis-prueba"
+description = "Apoyo a las pruebas de los tres workspaces: una prueba que no puede ejercerse lo dice, se cuenta y, si su requisito se exige, falla"
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# Sin dependencias, a proposito. Es una dev-dependency de crates de todas las
+# capas y de los dos workspaces (el del agente y el del plano de control), y no
+# puede arrastrarles nada. Vive en el workspace del agente porque el plano de
+# control ya depende de crates de aqui por ruta (aegis-estado, aegis-entidad) y
+# no al reves: un crate de server/ usado desde crates/ invertiria esa direccion.
+# Nunca entra en un binario: solo aparece en [dev-dependencies], que ni
+# `cargo tree -e normal` (matriz de capacidades, AegisFabric) ni la invariante
+# del arbol de dependencias del agente miran.
+[dependencies]

@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use aegis_agent::bpf;
 use aegis_agent::decode::decode;
 use aegis_agent::TelemetryEvent;
+use aegis_prueba::{omitir, Requisito};
 
 const O_WRONLY_CREAT: libc::c_long = (libc::O_WRONLY | libc::O_CREAT) as libc::c_long;
 
@@ -61,7 +62,10 @@ fn abrir(via: &str, ruta: &CString) -> bool {
 #[test]
 fn cada_via_de_apertura_llega_con_su_ruta() {
     if let Err(e) = bpf::preflight() {
-        eprintln!("SALTADA: el entorno no soporta la telemetria eBPF: {e}");
+        omitir(
+            &format!("el entorno no soporta la telemetria eBPF: {e}"),
+            Requisito::Ebpf,
+        );
         return;
     }
     let dir = std::env::temp_dir().join(format!("aegis-ficheros-{}", std::process::id()));

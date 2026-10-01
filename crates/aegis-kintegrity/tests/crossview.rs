@@ -641,13 +641,19 @@ fn el_kernel_de_verdad_no_produce_falsos_positivos() {
     // prueba tan exigente como detectar un rootkit —un solo falso positivo
     // aqui mataria procesos legitimos en produccion— y mucho mas reproducible.
     if !aegis_kintegrity::soportado() {
-        eprintln!("OMITIDA: sin BTF no hay verificacion cruzada");
+        aegis_prueba::omitir(
+            "sin BTF no hay verificacion cruzada",
+            aegis_prueba::Requisito::Btf,
+        );
         return;
     }
     let vistas = match aegis_kintegrity::BpfViews::cargar() {
         Ok(v) => v,
         Err(e) if e.is_unsupported() => {
-            eprintln!("OMITIDA: {e}");
+            aegis_prueba::omitir(
+                &format!("el kernel no admite el verificador cruzado: {e}"),
+                aegis_prueba::Requisito::KfuncsTareas,
+            );
             return;
         }
         Err(e) => panic!("no se pudo cargar el verificador: {e}"),
@@ -679,13 +685,19 @@ fn el_kernel_de_verdad_confirma_una_ocultacion_de_userland_inyectada() {
     // acusa. Todo lo de kernel es autentico; solo la vista de userland esta
     // manipulada, que es justo lo que un rootkit manipula.
     if !aegis_kintegrity::soportado() {
-        eprintln!("OMITIDA: sin BTF no hay verificacion cruzada");
+        aegis_prueba::omitir(
+            "sin BTF no hay verificacion cruzada",
+            aegis_prueba::Requisito::Btf,
+        );
         return;
     }
     let vistas = match aegis_kintegrity::BpfViews::cargar() {
         Ok(v) => v,
         Err(e) if e.is_unsupported() => {
-            eprintln!("OMITIDA: {e}");
+            aegis_prueba::omitir(
+                &format!("el kernel no admite el verificador cruzado: {e}"),
+                aegis_prueba::Requisito::KfuncsTareas,
+            );
             return;
         }
         Err(e) => panic!("no se pudo cargar: {e}"),
@@ -746,7 +758,10 @@ fn el_kernel_de_verdad_confirma_una_ocultacion_de_userland_inyectada() {
         // falso pase.
         seguir.store(false, std::sync::atomic::Ordering::Relaxed);
         let _ = hilo.join();
-        eprintln!("OMITIDA: el hilo victima no aparecio en la vista de kernel");
+        aegis_prueba::omitir(
+            "el hilo victima no aparecio en la vista de kernel",
+            aegis_prueba::Requisito::Entorno,
+        );
         return;
     }
 

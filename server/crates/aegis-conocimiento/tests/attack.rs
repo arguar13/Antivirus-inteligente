@@ -12,6 +12,7 @@ use aegis_conocimiento::grafo::Grafo;
 use aegis_conocimiento::inferencia::proponer;
 use aegis_conocimiento::intercambio;
 use aegis_conocimiento::observado::{Avistamiento, Observable};
+use aegis_prueba::{omitir, Requisito};
 use aegis_share::difusion::{Canal, Destino, Difusor};
 use aegis_share::marcado::{Marcado, Tlp};
 use aegis_share::procedencia::Fiabilidad;
@@ -26,7 +27,7 @@ const COLECCIONES: [&str; 3] = ["enterprise-attack", "ics-attack", "mobile-attac
 fn leer(c: &str) -> Option<String> {
     let r = std::fs::read_to_string(format!("{DIR}/{c}.json")).ok();
     if r.is_none() {
-        eprintln!("OMITIDA: no esta {DIR}/{c}.json");
+        omitir(&format!("no esta {DIR}/{c}.json"), Requisito::Attack);
     }
     r
 }

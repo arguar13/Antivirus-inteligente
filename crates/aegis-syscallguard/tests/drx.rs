@@ -6,6 +6,7 @@
 //! hardware marca exactamente N disparos. Es la instruccion `syscall` de la
 //! puerta sancionada, contada por el silicio, sin tocar un solo byte del codigo.
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_syscallguard::drx::{sondear_drx, SoporteDrx, VigilanteEjecucion};
 
 /// Funcion vigilada. `inline(never)` para que tenga una direccion estable y
@@ -29,7 +30,10 @@ fn la_sonda_de_drx_es_honesta() {
 #[test]
 fn un_punto_de_ruptura_por_hardware_cuenta_las_ejecuciones() {
     if !sondear_drx().hay() {
-        eprintln!("OMITIDA: esta maquina no expone registros de depuracion");
+        omitir(
+            "esta maquina no expone registros de depuracion",
+            Requisito::RegistrosDepuracion,
+        );
         return;
     }
 
@@ -37,7 +41,10 @@ fn un_punto_de_ruptura_por_hardware_cuenta_las_ejecuciones() {
     let vigilante = match VigilanteEjecucion::armar(addr, 0) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("OMITIDA: no se pudo armar el punto de ruptura: {e}");
+            omitir(
+                &format!("no se pudo armar el punto de ruptura: {e}"),
+                Requisito::RegistrosDepuracion,
+            );
             return;
         }
     };

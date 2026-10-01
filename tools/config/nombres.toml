@@ -27,7 +27,7 @@ conformes = [
     "aegis-disectores", "aegis-captura", "aegis-estado", "aegis-custodia",
     "aegis-invitado", "aegis-almacen", "aegis-almacen-pcap", "aegis-consola",
     "aegis-tejido", "aegis-flujo", "aegis-rango", "aegis-conocimiento",
-    "aegis-postura", "aegis-motor", "aegis-trabajador",
+    "aegis-postura", "aegis-motor", "aegis-trabajador", "aegis-prueba",
     # Siglas y nombres propios de formato
     "aegis-pe", "aegis-macho", "aegis-ipc", "aegis-pqc", "aegis-ml",
     "aegis-scal", "aegis-vmi", "aegis-ips", "aegis-sbom", "aegis-itdr",

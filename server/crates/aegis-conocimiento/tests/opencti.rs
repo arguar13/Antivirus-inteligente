@@ -12,6 +12,7 @@ mod comun;
 use std::collections::BTreeMap;
 
 use aegis_conocimiento::catalogo::{self, comparar};
+use aegis_prueba::{omitir, Requisito};
 use serde_json::Value;
 
 #[test]
@@ -47,7 +48,7 @@ fn las_relaciones_reales_de_attack_contra_el_mapeo_de_opencti() {
     for c in ["enterprise-attack", "ics-attack", "mobile-attack"] {
         let Ok(texto) = std::fs::read_to_string(format!("/opt/aegis-comparativa/attack/{c}.json"))
         else {
-            eprintln!("OMITIDA: no esta ATT&CK");
+            omitir("no esta ATT&CK", Requisito::Attack);
             return;
         };
         let doc: Value = serde_json::from_str(&texto).unwrap();

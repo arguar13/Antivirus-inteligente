@@ -37,3 +37,6 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+# Omitir una prueba por falta de PostgreSQL, Redis o datos se dice, se cuenta
+# y, en make ci, falla (H-10/H-20).
+aegis-prueba = { path = "../../../crates/aegis-prueba" }

@@ -18,6 +18,7 @@ use std::time::Duration;
 use aegis_net::packet::PacketBuilder;
 use aegis_net::xdp::{BlockReason, XdpAction, XdpConfig, XdpFilter};
 use aegis_net::NetError;
+use aegis_prueba::{omitir, Requisito};
 
 fn ip(a: u8, b: u8, c: u8, d: u8) -> Ipv4Addr {
     Ipv4Addr::new(a, b, c, d)
@@ -28,7 +29,10 @@ fn cargar(config: XdpConfig) -> Option<XdpFilter> {
     match XdpFilter::load(&config) {
         Ok(f) => Some(f),
         Err(NetError::InsufficientPrivileges) => {
-            eprintln!("SALTADA: hacen falta CAP_BPF y CAP_NET_ADMIN para cargar el filtro XDP");
+            omitir(
+                "hacen falta CAP_BPF y CAP_NET_ADMIN para cargar el filtro XDP",
+                Requisito::Root,
+            );
             None
         }
         Err(e) => panic!("no se pudo cargar el filtro XDP: {e}"),

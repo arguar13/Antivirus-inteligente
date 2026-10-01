@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_scal::error::ScalError;
 use aegis_scal::fsmon::{FileAction, FileSystemMonitor};
 use aegis_scal::memory::{MemoryInspector, RegionClass};
@@ -457,7 +458,10 @@ fn se_recuperan_las_direcciones_bloqueadas_de_la_salida_de_nft() {
 fn nftables_bloquea_y_desbloquea_de_verdad() {
     let f = aegis_scal::linux::netfilter::NftablesFilter::new();
     if !f.available() {
-        eprintln!("omitida: nftables no esta disponible en esta maquina");
+        omitir(
+            "nftables no esta disponible en esta maquina",
+            Requisito::Herramienta("nft"),
+        );
         return;
     }
     // Se limpia lo que hubiera antes para no arrastrar estado de otra prueba.

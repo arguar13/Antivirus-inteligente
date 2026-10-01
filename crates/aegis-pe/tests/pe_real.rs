@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use aegis_pe::{huella_authenticode, Formato, Imagen, Informe, PeError};
+use aegis_prueba::{omitir, Requisito};
 
 /// Construye un ejecutable de Windows de verdad y devuelve sus bytes.
 ///
@@ -48,7 +49,7 @@ fn construir_pe(nombre: &str, fuente: &str) -> Option<(Vec<u8>, PathBuf)> {
         .output()
         .ok()?;
     if !r.status.success() {
-        eprintln!("OMITIDA: clang no pudo compilar para Windows");
+        eprintln!("clang no pudo compilar para Windows");
         return None;
     }
     let r = Command::new("lld-link")
@@ -58,7 +59,7 @@ fn construir_pe(nombre: &str, fuente: &str) -> Option<(Vec<u8>, PathBuf)> {
         .output()
         .ok()?;
     if !r.status.success() {
-        eprintln!("OMITIDA: lld-link no pudo enlazar un PE");
+        eprintln!("lld-link no pudo enlazar un PE");
         return None;
     }
     let bytes = std::fs::read(&exe).ok()?;
@@ -99,7 +100,10 @@ fn campo<'a>(salida: &'a str, clave: &str) -> Option<&'a str> {
 #[test]
 fn un_pe_real_se_lee_y_coincide_con_lo_que_dice_llvm_readobj() {
     let Some((bytes, ruta)) = construir_pe("basico", FUENTE) else {
-        eprintln!("OMITIDA: esta maquina no tiene clang/lld-link para Windows");
+        omitir(
+            "esta maquina no tiene clang/lld-link para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).expect("leer un PE real");
@@ -121,7 +125,10 @@ fn un_pe_real_se_lee_y_coincide_con_lo_que_dice_llvm_readobj() {
 
     // El testigo independiente.
     let Some(salida) = readobj(&ruta) else {
-        eprintln!("(sin llvm-readobj para cotejar; el resto de la prueba ya paso)");
+        omitir(
+            "sin llvm-readobj para cotejar (el resto de la prueba ya paso)",
+            Requisito::Herramienta("llvm-readobj"),
+        );
         return;
     };
     let secciones: u16 = campo(&salida, "SectionCount")
@@ -143,7 +150,10 @@ fn un_pe_real_se_lee_y_coincide_con_lo_que_dice_llvm_readobj() {
 #[test]
 fn las_secciones_de_un_pe_real_caben_dentro_del_fichero() {
     let Some((bytes, _)) = construir_pe("secciones", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -169,7 +179,10 @@ fn cambiar_el_checksum_no_mueve_la_huella_authenticode() {
     // Un lector que hashee el fichero entero pasa todas las demas pruebas y
     // falla esta.
     let Some((bytes, _)) = construir_pe("checksum", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -193,7 +206,10 @@ fn cambiar_la_entrada_del_directorio_de_seguridad_no_mueve_la_huella() {
     // El otro tramo saltado: apunta a la firma, que todavia no existe cuando se
     // calcula la huella.
     let Some((bytes, _)) = construir_pe("dirseg", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -214,7 +230,10 @@ fn cambiar_un_byte_de_una_seccion_si_mueve_la_huella() {
     // La otra mitad de la propiedad. Sin esta, «saltarse el CheckSum» podria
     // estar implementado como «no hashear nada» y la prueba anterior pasaria.
     let Some((bytes, _)) = construir_pe("seccion", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -240,7 +259,10 @@ fn cambiar_un_byte_del_talon_dos_si_mueve_la_huella() {
     // El talon DOS —el «This program cannot be run in DOS mode»— esta antes del
     // CheckSum y dentro de la huella. Es sitio clasico para esconder datos.
     let Some((bytes, _)) = construir_pe("talon", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -258,7 +280,10 @@ fn pegar_datos_al_final_si_mueve_la_huella_cuando_no_hay_firma() {
     // Sin tabla de certificados, todo el overlay entra en la huella. Es lo que
     // impide pegarle una carga a un instalador sin que se note.
     let Some((bytes, _)) = construir_pe("overlay", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -274,7 +299,10 @@ fn pegar_datos_al_final_si_mueve_la_huella_cuando_no_hay_firma() {
 #[test]
 fn la_huella_de_un_mismo_fichero_es_siempre_la_misma() {
     let Some((bytes, _)) = construir_pe("estable", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -289,7 +317,10 @@ fn la_huella_authenticode_no_es_el_sha256_del_fichero() {
     // implementacion estaria mal de una forma que ninguna otra prueba ve.
     use sha2::{Digest, Sha256};
     let Some((bytes, _)) = construir_pe("distinta", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -313,7 +344,10 @@ fn truncar_un_pe_real_por_cualquier_sitio_no_provoca_un_panico() {
     // doscientos puntos y lo unico que se exige es que la respuesta sea `Ok` o
     // un `Err` con nombre.
     let Some((bytes, _)) = construir_pe("truncado", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let paso = (bytes.len() / 200).max(1);
@@ -339,7 +373,10 @@ fn voltear_bytes_sueltos_de_un_pe_real_no_provoca_un_panico() {
     // desplazamientos que el lector sigue. Generador determinista: una prueba
     // que falla una vez de cada cien y no se puede reproducir no sirve de nada.
     let Some((bytes, _)) = construir_pe("volteado", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let mut semilla = 0x5EED_1234_u64;
@@ -364,7 +401,10 @@ fn un_numero_de_secciones_imposible_se_rechaza_sin_reservar_memoria() {
     // reserve antes de comprobar pide sitio para 65535 secciones por cada
     // fichero que le manden.
     let Some((bytes, _)) = construir_pe("secciones-imposibles", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let imagen = Imagen::leer(&bytes).unwrap();
@@ -382,7 +422,10 @@ fn un_numero_de_secciones_imposible_se_rechaza_sin_reservar_memoria() {
 #[test]
 fn un_e_lfanew_que_apunta_fuera_del_fichero_se_rechaza() {
     let Some((bytes, _)) = construir_pe("lfanew", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let mut roto = bytes.clone();
@@ -394,7 +437,10 @@ fn un_e_lfanew_que_apunta_fuera_del_fichero_se_rechaza() {
 #[test]
 fn una_magic_desconocida_en_el_encabezado_opcional_se_rechaza() {
     let Some((bytes, _)) = construir_pe("magic", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let lfanew = u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
@@ -412,7 +458,10 @@ fn una_magic_desconocida_en_el_encabezado_opcional_se_rechaza() {
 #[test]
 fn el_informe_de_un_pe_real_dice_que_no_lleva_firma_y_lo_dice_como_indicio() {
     let Some((bytes, _)) = construir_pe("informe", FUENTE) else {
-        eprintln!("OMITIDA: sin cadena de compilacion para Windows");
+        omitir(
+            "sin cadena de compilacion para Windows",
+            Requisito::Herramienta("lld-link"),
+        );
         return;
     };
     let informe = Informe::de(&bytes).expect("informe de un PE real");

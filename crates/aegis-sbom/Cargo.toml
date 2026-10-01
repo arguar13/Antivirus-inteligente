@@ -42,3 +42,8 @@ thiserror = "2"
 # Los mapas de memoria y los sockets atribuidos a proceso: la telemetria que el
 # agente YA tiene, que es de donde salen las respuestas de alcanzabilidad.
 aegis-scal = { path = "../aegis-scal" }
+
+[dev-dependencies]
+# Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo
+# que le falta, falla (H-10/H-20). Solo de pruebas: nunca entra en el binario.
+aegis-prueba = { path = "../aegis-prueba" }

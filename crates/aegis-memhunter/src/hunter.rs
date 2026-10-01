@@ -780,6 +780,7 @@ mod pruebas {
     use super::*;
     use crate::pte::EntradaPagina;
     use crate::vad::Proteccion;
+    use aegis_prueba::{omitir, Requisito};
 
     const FICHERO: u64 = 0xa000_0000_0000_0000; // presente, bit 61 = 1
     const COPIADA: u64 = 0x8100_0000_0000_0000; // presente, bit 61 = 0
@@ -1281,9 +1282,12 @@ mod pruebas {
         // falla o pasa por azar. `tools/verificar-memhunter.sh` ejecuta esta
         // prueba con `--release`, y ahi el tope se exige.
         if cfg!(debug_assertions) {
-            eprintln!(
-                "sin juzgar: tope de {TOPE:?} solo sobre el binario optimizado (--release); \
-                 mejor pasada en depuracion {mejor:?}"
+            omitir(
+                &format!(
+                    "sin juzgar: tope de {TOPE:?} solo sobre el binario optimizado \
+                     (--release); mejor pasada en depuracion {mejor:?}"
+                ),
+                Requisito::Optimizado,
             );
             return;
         }
@@ -1323,6 +1327,7 @@ mod pruebas {
 #[cfg(all(test, target_os = "linux"))]
 mod pruebas_vivas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     /// EL CASO DE EXTREMO A EXTREMO. Se construye una region RWX anonima con una
     /// cabecera ELF dentro —exactamente lo que deja un cargador reflexivo— y se
@@ -1467,7 +1472,10 @@ mod pruebas_vivas {
         let mut hijo = match std::process::Command::new("/bin/sleep").arg("30").spawn() {
             Ok(h) => h,
             Err(e) => {
-                eprintln!("OMITIDA: no se pudo lanzar /bin/sleep: {e}");
+                omitir(
+                    &format!("no se pudo lanzar /bin/sleep: {e}"),
+                    Requisito::Entorno,
+                );
                 return;
             }
         };
@@ -1504,11 +1512,17 @@ mod pruebas_vivas {
             Some(Err(e)) => {
                 // Leer la memoria y la tabla de paginas de otro proceso necesita
                 // privilegios. Donde no los haya se DICE, no se finge que paso.
-                eprintln!("OMITIDA: no se pudo inspeccionar el proceso hijo: {e}");
+                omitir(
+                    &format!("no se pudo inspeccionar el proceso hijo: {e}"),
+                    Requisito::Ptrace,
+                );
                 return;
             }
             None => {
-                eprintln!("OMITIDA: el proceso hijo no llego a mapear sus bibliotecas");
+                omitir(
+                    "el proceso hijo no llego a mapear sus bibliotecas",
+                    Requisito::Entorno,
+                );
                 return;
             }
         };

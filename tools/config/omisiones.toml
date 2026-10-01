@@ -1,0 +1,139 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Omisiones declaradas de las pruebas (agente y plano de control)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Hallazgos H-10 y H-20. Una prueba de cualquiera de los dos workspaces que no
+#  puede ejercerse por falta de algo lo dice con `aegis_prueba::omitir`
+#  (crates/aegis-prueba),
+#  que la anota en el fichero de AEGIS_OMISIONES. Al final de cada invocacion
+#  de `make ci`, tools/ci/omisiones.py las cuenta y las dice; en la tanda
+#  COMPLETA, una omision que no este aqui hace fallar la puerta. Un verde con
+#  pruebas que no se ejecutaron tiene que decir cuales y por que, o no es un
+#  verde.
+#
+#  Lo que NO se declara aqui: servicios (PostgreSQL, Redis), privilegios (root,
+#  ptrace) y kernel (eBPF, BTF, Landlock, seccomp, sondas). La tanda los EXIGE
+#  (AEGIS_EXIGIR=servicios,privilegios,kernel): su falta es un fallo del
+#  entorno, no una omision admisible, y declararlos hace fallar la
+#  comprobacion.
+#
+#  Formato:
+#
+#    [[omision]]
+#    requisito = "attack"                 # una clave de tools/ci/omisiones.py
+#    fichero = "server/crates/.../x.rs"   # donde se llama a omitir(), desde la raiz
+#    prueba = "nombre_de_la_prueba"       # opcional: sin el, vale para el fichero
+#    motivo = "por que puede faltar en una tanda sana"
+#    fase = "la fase que la cierra, y como"
+#
+#  La lista solo deberia menguar: cada entrada nombra la fase que la cierra.
+
+# ── ATT&CK: el conjunto de datos real de MITRE (unos 31 000 objetos STIX) ────
+#
+# No esta en el repositorio: lo descarga tools/verificar-conocimiento.sh en
+# /opt/aegis-comparativa/attack, y ese grupo (conocimiento) lo EXIGE
+# (AEGIS_EXIGIR=...,attack) despues de descargarlo. Los grupos que van antes
+# —servidor y share— ejecutan las mismas pruebas y, en un runner limpio, aun no
+# lo tienen: ahi la omision es admisible porque el grupo conocimiento las
+# ejerce de verdad en la misma tanda.
+
+[[omision]]
+requisito = "attack"
+fichero = "server/crates/aegis-share/tests/attack.rs"
+motivo = "ATT&CK se descarga en el grupo conocimiento, que va despues; ahi se exige"
+fase = "MP-16 FASE 4 (medir deteccion y contenido): fijar ATT&CK con su huella en la preparacion del runner (deploy/ci/instalar-runner.sh), antes de la tanda"
+
+[[omision]]
+requisito = "attack"
+fichero = "server/crates/aegis-conocimiento/tests/attack.rs"
+motivo = "ATT&CK se descarga en el grupo conocimiento, que va despues; ahi se exige"
+fase = "MP-16 FASE 4 (medir deteccion y contenido): fijar ATT&CK con su huella en la preparacion del runner (deploy/ci/instalar-runner.sh), antes de la tanda"
+
+[[omision]]
+requisito = "attack"
+fichero = "server/crates/aegis-conocimiento/tests/opencti.rs"
+motivo = "ATT&CK se descarga en el grupo conocimiento, que va despues; ahi se exige"
+fase = "MP-16 FASE 4 (medir deteccion y contenido): fijar ATT&CK con su huella en la preparacion del runner (deploy/ci/instalar-runner.sh), antes de la tanda"
+
+# ── Medidas bajo demanda ──────────────────────────────────────────────────────
+
+[[omision]]
+requisito = "medida"
+fichero = "server/crates/aegis-server/tests/correlacion_escala.rs"
+motivo = "medida bajo demanda (10 000 endpoints y 200 000 alertas sembradas): solo corre con AEGIS_BENCH_CORRELACION=1"
+fase = "MP-16 FASE 6 (escala y plano de control): llevarla a la puerta como medida con su umbral (TOPE_MS) en un grupo de medidas propio"
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  Workspace del agente (crates/)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# make ci corre como root, sobre el kernel del runner (WSL2 6.6 hoy: BTF,
+# Landlock, seccomp y BPF LSM), y EXIGE privilegios y kernel. Las herramientas
+# que las pruebas usan de testigo (cc, clang, lld-link, llvm-readobj, nft,
+# python3, curl, dpkg...) las instala deploy/ci/instalar-runner.sh: su falta no
+# es admisible y NO se declara. Solo queda aqui lo que la maquina de CI no puede
+# dar tal como es hoy, cada cosa con la fase que lo cierra.
+
+# ── Entorno: WSL2 no enseña hilos de kernel ──────────────────────────────────
+#
+# WSL2 ejecuta la distribucion en su propio espacio de nombres de PID: el PID 2
+# es init-systemd, no kthreadd, y /proc no muestra ningun hilo con PF_KTHREAD.
+# La deteccion por bandera se comprueba igual sobre una linea de stat real de
+# kthreadd; lo que se omite es la parte que recorre los hilos vivos.
+
+[[omision]]
+requisito = "entorno"
+fichero = "crates/aegis-resp/tests/response.rs"
+prueba = "los_hilos_de_kernel_se_reconocen_por_su_bandera_no_por_su_enlace_exe"
+motivo = "WSL2 aisla la distribucion en un espacio de nombres de PID: /proc no muestra hilos de kernel"
+fase = "MP-16 FASE 3 (sobrecoste, empaquetado y convivencia): llevar la comprobacion sobre hilos vivos a la matriz de kernels (tools/config/kernels.toml), donde cada microVM tiene su kthreadd"
+
+# ── Entorno: ningun binario no-PIE conocido en Ubuntu 26.04 ──────────────────
+#
+# La prueba busca /usr/bin/python3.10 (Ubuntu 22.04) o containerd-shim-runc-v2
+# (Docker). El runner de hoy es Ubuntu 26.04 sin Docker: no tiene ninguno. La
+# traduccion de direcciones SI se ejerce sobre los binarios reales en la prueba
+# anterior del mismo modulo; lo que se omite es el caso no-PIE concreto.
+
+[[omision]]
+requisito = "entorno"
+fichero = "crates/aegis-l7hunter/src/elf.rs"
+prueba = "un_binario_no_pie_real_traduce_dentro_del_fichero"
+motivo = "los binarios no-PIE que busca (python3.10, containerd-shim-runc-v2) no existen en el runner (Ubuntu 26.04, sin Docker)"
+fase = "MP-16 FASE 2 (integrar las huerfanas; l7hunter entra en el agente): fabricar el no-PIE en la propia prueba con cc -no-pie en vez de buscarlo en el sistema"
+
+# ── Medida: el tope de coste del decisor de memoria, solo en --release ───────
+#
+# En el perfil de pruebas (depuracion, con todo el workspace en paralelo) el
+# cronometro mide el perfil y la carga, no el decisor. El grupo memhunter de
+# make ci la ejecuta con --release y ahi el tope SI se exige; en rust y en el
+# resto de pasadas en depuracion se omite, se anota y se cuenta.
+
+[[omision]]
+requisito = "optimizado"
+fichero = "crates/aegis-memhunter/src/hunter.rs"
+prueba = "el_decisor_resuelve_un_proceso_grande_en_menos_de_diez_milisegundos"
+motivo = "el tope de tiempo es del binario optimizado; en depuracion no se juzga (el grupo memhunter lo exige con --release)"
+fase = "MP-16 FASE 6 (escala y plano de control): pasarla al grupo de medidas en --release, junto a la de correlacion, y quitarla de las pasadas en depuracion"
+
+# ── Kfuncs de tareas: dependen de la version del kernel ─────────────────────
+#
+# La verificacion cruzada de kintegrity necesita los kfuncs de tareas en el
+# tipo de programa que usa. El kernel del runner (WSL 6.6) no los tiene; la
+# matriz de kernels los ejerce donde existen (nucleo-en-vivo). Se cierra cuando
+# el verificador funcione desde 6.7 (rediseño con iteradores iter.s/task) y el
+# runner pase a un kernel que los traiga.
+
+[[omision]]
+requisito = "kfuncs-tareas"
+fichero = "crates/aegis-kintegrity/tests/crossview.rs"
+prueba = "el_kernel_de_verdad_no_produce_falsos_positivos"
+motivo = "el kernel del runner (WSL 6.6) no tiene los kfuncs de tareas; la matriz lo ejerce en nucleo-en-vivo"
+fase = "FASE 2 del MP-16: verificador con iteradores (6.7+) y runner con kernel que los traiga"
+
+[[omision]]
+requisito = "kfuncs-tareas"
+fichero = "crates/aegis-kintegrity/tests/crossview.rs"
+prueba = "el_kernel_de_verdad_confirma_una_ocultacion_de_userland_inyectada"
+motivo = "el kernel del runner (WSL 6.6) no tiene los kfuncs de tareas; la matriz lo ejerce en nucleo-en-vivo"
+fase = "FASE 2 del MP-16: verificador con iteradores (6.7+) y runner con kernel que los traiga"

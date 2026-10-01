@@ -486,6 +486,7 @@ fn leer_u64(d: &[u8], off: usize) -> Option<u64> {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
     use std::path::Path;
 
     #[test]
@@ -599,7 +600,10 @@ mod pruebas {
     fn encuentra_ssl_read_y_ssl_write_en_la_openssl_real() {
         let ruta = Path::new("/usr/lib/x86_64-linux-gnu/libssl.so.3");
         if !ruta.exists() {
-            eprintln!("OMITIDA: no hay OpenSSL 3 en {}", ruta.display());
+            omitir(
+                &format!("no hay OpenSSL 3 en {}", ruta.display()),
+                Requisito::Herramienta("libssl3"),
+            );
             return;
         }
         let b = Binario::desde_fichero(ruta).expect("libssl.so.3 tiene que analizarse");
@@ -741,6 +745,9 @@ mod pruebas {
             );
             return;
         }
-        eprintln!("OMITIDA: esta maquina no tiene ningun binario no-PIE conocido");
+        omitir(
+            "esta maquina no tiene ningun binario no-PIE conocido",
+            Requisito::Entorno,
+        );
     }
 }

@@ -146,6 +146,7 @@ impl ObjetivoConfinable {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     /// AUTOATAQUE: el motor de confinamiento contra el propio agente. El
     /// binario que esta corriendo ahora mismo —el de las pruebas— hace de agente.
@@ -162,7 +163,7 @@ mod pruebas {
     #[test]
     fn init_no_se_puede_confinar() {
         let Ok(uno) = std::fs::read_link("/proc/1/exe") else {
-            eprintln!("NO APLICABLE: /proc/1/exe no se puede leer aqui");
+            omitir("/proc/1/exe no se puede leer aqui", Requisito::Root);
             return;
         };
         let r = ObjetivoConfinable::nuevo(&uno, &ActivosProtegidos::default());

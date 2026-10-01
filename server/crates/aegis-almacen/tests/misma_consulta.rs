@@ -17,6 +17,7 @@ use aegis_estado::{Contexto, Filtro};
 use aegis_hunt::ejecutor::Ejecutor;
 use aegis_parser::plan::planificar;
 use aegis_parser::sintaxis;
+use aegis_prueba::{omitir, Requisito};
 use sqlx::postgres::PgPoolOptions;
 
 fn url() -> String {
@@ -52,7 +53,10 @@ async fn cada_consulta_devuelve_lo_mismo_contra_el_endpoint_y_contra_el_historic
     {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("OMITIDA: no hay PostgreSQL en {} ({e})", url());
+            omitir(
+                &format!("no hay PostgreSQL en {} ({e})", url()),
+                Requisito::Postgresql,
+            );
             return;
         }
     };

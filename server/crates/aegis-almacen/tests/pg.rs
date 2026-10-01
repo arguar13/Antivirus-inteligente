@@ -11,6 +11,7 @@ use aegis_almacen::{Almacen, ErrorAlmacen, FilaEntrada, Via};
 use aegis_entidad::entidad;
 use aegis_parser::historico::Ventana;
 use aegis_parser::valor::Valor;
+use aegis_prueba::{omitir, Requisito};
 use sqlx::postgres::PgPoolOptions;
 
 const NS_DIA: u64 = 86_400_000_000_000;
@@ -45,7 +46,10 @@ async fn prueba(nombre: &str, retencion: Retencion) -> Option<Prueba> {
     {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("OMITIDA: no hay PostgreSQL en {} ({e})", url());
+            omitir(
+                &format!("no hay PostgreSQL en {} ({e})", url()),
+                Requisito::Postgresql,
+            );
             return None;
         }
     };

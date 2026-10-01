@@ -15,6 +15,7 @@ use aegis_confinar::supervision::{self, Desviacion};
 use aegis_confinar::{
     ActivosProtegidos, Confirmacion, Despliegue, Estado, ObjetivoConfinable, Rechazo,
 };
+use aegis_prueba::{omitir, Requisito};
 use aegis_sandbox::supervisor::Fin;
 use aegis_sandbox::syscalls;
 
@@ -43,7 +44,10 @@ fn stub() -> Option<PathBuf> {
 
 fn objetivo() -> Option<ObjetivoConfinable> {
     let Some(b) = stub() else {
-        eprintln!("NO APLICABLE: no hay compilador de C para el programa de prueba");
+        omitir(
+            "no hay compilador de C (o no compila) para el programa de prueba",
+            Requisito::Herramienta("cc"),
+        );
         return None;
     };
     Some(ObjetivoConfinable::nuevo(&b, &ActivosProtegidos::default()).expect("confinable"))
@@ -71,7 +75,10 @@ fn hay_etc_hostname() -> bool {
 fn se_aprende_el_perfil_de_un_programa_real_sin_cambiar_lo_que_hace() {
     let Some(o) = objetivo() else { return };
     if !hay_etc_hostname() {
-        eprintln!("NO APLICABLE: /etc/hostname no existe o esta vacio aqui");
+        omitir(
+            "/etc/hostname no existe o esta vacio aqui",
+            Requisito::Entorno,
+        );
         return;
     }
     let a = supervision::aprender(&o, &args("normal"), VENTANA).expect("aprender");
@@ -108,6 +115,10 @@ fn se_aprende_el_perfil_de_un_programa_real_sin_cambiar_lo_que_hace() {
 fn el_ensayo_permisivo_no_bloquea_nada_y_anota_lo_que_habria_bloqueado() {
     let Some(o) = objetivo() else { return };
     if !hay_etc_hostname() {
+        omitir(
+            "/etc/hostname no existe o esta vacio aqui",
+            Requisito::Entorno,
+        );
         return;
     }
     let p = supervision::aprender(&o, &args("normal"), VENTANA)
@@ -153,6 +164,10 @@ fn el_ensayo_permisivo_no_bloquea_nada_y_anota_lo_que_habria_bloqueado() {
 fn el_perfil_impuesto_deja_funcionar_lo_aprendido_y_el_kernel_bloquea_lo_demas() {
     let Some(o) = objetivo() else { return };
     if !hay_etc_hostname() {
+        omitir(
+            "/etc/hostname no existe o esta vacio aqui",
+            Requisito::Entorno,
+        );
         return;
     }
     let p = supervision::aprender(&o, &args("normal"), VENTANA)
@@ -188,13 +203,20 @@ fn el_perfil_impuesto_deja_funcionar_lo_aprendido_y_el_kernel_bloquea_lo_demas()
 fn el_perfil_impuesto_quita_las_capacidades_que_no_se_usaron() {
     let Some(o) = objetivo() else { return };
     if !hay_etc_hostname() {
+        omitir(
+            "/etc/hostname no existe o esta vacio aqui",
+            Requisito::Entorno,
+        );
         return;
     }
     let p = supervision::aprender(&o, &args("caps"), VENTANA)
         .expect("aprender")
         .perfil;
     if !p.root {
-        eprintln!("NO APLICABLE: las pruebas no corren como root; sin privilegio no hay capacidades que quitar");
+        omitir(
+            "las pruebas no corren como root: sin privilegio no hay capacidades que quitar",
+            Requisito::Root,
+        );
         return;
     }
     let (fin, sal) =
@@ -225,6 +247,10 @@ fn el_perfil_impuesto_quita_las_capacidades_que_no_se_usaron() {
 fn un_perfil_malo_se_retira_solo_y_el_programa_vuelve_a_funcionar() {
     let Some(o) = objetivo() else { return };
     if !hay_etc_hostname() {
+        omitir(
+            "/etc/hostname no existe o esta vacio aqui",
+            Requisito::Entorno,
+        );
         return;
     }
     let mut p = supervision::aprender(&o, &args("normal"), VENTANA)

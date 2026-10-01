@@ -15,6 +15,7 @@ use aegis_ml::features::{
     OFF_ENTROPY_HIST, OFF_HEADER, OFF_IMPORTS, OFF_SECTIONS, OFF_STRINGS,
 };
 use aegis_ml::{MalwareModel, ModelError, Verdict};
+use aegis_prueba::{omitir, Requisito};
 
 use common::*;
 
@@ -503,9 +504,11 @@ fn el_hashing_de_importaciones_reparte_y_normaliza() {
     let x = FeatureExtractor::default();
     // Un binario real del sistema tiene importaciones de libc.
     let Ok(f) = x.extract_file(Path::new("/bin/ls")) else {
+        omitir("/bin/ls no se pudo analizar", Requisito::Entorno);
         return;
     };
     if f.imports.is_empty() {
+        omitir("/bin/ls no tiene importaciones", Requisito::Entorno);
         return;
     }
     let datos = std::fs::read("/bin/ls").unwrap();

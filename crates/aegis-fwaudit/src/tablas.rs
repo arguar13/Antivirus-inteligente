@@ -370,6 +370,7 @@ mod pruebas {
     use super::*;
     use crate::acpi::analizar_tabla;
     use crate::acpi::pruebas::tabla;
+    use aegis_prueba::{omitir, Requisito};
     use std::path::Path;
 
     fn t(firma: &[u8; 4], cuerpo: &[u8]) -> TablaAcpi {
@@ -480,7 +481,7 @@ mod pruebas {
     fn la_fadt_real_de_esta_maquina_se_decodifica() {
         let c = crate::acpi::leer_tablas_del_sistema();
         let Some(f) = c.por_firma(b"FACP") else {
-            eprintln!("NO APLICABLE: sin FADT");
+            omitir("esta maquina no expone la FADT", Requisito::Acpi);
             return;
         };
         let fadt = Fadt::analizar(f).expect("una FADT real tiene que decodificarse");

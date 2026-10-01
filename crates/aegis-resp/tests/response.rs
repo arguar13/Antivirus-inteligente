@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_resp::isolate::{build_ruleset, parse_resolvers, IsolationPolicy, Isolator, TABLE};
 use aegis_resp::kill::{
     collect_tree, parse_stat, protection_reason, self_ancestry, snapshot_processes,
@@ -71,11 +72,14 @@ fn los_hilos_de_kernel_se_reconocen_por_su_bandera_no_por_su_enlace_exe() {
         // de PID, donde /proc solo muestra los procesos del espacio. Lo que la
         // prueba afirma sobre la bandera ya quedo comprobado arriba con una
         // linea de `stat` autentica de kthreadd.
-        eprintln!(
-            "PARCIAL: esta maquina no expone hilos de kernel en /proc \
-             ({} procesos, ninguno con PF_KTHREAD). La deteccion por bandera se \
-             comprobo igual sobre la linea de stat de kthreadd.",
-            ps.len()
+        omitir(
+            &format!(
+                "esta maquina no expone hilos de kernel en /proc \
+                 ({} procesos, ninguno con PF_KTHREAD). La deteccion por bandera se \
+                 comprobo igual sobre la linea de stat de kthreadd.",
+                ps.len()
+            ),
+            Requisito::Entorno,
         );
         return;
     }

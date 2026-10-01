@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_scan::memory::{chunk_ranges, parse_maps, MemoryScanPolicy, Perms, RegionClass};
 use aegis_scan::service::{ScanJob, ScanServiceConfig, ScanTarget};
 use aegis_scan::{ScanService, Severity, YaraEngine};
@@ -419,7 +420,10 @@ fn lanzar_portador(lab: &Path) -> Option<(Child, PathBuf)> {
 fn detecta_una_firma_inyectada_en_la_memoria_de_un_proceso_hijo() {
     let lab = Lab::nuevo("memoria");
     let Some((mut hijo, _)) = lanzar_portador(lab.path()) else {
-        eprintln!("SALTADA: no se pudo preparar el proceso portador (falta python3?)");
+        omitir(
+            "no se pudo preparar el proceso portador (falta python3?)",
+            Requisito::Herramienta("python3"),
+        );
         return;
     };
     let pid = hijo.id() as i32;
@@ -431,7 +435,7 @@ fn detecta_una_firma_inyectada_en_la_memoria_de_un_proceso_hijo() {
             let _ = hijo.kill();
             let _ = hijo.wait();
             if format!("{err}").contains("permiso") || format!("{err}").contains("CAP_SYS_PTRACE") {
-                eprintln!("SALTADA: sin permisos para leer memoria ajena");
+                omitir("sin permisos para leer memoria ajena", Requisito::Ptrace);
                 return;
             }
             panic!("error al escanear la memoria: {err}");

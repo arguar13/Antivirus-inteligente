@@ -25,6 +25,9 @@ aegis-disasm = { path = "../aegis-disasm" }
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "instr_info", "intel"] }
 
 [dev-dependencies]
+# Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo
+# que le falta, falla (H-10/H-20). Solo de pruebas: nunca entra en el binario.
+aegis-prueba = { path = "../aegis-prueba" }
 # Solo para el REDONDEO SEMANTICO: lee el objeto que compila el corpus de prueba
 # para sacar los bytes y la direccion de cada funcion. Ya esta en la linea base
 # del agente (lo usa aegis-disasm). No entra en el arbol de produccion del crate.

@@ -18,6 +18,7 @@ use aegis_custodia::{
     Paso, Pieza, Procedencia, Sello, Veredicto,
 };
 use aegis_pqc::firma_hibrida::ClaveFirmaHibrida;
+use aegis_prueba::{omitir, Requisito};
 
 /// Evidencia real: el mapa de memoria de este mismo proceso.
 fn evidencia_real() -> Vec<u8> {
@@ -392,7 +393,10 @@ fn un_artefacto_grande_de_verdad_se_sella_y_se_verifica() {
     // texto corto, que es como suelen escribirse las pruebas y como nunca es la
     // evidencia real.
     let Ok(ruta) = std::env::current_exe() else {
-        eprintln!("OMITIDA: no se pudo localizar el binario de la prueba");
+        omitir(
+            "no se pudo localizar el binario de la prueba",
+            Requisito::Entorno,
+        );
         return;
     };
     let bytes = std::fs::read(&ruta).expect("leer el binario de la prueba");

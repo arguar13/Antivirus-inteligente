@@ -25,6 +25,7 @@ use aegis_ips::plano::PlanoIps;
 use aegis_ips::protegidos::MotivoProteccion;
 use aegis_ips::regla::{Criterio, Regla};
 use aegis_ips::veredicto::Accion;
+use aegis_prueba::{omitir, Requisito};
 use aegis_wire::motor::{ConfigMotor, Motor};
 
 const PASA: u32 = 0;
@@ -95,11 +96,13 @@ fn plano(modo: Modo) -> Option<PlanoIps> {
     match PlanoIps::cargar(modo, true) {
         Ok(p) => Some(p),
         Err(e) => {
-            println!(
-                "OMITIDA: no se pudo cargar el programa eBPF ({e}).\n\
-                 El CIRCUITO no se ejercio aqui. Sus dos mitades si se prueban por\n\
-                 separado: la decision en las pruebas del decisor, sin privilegios,\n\
-                 y el corte en `corte_vivo` cuando el kernel esta disponible."
+            omitir(
+                &format!(
+                    "no se pudo cargar el programa eBPF ({e}). El CIRCUITO no se \
+                     ejercio aqui; sus dos mitades se prueban por separado: la \
+                     decision en las pruebas del decisor y el corte en `corte_vivo`"
+                ),
+                Requisito::Ebpf,
             );
             None
         }

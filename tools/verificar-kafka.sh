@@ -49,6 +49,20 @@ if [ -z "$CORREDORES" ]; then
         printf '%sOMITIDA%s: no se pudo levantar un corredor (sin Java o sin salida a archive.apache.org).\n' "$GRIS" "$FIN"
         printf '        La verificacion de extremo a extremo del destino Kafka NO se ha ejecutado.\n'
         printf '        En un runner con Docker, exporta AEGIS_KAFKA=host:puerto de un corredor real.\n'
+        # Se CUENTA (hallazgos H-10/H-20): antes la tanda salia verde sin haber
+        # ejercido el destino Kafka. Sin declarar en tools/config/omisiones.toml,
+        # la tanda completa falla al final; y si se exige kafka, falla aqui.
+        case ",${AEGIS_EXIGIR:-}," in
+            *,todo,*|*,kafka,*|*,red,*)
+                printf '%sFALLO%s: AEGIS_EXIGIR exige kafka\n' "$ROJO" "$FIN"
+                exit 1
+                ;;
+        esac
+        if [ -n "${AEGIS_OMISIONES:-}" ]; then
+            printf 'kafka\ttools/verificar-kafka.sh\t%s\tverificar-kafka\t%s\n' "$LINENO" \
+                'no se pudo levantar un corredor de Kafka (sin Java o sin salida a archive.apache.org)' \
+                >> "$AEGIS_OMISIONES" || exit 1
+        fi
         exit 0
     fi
 fi
@@ -58,6 +72,8 @@ printf '%s==>%s corredor=%s tema=%s\n' "$GRIS" "$FIN" "$CORREDORES" "$TEMA"
 
 export AEGIS_KAFKA_CORREDORES="$CORREDORES"
 export AEGIS_KAFKA_TEMA="$TEMA"
+# Con corredor, la prueba no puede omitirse: se EXIGE (aegis_prueba, H-10/H-20).
+export AEGIS_EXIGIR="${AEGIS_EXIGIR:+$AEGIS_EXIGIR,}kafka"
 
 if cargo test -p aegis-firehose --features kafka --test kafka_extremo -- --nocapture; then
     printf '    %sOK%s  el destino Kafka entrega, conserva el orden y no duplica; el corredor lo acusa\n' "$VERDE" "$FIN"

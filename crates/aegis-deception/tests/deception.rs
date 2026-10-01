@@ -16,6 +16,7 @@ use aegis_deception::decoy::{DecoyConfig, DecoyKind, DecoyNet, Interaction, Skip
 use aegis_deception::engine::{DeceptionConfig, DeceptionEngine};
 use aegis_deception::guard::{parse_routes, Guard};
 use aegis_deception::sensor::{clasificar, AlertKind, ReconSensor, SensorConfig};
+use aegis_prueba::{omitir, Requisito};
 use aegis_scal::netfilter::{BlockReason, BlockedAddress, NetworkFilter};
 use aegis_scal::platform::Platform;
 use aegis_scal::ScalError;
@@ -510,7 +511,10 @@ fn una_conexion_real_a_un_senuelo_recorre_el_motor_entero() {
 fn el_bloqueo_llega_al_cortafuegos_de_verdad() {
     let filtro = aegis_scal::linux::netfilter::NftablesFilter::new();
     if !filtro.available() {
-        eprintln!("OMITIDA: nftables no esta disponible en esta maquina");
+        omitir(
+            "nftables no esta disponible en esta maquina",
+            Requisito::Herramienta("nft"),
+        );
         return;
     }
     filtro.flush().unwrap();

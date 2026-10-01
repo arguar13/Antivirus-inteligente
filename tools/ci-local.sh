@@ -91,6 +91,42 @@ LOGS="$(mktemp -d -t aegis-ci-XXXXXXXX)" || {
     exit 1
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Omisiones de las pruebas del agente y del plano de control (H-10 y H-20)
+#
+# Las pruebas de los dos workspaces que necesitan PostgreSQL, Redis, root, el
+# kernel, una herramienta o un conjunto de datos
+# se omitian con un aviso por stderr y `return`. Cargo captura la salida de las
+# pruebas que pasan, asi que la omision salia como `ok`: la tanda daba verde sin
+# haberlas ejecutado y sin decirlo. Ahora pasan por aegis_prueba::omitir
+# (crates/aegis-prueba, el mismo para los dos workspaces), que obedece a dos
+# variables:
+#
+#   AEGIS_EXIGIR     lo que se exige: a una prueba que le falte, FALLA diciendo
+#                    que falta y como obtenerlo. La tanda exige los SERVICIOS:
+#                    PostgreSQL y Redis se arrancan antes de lanzarla (en el
+#                    runner, el paso de servicios del workflow; en local,
+#                    tools/ci/servicios.sh --arrancar como root). Y exige
+#                    PRIVILEGIOS y KERNEL: la tanda corre como root sobre un
+#                    kernel con BTF, Landlock y seccomp (el grupo bpf ya carga
+#                    programas en el verificador), asi que su falta es del
+#                    entorno y no una omision admisible. Herramientas,
+#                    hardware y entorno no se exigen: se anotan y, sin
+#                    declarar, hacen fallar la tanda al final.
+#   AEGIS_OMISIONES  donde se anota cada omision que no se exige (datos,
+#                    medidas, hardware, herramientas, red, entorno), para
+#                    contarlas al final aunque cargo
+#                    capture la salida.
+#
+# Al final de cada invocacion se cuentan (tools/ci/omisiones.py). En la tanda
+# COMPLETA, una omision no declarada en tools/config/omisiones.toml hace fallar
+# la puerta. `AEGIS_EXIGIR=` (vacio) permite omitir los servicios en un grupo
+# suelto en local; en la tanda completa esas omisiones no estan declaradas y
+# fallan igual.
+export AEGIS_EXIGIR="${AEGIS_EXIGIR-servicios,privilegios,kernel}"
+export AEGIS_OMISIONES="$LOGS/omisiones.tsv"
+: > "$AEGIS_OMISIONES"
+
 # El directorio se borra al salir SOLO si no hubo fallos.
 #
 # De lo que falla, en pantalla se ven las ultimas lineas y nada mas. Para un
@@ -274,6 +310,10 @@ if [ "$SOLO" = "--reanudar" ]; then
     mkdir -p "$(dirname "$APUNTE")"
     [ -f "$APUNTE" ] || echo "$HUELLA" > "$APUNTE"
 
+    # Cada grupo corre en su propia invocacion y cuenta sus propias omisiones;
+    # esto le dice que es parte de la tanda COMPLETA, donde una omision no
+    # declarada en tools/config/omisiones.toml hace fallar (H-10/H-20).
+    export AEGIS_CI_TANDA=1
     PENDIENTES=0
     for g in $(grupos); do
         if grep -qxF "verde $g" "$APUNTE"; then
@@ -349,10 +389,14 @@ paso rust  "Rust · tests"               cargo test --all
 # vive ahi.
 #
 # Las pruebas de integracion del servidor hablan con un PostgreSQL y un Redis
-# reales y se omiten SOLAS, con un aviso, si no los hay. Por eso se pueden
-# ejecutar aqui sin condicionar el grupo a que la maquina tenga bases de datos:
-# donde las haya, se comprueban; donde no, se dice.
+# reales. Antes se omitian SOLAS si no los habia, con un aviso que cargo se
+# tragaba (H-10/H-20): el grupo salia verde sin haberlas ejecutado. Ahora la
+# tanda los EXIGE (AEGIS_EXIGIR=servicios, arriba): el primer paso comprueba
+# que responden con la misma URL que usan las pruebas y, si no, dice como
+# arrancarlos; y una prueba a la que le falten falla en vez de omitirse.
 if [ -d server ]; then
+    paso servidor "Servidor · PostgreSQL y Redis de las pruebas responden" \
+        ./tools/ci/servicios.sh --comprobar
     paso servidor "Servidor · formato"   sh -c 'cd server && cargo fmt --all --check'
     paso servidor "Servidor · clippy (-D warnings)" \
         sh -c 'cd server && cargo clippy --all-targets -- -D warnings'
@@ -752,7 +796,8 @@ fi
 # simulada en memoria. Perdida CERO contada en los dos extremos (lo que se envio,
 # lo que la base guarda, y el contador del servidor), latencia de ingesta p50/p95/
 # p99, aislamiento por inquilino, y la purga de la FASE 75 como metadato (DETACH+
-# DROP, no un DELETE que bloquee). Sin PostgreSQL se OMITE con honestidad.
+# DROP, no un DELETE que bloquee). PostgreSQL se EXIGE (AEGIS_EXIGIR=servicios):
+# sin el, la prueba falla y el grupo tambien, diciendo como arrancarlo.
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "escala-real" ]; then
     printf '%s==>%s AegisReal · escala medida de verdad contra PostgreSQL (perdida cero, latencia, purga)\n' "$GRIS" "$FIN"
     if ./tools/verificar-escala-real.sh > $LOGS/aegis-escala-real-ci.log 2>&1; then
@@ -1623,6 +1668,30 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "invariantes" ]; then
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
         sed 's/^/    | /' $LOGS/aegis-invariantes-ci.log
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
+# Recuento de omisiones (H-10/H-20). No es un grupo: va al final de CADA
+# invocacion —la tanda entera, un grupo suelto o cada grupo de `--reanudar`— y
+# cuenta lo que esa invocacion omitio. En la tanda completa, una omision no
+# declarada en tools/config/omisiones.toml es un fallo; en un grupo lanzado a
+# mano solo se informa. Sin omisiones, se ejecuta igual en la tanda entera,
+# porque tambien comprueba que la configuracion no miente.
+if [ -z "$SOLO" ] || [ "${AEGIS_CI_TANDA:-0}" = "1" ]; then
+    OMISIONES_ESTRICTAS=--exigir-declaradas
+else
+    OMISIONES_ESTRICTAS=""
+fi
+if [ -s "$AEGIS_OMISIONES" ] || [ -z "$SOLO" ]; then
+    printf '%s==>%s Omisiones · pruebas que no se ejecutaron (agente y plano de control)\n' "$GRIS" "$FIN"
+    if python3 tools/ci/omisiones.py "$AEGIS_OMISIONES" $OMISIONES_ESTRICTAS \
+            > "$LOGS/omisiones.log" 2>&1; then
+        sed 's/^/    | /' "$LOGS/omisiones.log"
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        sed 's/^/    | /' "$LOGS/omisiones.log"
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
         FALLOS=$((FALLOS + 1))
     fi
 fi

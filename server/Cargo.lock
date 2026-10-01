@@ -27,6 +27,7 @@ dependencies = [
  "aegis-hunt",
  "aegis-ingest",
  "aegis-parser",
+ "aegis-prueba",
  "miniz_oxide",
  "sqlx",
  "thiserror 2.0.20",
@@ -87,6 +88,7 @@ name = "aegis-conocimiento"
 version = "0.1.0"
 dependencies = [
  "aegis-entidad",
+ "aegis-prueba",
  "aegis-share",
  "serde_json",
  "sha2",
@@ -201,6 +203,7 @@ dependencies = [
  "aegis-entidad",
  "aegis-pqc",
  "aegis-predict",
+ "aegis-prueba",
  "ipnet",
  "serde_json",
  "sha2",
@@ -363,6 +366,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-prueba"
+version = "0.1.0"
+
+[[package]]
 name = "aegis-rango"
 version = "0.1.0"
 dependencies = [
@@ -452,6 +459,7 @@ dependencies = [
  "aegis-parser",
  "aegis-pqc",
  "aegis-predict",
+ "aegis-prueba",
  "aegis-selfdefense",
  "async-trait",
  "axum",
@@ -484,6 +492,7 @@ dependencies = [
 name = "aegis-share"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "serde_json",
  "sha2",
 ]

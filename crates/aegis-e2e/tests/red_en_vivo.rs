@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 use aegis_agent::bpf;
 use aegis_agent::decode::decode;
 use aegis_agent::TelemetryEvent;
+use aegis_prueba::{omitir, Requisito};
 
 /// Lo que interesa de cada evento de conexion: destino, puerto y marca de loopback.
 type Conexion = ([u8; 16], u16, bool);
@@ -43,7 +44,10 @@ fn esperar_hasta(limite: Duration, cond: impl Fn() -> bool) -> bool {
 #[test]
 fn una_conexion_tcp_llega_con_su_direccion_y_su_puerto() {
     if let Err(e) = bpf::preflight() {
-        eprintln!("SALTADA: el entorno no soporta la telemetria eBPF: {e}");
+        omitir(
+            &format!("el entorno no soporta la telemetria eBPF: {e}"),
+            Requisito::Ebpf,
+        );
         return;
     }
 

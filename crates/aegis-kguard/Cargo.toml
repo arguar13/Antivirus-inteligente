@@ -16,3 +16,8 @@ thiserror = "2"
 hmac = "0.12"
 sha2 = "0.10"
 libc = "0.2"
+
+[dev-dependencies]
+# Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo
+# que le falta, falla (H-10/H-20). Solo de pruebas: nunca entra en el binario.
+aegis-prueba = { path = "../aegis-prueba" }

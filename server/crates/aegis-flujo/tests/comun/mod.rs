@@ -10,6 +10,7 @@ use aegis_flujo::pg::PuertosPg;
 use aegis_pqc::firma_hibrida::ClaveFirmaHibrida;
 use aegis_predict::grafo::Evidencia;
 use aegis_predict::ConfigContencion;
+use aegis_prueba::{omitir, Requisito};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
 
@@ -34,7 +35,10 @@ impl Base {
         {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("OMITIDA: no hay PostgreSQL en {} ({e})", url());
+                omitir(
+                    &format!("no hay PostgreSQL en {} ({e})", url()),
+                    Requisito::Postgresql,
+                );
                 return None;
             }
         };

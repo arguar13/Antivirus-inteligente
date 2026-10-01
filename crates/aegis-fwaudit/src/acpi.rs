@@ -420,6 +420,7 @@ fn leer_directorio(dir: &Path, dinamica: bool, salida: &mut ConjuntoTablas) {
 #[cfg(test)]
 pub(crate) mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     /// Construye una tabla ACPI valida byte a byte, con su checksum bien puesto.
     ///
@@ -522,10 +523,12 @@ pub(crate) mod pruebas {
     fn las_tablas_acpi_reales_de_esta_maquina_se_analizan_y_cuadran() {
         let c = leer_tablas_del_sistema();
         if c.is_empty() {
-            eprintln!(
-                "OMITIDA: esta maquina no expone tablas ACPI en {DIR_TABLAS} \
-                 (ilegibles: {})",
-                c.ilegibles.len()
+            omitir(
+                &format!(
+                    "esta maquina no expone tablas ACPI en {DIR_TABLAS} (ilegibles: {})",
+                    c.ilegibles.len()
+                ),
+                Requisito::Acpi,
             );
             return;
         }

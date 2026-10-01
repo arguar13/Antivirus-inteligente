@@ -110,6 +110,7 @@ name = "aegis-confinar"
 version = "0.1.0"
 dependencies = [
  "aegis-entidad",
+ "aegis-prueba",
  "aegis-sandbox",
  "libc",
  "thiserror 2.0.20",
@@ -130,6 +131,7 @@ name = "aegis-custodia"
 version = "0.1.0"
 dependencies = [
  "aegis-pqc",
+ "aegis-prueba",
  "aegis-scal",
  "sha2",
  "thiserror 2.0.20",
@@ -141,6 +143,7 @@ version = "0.1.0"
 dependencies = [
  "aegis-honeytoken",
  "aegis-net",
+ "aegis-prueba",
  "aegis-scal",
  "libc",
  "thiserror 2.0.20",
@@ -151,6 +154,7 @@ name = "aegis-decompile"
 version = "0.1.0"
 dependencies = [
  "aegis-disasm",
+ "aegis-prueba",
  "goblin",
  "iced-x86",
  "thiserror 2.0.20",
@@ -185,6 +189,7 @@ dependencies = [
  "aegis-mesh",
  "aegis-ml",
  "aegis-net",
+ "aegis-prueba",
  "aegis-ransom",
  "aegis-resp",
  "aegis-scal",
@@ -251,6 +256,7 @@ dependencies = [
 name = "aegis-evasion"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "aegis-scan",
  "goblin",
  "libc",
@@ -261,6 +267,7 @@ dependencies = [
 name = "aegis-firehose"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "rcgen",
  "rdkafka",
  "rustls",
@@ -311,6 +318,7 @@ version = "0.1.0"
 dependencies = [
  "aegis-entidad",
  "aegis-firmware",
+ "aegis-prueba",
  "libc",
  "sha2",
  "thiserror 2.0.20",
@@ -320,6 +328,7 @@ dependencies = [
 name = "aegis-harden"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "aes-gcm",
  "libc",
  "sha2",
@@ -410,6 +419,7 @@ dependencies = [
 name = "aegis-invitado"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "libc",
 ]
 
@@ -422,6 +432,7 @@ name = "aegis-ips"
 version = "0.1.0"
 dependencies = [
  "aegis-net",
+ "aegis-prueba",
  "aegis-wire",
  "libbpf-rs",
  "thiserror 2.0.20",
@@ -431,6 +442,7 @@ dependencies = [
 name = "aegis-kguard"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "hmac",
  "libc",
  "sha2",
@@ -442,6 +454,7 @@ name = "aegis-kintegrity"
 version = "0.1.0"
 dependencies = [
  "aegis-kguard",
+ "aegis-prueba",
  "aegis-scal",
  "libbpf-rs",
  "libbpf-sys",
@@ -453,6 +466,7 @@ dependencies = [
 name = "aegis-l7hunter"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "libc",
  "thiserror 2.0.20",
  "tract-onnx",
@@ -463,6 +477,7 @@ name = "aegis-macho"
 version = "0.1.0"
 dependencies = [
  "aegis-pe",
+ "aegis-prueba",
  "thiserror 2.0.20",
 ]
 
@@ -470,6 +485,7 @@ dependencies = [
 name = "aegis-memhunter"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "libc",
  "thiserror 2.0.20",
 ]
@@ -489,6 +505,7 @@ dependencies = [
 name = "aegis-ml"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "goblin",
  "thiserror 2.0.20",
  "tract-onnx",
@@ -506,6 +523,7 @@ name = "aegis-net"
 version = "0.1.0"
 dependencies = [
  "aegis-ipc",
+ "aegis-prueba",
  "aegis-scal",
  "libbpf-rs",
  "libc",
@@ -532,6 +550,7 @@ dependencies = [
 name = "aegis-pe"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "sha2",
  "thiserror 2.0.20",
 ]
@@ -566,6 +585,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-prueba"
+version = "0.1.0"
+
+[[package]]
 name = "aegis-ptguard"
 version = "0.1.0"
 dependencies = [
@@ -588,6 +611,7 @@ dependencies = [
 name = "aegis-resp"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "aes-gcm",
  "hkdf",
  "libc",
@@ -618,6 +642,7 @@ dependencies = [
 name = "aegis-sandbox"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "libc",
  "thiserror 2.0.20",
 ]
@@ -628,6 +653,7 @@ version = "0.1.0"
 dependencies = [
  "aegis-disasm",
  "aegis-entidad",
+ "aegis-prueba",
  "aegis-scal",
  "aegis-vuln",
  "goblin",
@@ -641,6 +667,7 @@ dependencies = [
 name = "aegis-scal"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "libc",
  "thiserror 2.0.20",
 ]
@@ -650,6 +677,7 @@ name = "aegis-scan"
 version = "0.1.0"
 dependencies = [
  "aegis-patron",
+ "aegis-prueba",
  "aegis-scal",
  "arc-swap",
  "libc",
@@ -698,6 +726,7 @@ dependencies = [
 name = "aegis-syscallguard"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "aegis-scal",
  "libc",
  "thiserror 2.0.20",
@@ -714,6 +743,7 @@ dependencies = [
  "aegis-ml",
  "aegis-motor",
  "aegis-pe",
+ "aegis-prueba",
  "aegis-sandbox",
  "goblin",
  "libc",
@@ -724,6 +754,7 @@ name = "aegis-unpacker"
 version = "0.1.0"
 dependencies = [
  "aegis-ml",
+ "aegis-prueba",
  "aegis-scal",
  "aegis-scan",
  "libc",

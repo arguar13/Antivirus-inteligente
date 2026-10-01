@@ -15,6 +15,7 @@
 use std::process::Command;
 
 use aegis_macho::{Binario, MachoError};
+use aegis_prueba::{omitir, Requisito};
 
 /// Compila un Mach-O real para una arquitectura.
 fn objeto_real(target: &str, nombre: &str) -> Option<Vec<u8>> {
@@ -51,7 +52,10 @@ fn x86_64() -> Option<Vec<u8>> {
 #[test]
 fn un_macho_arm64_real_se_lee_y_trae_sus_segmentos() {
     let Some(bytes) = arm64() else {
-        eprintln!("OMITIDA: clang no compila a Mach-O arm64 en esta maquina");
+        omitir(
+            "clang no compila a Mach-O arm64 en esta maquina",
+            Requisito::Herramienta("clang"),
+        );
         return;
     };
     // El numero magico de verdad, no uno inventado.
@@ -77,7 +81,10 @@ fn un_macho_arm64_real_se_lee_y_trae_sus_segmentos() {
 #[test]
 fn un_macho_x86_64_real_tambien() {
     let Some(bytes) = x86_64() else {
-        eprintln!("OMITIDA: clang no compila a Mach-O x86_64 en esta maquina");
+        omitir(
+            "clang no compila a Mach-O x86_64 en esta maquina",
+            Requisito::Herramienta("clang"),
+        );
         return;
     };
     let b = Binario::leer(&bytes).expect("leer un Mach-O real");
@@ -89,7 +96,10 @@ fn las_dos_arquitecturas_dan_ficheros_distintos_y_los_dos_se_leen() {
     // Que el lector entienda uno no dice que entienda el otro: los comandos de
     // carga y sus tamanos cambian entre arquitecturas.
     let (Some(a), Some(x)) = (arm64(), x86_64()) else {
-        eprintln!("OMITIDA: sin las dos arquitecturas");
+        omitir(
+            "clang no da las dos arquitecturas de Mach-O",
+            Requisito::Herramienta("clang"),
+        );
         return;
     };
     assert_ne!(a, x, "son dos binarios distintos");
@@ -104,7 +114,10 @@ fn un_universal_con_dos_rodajas_reales_trae_los_dos_programas() {
     // que el lector no se queda con la primera, que es el punto ciego que este
     // modulo existe para cerrar.
     let (Some(x), Some(a)) = (x86_64(), arm64()) else {
-        eprintln!("OMITIDA: sin las dos arquitecturas");
+        omitir(
+            "clang no da las dos arquitecturas de Mach-O",
+            Requisito::Herramienta("clang"),
+        );
         return;
     };
     let f = envolver(&[(0x0100_0007, &x), (0x0100_000c, &a)]);
@@ -142,7 +155,10 @@ fn un_universal_con_dos_rodajas_reales_trae_los_dos_programas() {
 #[test]
 fn truncar_un_macho_real_por_cualquier_sitio_no_provoca_un_panico() {
     let Some(bytes) = arm64() else {
-        eprintln!("OMITIDA: sin cadena de compilacion para macOS");
+        omitir(
+            "sin cadena de compilacion para macOS",
+            Requisito::Herramienta("clang"),
+        );
         return;
     };
     let paso = (bytes.len() / 150).max(1);
@@ -157,7 +173,10 @@ fn truncar_un_macho_real_por_cualquier_sitio_no_provoca_un_panico() {
 #[test]
 fn voltear_bytes_de_los_encabezados_de_un_macho_real_no_provoca_un_panico() {
     let Some(bytes) = arm64() else {
-        eprintln!("OMITIDA: sin cadena de compilacion para macOS");
+        omitir(
+            "sin cadena de compilacion para macOS",
+            Requisito::Herramienta("clang"),
+        );
         return;
     };
     let mut semilla = 0x00A1_1CE5_u64;
@@ -177,7 +196,10 @@ fn voltear_bytes_de_los_encabezados_de_un_macho_real_no_provoca_un_panico() {
 #[test]
 fn una_rodaja_que_apunta_fuera_del_fichero_se_rechaza_con_un_macho_real_dentro() {
     let Some(a) = arm64() else {
-        eprintln!("OMITIDA: sin cadena de compilacion para macOS");
+        omitir(
+            "sin cadena de compilacion para macOS",
+            Requisito::Herramienta("clang"),
+        );
         return;
     };
     let mut f = envolver(&[(0x0100_000c, &a)]);

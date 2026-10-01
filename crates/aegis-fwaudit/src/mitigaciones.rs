@@ -173,6 +173,7 @@ pub fn evaluar(v: &Result<Vec<Vulnerabilidad>, String>) -> Comprobacion {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     /// Los textos REALES que escribe el kernel, incluidos los de esta maquina.
     #[test]
@@ -258,7 +259,10 @@ mod pruebas {
     fn las_vulnerabilidades_reales_de_esta_maquina_se_leen_todas() {
         let r = leer(Path::new("/sys"));
         let Ok(lista) = &r else {
-            eprintln!("NO APLICABLE: {r:?}");
+            omitir(
+                &format!("el kernel no expone sus mitigaciones: {r:?}"),
+                Requisito::Entorno,
+            );
             return;
         };
         assert!(!lista.is_empty());

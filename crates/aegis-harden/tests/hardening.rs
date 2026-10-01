@@ -11,6 +11,7 @@ use std::process::Command;
 
 use aegis_harden::antidebug::{self, DebuggerCheck, Policy};
 use aegis_harden::strings;
+use aegis_prueba::{omitir, Requisito};
 
 // ---------------------------------------------------------------------------
 // Cifrado de cadenas
@@ -140,7 +141,10 @@ fn el_self_test_del_tool_pasa() {
     {
         Ok(o) => o,
         Err(_) => {
-            eprintln!("python3 no disponible; se omite el self-test del tool");
+            omitir(
+                "python3 no disponible: el self-test del tool no se ejercio",
+                Requisito::Herramienta("python3"),
+            );
             return;
         }
     };
@@ -160,7 +164,10 @@ fn el_fichero_generado_esta_al_dia() {
     let salida = match Command::new("python3").arg(&tool).arg("--check").output() {
         Ok(o) => o,
         Err(_) => {
-            eprintln!("python3 no disponible; se omite --check");
+            omitir(
+                "python3 no disponible: --check no se ejercio",
+                Requisito::Herramienta("python3"),
+            );
             return;
         }
     };

@@ -49,6 +49,7 @@ members = [
     "crates/aegis-sync",
     "crates/aegis-watchdog",
     "crates/aegis-e2e",
+    "crates/aegis-prueba",
     "crates/aegis-firehose",
     "crates/aegis-attest",
     "crates/aegis-rollback",

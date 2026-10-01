@@ -475,7 +475,11 @@ while IFS='|' read -r tipo a b c; do
             esac
             ;;
         cargo-test)
-            "$C/pruebas/$a" --test-threads=1 > "$T/prueba-$a.log" 2>&1 < /dev/null
+            # Dentro de la VM no hay tanda que cuente omisiones: root y la
+            # telemetria eBPF se EXIGEN, o una prueba e2e sin sondas saldria
+            # «pasa» sin haber visto un evento (aegis_prueba, H-10/H-20).
+            AEGIS_EXIGIR=privilegios,ebpf "$C/pruebas/$a" --test-threads=1 \
+                > "$T/prueba-$a.log" 2>&1 < /dev/null
             if [ $? -eq 0 ]; then
                 linea "AEGIS-MATRIZ|prueba|$a|pasa|$(grep 'test result' "$T/prueba-$a.log" | tail -n 1)"
             else

@@ -19,6 +19,7 @@ use aegis_itdr::grafo::Nivel;
 use aegis_orchestrator::{AccionRemediacion, EjecutorRemediacion, Objetivo};
 use aegis_predict::grafo::{Activo, ClaseActivo, Evidencia, Paso, RelacionSerializable, Via};
 use aegis_predict::{ConfigContencion, GrafoAtaque};
+use aegis_prueba::{omitir, Requisito};
 use aegis_server::almacen::Almacen;
 use aegis_server::prediccion::{contener_preventivamente, ResultadoPreventivo};
 use aegis_server::remediacion::EjecutorFlota;
@@ -110,7 +111,10 @@ fn grafo(endpoint: &str) -> GrafoAtaque {
 #[tokio::test]
 async fn una_contencion_preventiva_encola_una_orden_real_en_el_endpoint() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL en {}", url_pg());
+        omitir(
+            &format!("no hay PostgreSQL en {}", url_pg()),
+            Requisito::Postgresql,
+        );
         return;
     };
     let cn = cn_unico("pred");
@@ -152,7 +156,10 @@ async fn una_contencion_preventiva_encola_una_orden_real_en_el_endpoint() {
 #[tokio::test]
 async fn una_contencion_sobre_un_endpoint_no_matriculado_falla_con_un_motivo_legible() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL en {}", url_pg());
+        omitir(
+            &format!("no hay PostgreSQL en {}", url_pg()),
+            Requisito::Postgresql,
+        );
         return;
     };
     let cn = cn_unico("fantasma");
@@ -181,7 +188,10 @@ async fn una_contencion_sobre_un_endpoint_no_matriculado_falla_con_un_motivo_leg
 #[tokio::test]
 async fn una_evidencia_fabricada_no_encola_ninguna_orden() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL en {}", url_pg());
+        omitir(
+            &format!("no hay PostgreSQL en {}", url_pg()),
+            Requisito::Postgresql,
+        );
         return;
     };
     let cn = cn_unico("victima");
@@ -234,7 +244,10 @@ async fn una_evidencia_fabricada_no_encola_ninguna_orden() {
 #[tokio::test]
 async fn la_orden_preventiva_usa_el_mismo_verbo_que_la_de_deteccion() {
     let Some(almacen) = almacen_de_pruebas().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL en {}", url_pg());
+        omitir(
+            &format!("no hay PostgreSQL en {}", url_pg()),
+            Requisito::Postgresql,
+        );
         return;
     };
     let cn = cn_unico("verbo");

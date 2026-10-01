@@ -16,3 +16,8 @@ thiserror = "2"
 libc = "0.2"
 goblin = "0.9"
 aegis-scan = { path = "../aegis-scan" }
+
+[dev-dependencies]
+# Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo
+# que le falta, falla (H-10/H-20). Solo de pruebas: nunca entra en el binario.
+aegis-prueba = { path = "../aegis-prueba" }

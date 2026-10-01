@@ -38,10 +38,12 @@ jobs:
       - name: Comprobar el runner
         run: ./deploy/ci/instalar-runner.sh --comprobar
 
+      # Sin `|| true` (hallazgos H-10/H-20): make ci EXIGE PostgreSQL y Redis
+      # (AEGIS_EXIGIR=servicios). Si no arrancan, o la URL de las pruebas no
+      # conecta, el job falla AQUI diciendo cual y por que, en vez de dar verde
+      # con las pruebas de integracion sin ejecutar.
       - name: Servicios de las pruebas de integracion
-        run: |
-          pg_ctlcluster --skip-systemctl-redirect "$(pg_lsclusters -h | awk 'NR==1{print $1}')" main start || true
-          redis-server --daemonize yes || true
+        run: ./tools/ci/servicios.sh --arrancar
 
       - name: make ci
         env:

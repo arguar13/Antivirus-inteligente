@@ -29,6 +29,9 @@ thiserror = "2"
 libc = "0.2"
 
 [dev-dependencies]
+# Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo
+# que le falta, falla (H-10/H-20). Solo de pruebas: nunca entra en el binario.
+aegis-prueba = { path = "../aegis-prueba" }
 # La prueba de la garantia de solo lectura SI necesita intentar escribir de
 # verdad sobre el descriptor y comprobar que el KERNEL lo rechaza. Afirmar la
 # garantia sin ejercerla contra el kernel seria afirmarla sobre el papel.

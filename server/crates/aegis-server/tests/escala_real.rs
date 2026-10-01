@@ -25,6 +25,7 @@
 //! El muro real (cien mil conexiones mTLS vivas, discos de produccion) se declara
 //! en `tools/verificar-escala-real.sh`.
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_server::almacen::{Almacen, NuevaAlerta};
 use chrono::Utc;
 use sqlx::Row;
@@ -94,7 +95,10 @@ fn percentil_ns(muestras: &mut [u128], p: f64) -> u128 {
 async fn cero_perdida_contada_en_los_dos_extremos_contra_postgres_real() {
     let _serie = EN_SERIE.lock().await;
     let Some(a) = almacen().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL (AEGIS_TEST_PG_URL). La medida real se declara.");
+        omitir(
+            "no hay PostgreSQL (AEGIS_TEST_PG_URL). La medida real se declara.",
+            Requisito::Postgresql,
+        );
         return;
     };
     let run = sufijo();
@@ -208,7 +212,10 @@ async fn la_purga_es_metadato_no_un_barrido_de_filas() {
     // ingesta; un DELETE recorre y bloquea. Se demuestra contra PostgreSQL REAL en
     // un esquema desechable, a escala pequena —la propiedad no depende del tamano—.
     let Some(a) = almacen().await else {
-        eprintln!("OMITIDA: no hay PostgreSQL. La medida de purga se declara.");
+        omitir(
+            "no hay PostgreSQL. La medida de purga se declara.",
+            Requisito::Postgresql,
+        );
         return;
     };
     let esquema = format!("purga_{}", sufijo());

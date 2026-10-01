@@ -292,6 +292,7 @@ pub fn por_bdf(dispositivos: &[Dispositivo], bdf: Bdf) -> Option<&Dispositivo> {
 #[cfg(test)]
 mod pruebas {
     use super::*;
+    use aegis_prueba::{omitir, Requisito};
 
     #[test]
     fn la_direccion_se_analiza_en_su_forma_canonica_y_nada_mas() {
@@ -352,7 +353,7 @@ mod pruebas {
         let ds = match enumerar(Path::new("/sys")) {
             Ok(d) => d,
             Err(SinPci(m)) => {
-                eprintln!("NO APLICABLE: {m}");
+                omitir(&format!("sin bus PCI legible: {m}"), Requisito::Pci);
                 return;
             }
         };

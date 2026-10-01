@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_syscallguard::{EstadoSyscall, OrigenSyscall, SyscallGuard};
 
 /// Numero de syscall de `getpid`, la que ejecuta el codigo directo del stub.
@@ -48,7 +49,10 @@ fn compilar_stub() -> Option<PathBuf> {
 #[test]
 fn el_guardia_caza_la_syscall_directa_y_respeta_la_de_libc() {
     let Some(stub) = compilar_stub() else {
-        eprintln!("OMITIDA: no hay compilador de C para construir el vector");
+        omitir(
+            "no hay compilador de C (o no compila) para construir el vector",
+            Requisito::Herramienta("cc"),
+        );
         return;
     };
 
@@ -112,7 +116,10 @@ fn un_binario_normal_no_dispara_evasion() {
     let informe = match guardia.perfilar_comando(std::path::Path::new("/bin/true"), &[]) {
         Ok(i) => i,
         Err(e) => {
-            eprintln!("OMITIDA: no se pudo trazar /bin/true: {e}");
+            omitir(
+                &format!("no se pudo trazar /bin/true: {e}"),
+                Requisito::Ptrace,
+            );
             return;
         }
     };

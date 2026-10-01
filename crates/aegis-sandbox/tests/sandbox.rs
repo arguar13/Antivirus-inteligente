@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_sandbox::policy::FsPolicy;
 use aegis_sandbox::sandbox::CompiledSandbox;
 use aegis_sandbox::seccomp::{self, DeniedAction, RET_ALLOW, RET_KILL_PROCESS};
@@ -317,9 +318,10 @@ fn landlock_niega_el_sistema_de_ficheros_de_raiz() {
         // No se falla: este kernel no tiene CONFIG_SECURITY_LANDLOCK. Se avisa
         // en vez de callar, porque la diferencia entre "probado" y "omitido"
         // tiene que verse en la salida del CI.
-        eprintln!(
-            "OMITIDA: este kernel no admite Landlock; la restriccion por rutas \
-             no se puede ejercer aqui. seccomp SI se probo."
+        omitir(
+            "este kernel no admite Landlock; la restriccion por rutas \
+             no se puede ejercer aqui. seccomp SI se probo.",
+            Requisito::Landlock,
         );
         assert!(soporte.seccomp, "al menos seccomp tiene que estar");
         return;
@@ -416,7 +418,7 @@ fn conjunto_de_pruebas() -> Option<aegis_sandbox::landlock::Ruleset> {
 #[test]
 fn una_regla_sobre_un_fichero_regular_no_tumba_el_sandbox() {
     let Some(rs) = conjunto_de_pruebas() else {
-        eprintln!("OMITIDA: este kernel no trae Landlock");
+        omitir("este kernel no trae Landlock", Requisito::Landlock);
         return;
     };
     let fichero = std::env::temp_dir().join("aegis-landlock-fichero-regular");
@@ -435,12 +437,12 @@ fn una_regla_sobre_un_fichero_regular_no_tumba_el_sandbox() {
 #[test]
 fn una_regla_sobre_un_dispositivo_de_caracteres_no_tumba_el_sandbox() {
     let Some(rs) = conjunto_de_pruebas() else {
-        eprintln!("OMITIDA: este kernel no trae Landlock");
+        omitir("este kernel no trae Landlock", Requisito::Landlock);
         return;
     };
     let dev = PathBuf::from("/dev/null");
     if !dev.exists() {
-        eprintln!("OMITIDA: esta maquina no tiene /dev/null");
+        omitir("esta maquina no tiene /dev/null", Requisito::Entorno);
         return;
     }
     // Lectura Y escritura: la mascara mas ancha que la politica llega a pedir,
@@ -456,7 +458,7 @@ fn una_regla_sobre_un_dispositivo_de_caracteres_no_tumba_el_sandbox() {
 #[test]
 fn una_ruta_sin_ningun_derecho_aplicable_se_declara_en_vez_de_contarse() {
     let Some(rs) = conjunto_de_pruebas() else {
-        eprintln!("OMITIDA: este kernel no trae Landlock");
+        omitir("este kernel no trae Landlock", Requisito::Landlock);
         return;
     };
     let fichero = std::env::temp_dir().join("aegis-landlock-sin-derechos");
@@ -511,7 +513,7 @@ fn una_politica_sin_rutas_no_prohibe_el_sistema_de_ficheros_entero() {
 fn el_resumen_distingue_las_rutas_con_regla_de_las_que_no_la_tienen() {
     let soporte = Support::detect();
     if soporte.landlock_abi.is_none() {
-        eprintln!("OMITIDA: este kernel no trae Landlock");
+        omitir("este kernel no trae Landlock", Requisito::Landlock);
         return;
     }
     let fichero = std::env::temp_dir().join("aegis-landlock-resumen");
@@ -541,7 +543,7 @@ fn un_fichero_de_solo_lectura_sigue_siendo_de_solo_lectura() {
     // ejerciendolo dentro del sandbox, no leyendo la mascara.
     let soporte = Support::detect();
     if !soporte.can_restrict_paths() {
-        eprintln!("OMITIDA: este kernel no trae Landlock");
+        omitir("este kernel no trae Landlock", Requisito::Landlock);
         return;
     }
     let fichero = std::env::temp_dir().join("aegis-landlock-solo-lectura");

@@ -31,6 +31,9 @@ default = []
 kafka = ["dep:rdkafka", "dep:tokio"]
 
 [dev-dependencies]
+# Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo
+# que le falta, falla (H-10/H-20). Solo de pruebas: nunca entra en el binario.
+aegis-prueba = { path = "../aegis-prueba" }
 # Para levantar un servidor de syslog REAL en las pruebas: un extremo TLS de
 # verdad, con su certificado, no una imitacion del protocolo.
 rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }

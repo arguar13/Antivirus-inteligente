@@ -34,6 +34,7 @@ use aegis_ips::modo::Modo;
 use aegis_ips::plano::PlanoIps;
 use aegis_ips::protegidos::MotivoProteccion;
 use aegis_ips::veredicto::{Accion, Flujo};
+use aegis_prueba::{omitir, Requisito};
 
 /// `TC_ACT_OK`: el paquete sigue su camino.
 const PASA: u32 = 0;
@@ -89,11 +90,13 @@ fn plano(modo: Modo) -> Option<PlanoIps> {
     match PlanoIps::cargar(modo, true) {
         Ok(p) => Some(p),
         Err(e) => {
-            println!(
-                "OMITIDA: no se pudo cargar el programa eBPF ({e}).\n\
-                 Cargar codigo en el kernel exige CAP_BPF o root. El corte NO se\n\
-                 ejercio aqui; la DECISION de cortar si se prueba, sin privilegios,\n\
-                 en las pruebas del decisor."
+            omitir(
+                &format!(
+                    "no se pudo cargar el programa eBPF ({e}). Cargar codigo en el \
+                     kernel exige CAP_BPF o root. El corte NO se ejercio aqui; la \
+                     DECISION de cortar si se prueba, sin privilegios, en el decisor"
+                ),
+                Requisito::Ebpf,
             );
             None
         }

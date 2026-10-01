@@ -41,3 +41,8 @@ libc = "0.2"
 name = "aegis-trabajador-prueba"
 path = "src/bin/aegis-trabajador-prueba.rs"
 required-features = ["prueba-fallos"]
+
+[dev-dependencies]
+# Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo
+# que le falta, falla (H-10/H-20). Solo de pruebas: nunca entra en el binario.
+aegis-prueba = { path = "../aegis-prueba" }

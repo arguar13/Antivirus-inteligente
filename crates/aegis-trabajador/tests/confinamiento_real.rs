@@ -2,14 +2,16 @@
 //! panico, bomba de memoria, bucle infinito, relanzamiento y enfriamiento.
 //!
 //! Necesita root (espacio de nombres de red, cambio de uid, cgroup). En make ci
-//! se ejecuta como root con `AEGIS_EXIGIR_ROOT=1`, y entonces NO se salta: una
-//! prueba de confinamiento que se omite en silencio es un verde falso.
+//! se ejecuta como root y con `AEGIS_EXIGIR=root` (aegis_prueba), y entonces NO
+//! se salta: una prueba de confinamiento que se omite en silencio es un verde
+//! falso.
 
 #![cfg(all(target_os = "linux", feature = "prueba-fallos"))]
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use aegis_prueba::{omitir, Requisito};
 use aegis_trabajador::{Analizador, ConfigTrabajador, FalloAnalisis, Trabajador};
 
 fn es_root() -> bool {
@@ -26,11 +28,7 @@ fn es_root() -> bool {
 /// `None` si hay que saltar (sin root y sin exigencia); falla si se exige.
 fn config() -> Option<ConfigTrabajador> {
     if !es_root() {
-        assert!(
-            std::env::var_os("AEGIS_EXIGIR_ROOT").is_none(),
-            "AEGIS_EXIGIR_ROOT: la prueba de confinamiento real necesita root"
-        );
-        eprintln!("SALTADA: el confinamiento real necesita root");
+        omitir("el confinamiento real necesita root", Requisito::Root);
         return None;
     }
     let mut c = ConfigTrabajador::este_binario().expect("ruta del ejecutable");

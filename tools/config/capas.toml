@@ -64,7 +64,7 @@ crates = [
 ]
 
 [herramientas]
-crates = ["aegis-e2e", "fleet-simulator"]
+crates = ["aegis-e2e", "aegis-prueba", "fleet-simulator"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  Excepciones conocidas
