@@ -20,6 +20,7 @@ use aegis_evasion::hollow::{self, HollowVerdict};
 use aegis_evasion::hooks::{self, PatchKind, ResolvedSymbol, SIMBOLOS_VIGILADOS};
 use aegis_evasion::inject::{scan_injection, InjectionKind, ARENA_JIT_MIN};
 use aegis_evasion::report::{EvasionReport, EvasionSeverity};
+use aegis_prueba::{omitir, Requisito};
 use aegis_scan::memory::{self, MemoryRegion, Perms};
 
 const PAGINA: usize = 4096;
@@ -118,6 +119,19 @@ fn biblioteca_ejecutable() -> Option<(String, u64, usize)> {
     None
 }
 
+/// La ruta de la libc dinamica mapeada en este proceso (`libc.so.6`,
+/// `libc-2.x.so`...), por el nombre del fichero y no por su posicion.
+fn libc_mapeada() -> Option<String> {
+    let regs = memory::regions_of(std::process::id() as i32).ok()?;
+    regs.into_iter()
+        .filter(|r| r.perms.exec && !r.perms.write)
+        .filter_map(|r| r.path)
+        .find(|p| {
+            let nombre = p.rsplit('/').next().unwrap_or_default();
+            p.starts_with('/') && (nombre.starts_with("libc.so") || nombre.starts_with("libc-"))
+        })
+}
+
 fn region(start: u64, end: u64, perms: &str, path: Option<&str>) -> MemoryRegion {
     MemoryRegion {
         start,
@@ -142,11 +156,17 @@ fn region(start: u64, end: u64, perms: &str, path: Option<&str>) -> MemoryRegion
 #[test]
 fn un_mapeo_ejecutable_sobrescrito_se_detecta_como_vaciado() {
     let Some((ruta, offset, largo)) = biblioteca_ejecutable() else {
-        eprintln!("sin biblioteca utilizable; se omite");
+        omitir(
+            "sin biblioteca ejecutable utilizable en el propio proceso",
+            Requisito::Entorno,
+        );
         return;
     };
     let Some(m) = mapear_privado_exec(&ruta, offset as i64, largo) else {
-        eprintln!("mmap no disponible; se omite");
+        omitir(
+            "mmap privado y ejecutable no disponible",
+            Requisito::Entorno,
+        );
         return;
     };
     let inicio = m.addr as u64;
@@ -203,12 +223,24 @@ fn un_mapeo_ejecutable_sobrescrito_se_detecta_como_vaciado() {
 #[test]
 fn un_parche_pequeno_no_se_confunde_con_un_vaciado() {
     let Some((_, offset, largo)) = biblioteca_ejecutable() else {
+        omitir(
+            "sin biblioteca ejecutable utilizable en el propio proceso",
+            Requisito::Entorno,
+        );
         return;
     };
     let Some((ruta, _, _)) = biblioteca_ejecutable() else {
+        omitir(
+            "sin biblioteca ejecutable utilizable en el propio proceso",
+            Requisito::Entorno,
+        );
         return;
     };
     let Some(m) = mapear_privado_exec(&ruta, offset as i64, largo) else {
+        omitir(
+            "mmap privado y ejecutable no disponible",
+            Requisito::Entorno,
+        );
         return;
     };
     let inicio = m.addr as u64;
@@ -302,6 +334,7 @@ fn los_procesos_reales_del_sistema_no_dan_falsos_positivos() {
     let mut sospechosos = Vec::new();
 
     let Ok(dir) = std::fs::read_dir("/proc") else {
+        omitir("/proc no se puede recorrer", Requisito::Entorno);
         return;
     };
     for e in dir.flatten() {
@@ -353,7 +386,10 @@ fn una_region_anonima_rwx_real_se_detecta() {
         64 * PAGINA,
         libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
     ) else {
-        eprintln!("el sistema no permite RWX; se omite");
+        omitir(
+            "el sistema no permite memoria anonima RWX",
+            Requisito::Entorno,
+        );
         return;
     };
     let inicio = m.addr as u64;
@@ -466,6 +502,7 @@ fn el_analisis_completo_no_marca_como_graves_los_procesos_del_sistema() {
     let mut graves = Vec::new();
 
     let Ok(dir) = std::fs::read_dir("/proc") else {
+        omitir("/proc no se puede recorrer", Requisito::Entorno);
         return;
     };
     for e in dir.flatten() {
@@ -701,18 +738,33 @@ fn lo_que_no_se_puede_leer_se_cuenta_como_omitido_y_no_como_limpio() {
 /// donde se cometen los errores, y solo un ELF de verdad la ejercita.
 #[test]
 fn los_simbolos_vigilados_se_resuelven_de_una_libc_real() {
-    let Some((ruta, _, _)) = biblioteca_ejecutable() else {
+    // La libc de VERDAD, por su nombre: la primera region ejecutable del proceso
+    // es el propio binario de prueba, que no exporta nada de la libc, y con ella
+    // esta prueba se omitia siempre sin haber mirado nunca una libc.
+    let Some(ruta) = libc_mapeada() else {
+        omitir(
+            "el proceso de prueba no tiene una libc dinamica mapeada",
+            Requisito::Entorno,
+        );
         return;
     };
     let Ok(datos) = std::fs::read(&ruta) else {
+        omitir(&format!("{ruta} no se puede leer"), Requisito::Entorno);
         return;
     };
     let Ok(simbolos) = hooks::resolver_simbolos(&ruta, &datos, 0x7f0000000000, SIMBOLOS_VIGILADOS)
     else {
+        omitir(
+            &format!("los simbolos de {ruta} no se pudieron resolver"),
+            Requisito::Entorno,
+        );
         return;
     };
     if simbolos.is_empty() {
-        eprintln!("{ruta} no exporta ninguno de los simbolos vigilados; se omite");
+        omitir(
+            &format!("{ruta} no exporta ninguno de los simbolos vigilados"),
+            Requisito::Entorno,
+        );
         return;
     }
 
