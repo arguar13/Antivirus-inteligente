@@ -13,15 +13,24 @@ gana en cuatro cosas.
 
 ## 100.2 Construcción reproducible bit a bit
 
-in-toto **atestigua lo que pasó**; esto demuestra que se puede **repetir**, que es
-una afirmación mucho más fuerte y que casi nadie sostiene. `tools/construir-reproducible.sh`
-compila el mismo fuente dos veces con los flags que cierran las fuentes conocidas
-de no-determinismo (`--remap-path-prefix`, `-C codegen-units=1`, `SOURCE_DATE_EPOCH`)
-y comprueba que dan el **mismo binario byte a byte**. Lo que no sea reproducible no
-se maquilla: se declara con su motivo (`reproducible::comparar` dice el primer byte
-que difiere) para arreglar la **causa**. En una máquina se demuestra la
-reproducibilidad **temporal** (dos builds seguidos); la **cross-máquina** de la
-flota se cierra con dos runners distintos, y se declara.
+in-toto **atestigua lo que pasó**; esto comprueba que se puede **repetir**.
+`tools/construir-reproducible.sh` (grupo `reproducible` de `make ci`) construye
+**dos veces los instalables reales** —los de `tools/config/instalables.toml`, con
+`tools/ci/hermetico.sh`: hoy `aegis-agent`, `aegisctl`, `aegis-watchdog` y
+`aegis-fleet`— desde el mismo árbol, en dos directorios de destino distintos (uno
+con caché y otro desde cero) y con `SOURCE_DATE_EPOCH` igual a la fecha del commit,
+y compara el SHA-256 de cada binario. Las rutas que el compilador puede incrustar
+(árbol fuente, `CARGO_HOME`, directorio de destino y el `OUT_DIR` de los objetos
+eBPF) se remapean a nombres fijos, con los mismos flags en las dos construcciones.
+Si un binario difiere, la puerta **falla** y lo diagnostica: `diffoscope` si está
+instalado; si no, la primera sección ELF distinta y las cadenas que cambian. No hay
+lista de binarios exentos: se arregla la **causa**.
+
+Lo que mide es la reproducibilidad **temporal en una máquina**. No mide la
+**cross-máquina** (otro runner, otra ruta del repositorio), ni que los binarios de
+`dist-hermetico/` sean idénticos a los de la comprobación, que se construyen con
+otra lista de remapeos. Hasta el hallazgo H-06, este script compilaba un `fib.rs`
+de juguete con `rustc` y ningún instalable se había construido dos veces.
 
 ## 100.3 La atestación se verifica en el endpoint, ANTES de aplicar
 
@@ -69,7 +78,7 @@ del árbol completo para todos los tamaños de 1 a 33.
 | Cadena de linaje hasta el TPM | **sí** | contigüidad comprobada; un hueco da el eslabón que falta |
 | Gate: no aplicar sin atestación que case | **sí** | huella≠SBOM, sin firma, cadena rota o no reproducible → `Rechazar`, registrado |
 | Integración en el camino crítico | **sí** | `aegis-update::aplicar_con_procedencia` consulta la puerta antes de aplicar |
-| Reproducibilidad temporal (dos builds) | **sí** | `construir-reproducible.sh`: dos builds del mismo fuente → mismo sha256 |
+| Reproducibilidad temporal de los instalables (dos builds) | **sí**, en una máquina | `construir-reproducible.sh` (grupo `reproducible`): los instalables herméticos, dos destinos, mismo SHA-256; si difieren, falla con diagnóstico |
 | Autoataque: la actualización como ejecución | **sí** | ninguna variante maliciosa se aplica; cada rechazo se registra |
 | Reproducibilidad cross-máquina de la flota | **frontera declarada** | necesita dos runners distintos; el mecanismo de comparación está |
 | SBOM propio por alcanzabilidad (FASE 94) | **incremento siguiente** | el gate consume el resultado; el análisis completo del SBOM propio se declara |

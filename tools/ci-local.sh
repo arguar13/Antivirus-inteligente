@@ -1121,14 +1121,15 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "inline" ]; then
 fi
 
 # AegisProvenance (FASE 108): la procedencia del propio producto —la unica fase que
-# audita al proyecto—. Lo distintivo, probado como logica pura: construccion
-# REPRODUCIBLE bit a bit (dos builds, mismo binario), atestacion verificada EN EL
+# audita al proyecto—. Lo distintivo, probado como logica pura: la DECISION de
+# reproducibilidad (las dos construcciones de verdad son el grupo
+# `reproducible`), atestacion verificada EN EL
 # ENDPOINT antes de aplicar (aegis-update no aplica lo que no casa con el SBOM),
 # una sola cadena de linaje fuente->...->TPM, y un registro de transparencia Merkle
 # de solo apendice, verificable SIN conexion, donde un fork se detecta por la
 # prueba de consistencia (RFC 6962).
 if [ -z "${SOLO:-}" ] || [ "$SOLO" = "procedencia" ]; then
-    printf '%s==>%s AegisProvenance · reproducible, atestacion verificada antes de aplicar, transparencia sin conexion\n' "$GRIS" "$FIN"
+    printf '%s==>%s AegisProvenance · atestacion verificada antes de aplicar, transparencia sin conexion\n' "$GRIS" "$FIN"
     if ./tools/verificar-procedencia.sh > $LOGS/aegis-procedencia-ci.log 2>&1; then
         sed 's/^/    | /' $LOGS/aegis-procedencia-ci.log
         printf '    %sOK%s\n' "$VERDE" "$FIN"
@@ -1631,10 +1632,18 @@ paso cadena "Cadena de suministro · deny, audit y vet en los cuatro workspaces"
     ./tools/ci/supply_chain.sh
 paso hermetico "Artefactos hermeticos · binarios estaticos de los instalables" \
     ./tools/ci/hermetico.sh
+# H-06: los MISMOS instalables, construidos dos veces (un destino con cache y
+# otro desde cero, SOURCE_DATE_EPOCH del commit) y con el SHA-256 comparado; si
+# difieren, FALLA con diagnostico. Va junto a `hermetico` porque necesita lo
+# mismo (sysroot musl, objetivo de Rust) y no toca dist-hermetico/. Es de los
+# grupos caros: una construccion hermetica entera por tanda, mas la incremental.
+paso reproducible "Reproducibilidad · los instalables construidos dos veces dan el mismo SHA-256" \
+    ./tools/construir-reproducible.sh
 # La matriz CONSTRUYE lo que prueba: las sondas y el verificador de x86-64, y los
 # artefactos cruzados de aarch64 (sondas, verificador y agente). Usar artefactos
 # que ya estuvieran en disco probaria un arbol que no es este, y en un runner
-# limpio no existirian. El agente hermetico de x86-64 lo deja el grupo anterior.
+# limpio no existirian. El agente hermetico de x86-64 lo deja el grupo
+# `hermetico` (el de reproducibilidad construye en otros destinos y no lo toca).
 paso kernels "Matriz de kernels · cada distribucion real en su microVM" \
     bash -c 'make -C drivers/linux/aegis-bpf build verify-estatico \
              && cargo xtask kernels traer \

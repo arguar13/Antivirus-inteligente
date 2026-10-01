@@ -4,8 +4,11 @@
 #
 # CONTRA QUIEN COMPITE: in-toto, SLSA, Sigstore. Es la UNICA fase que audita al
 # proyecto. Lo distintivo, probado como logica pura:
-#  - CONSTRUCCION REPRODUCIBLE bit a bit: dos builds del mismo fuente dan el mismo
-#    binario (construir-reproducible.sh). in-toto atestigua; esto REPITE.
+#  - La DECISION de reproducibilidad (aegis_procedencia::reproducible): dos
+#    huellas iguales, o el motivo de que no lo sean. Las dos construcciones de
+#    los instalables son OTRO grupo de make ci, `reproducible`
+#    (tools/construir-reproducible.sh): cuestan una construccion hermetica
+#    entera, y aqui todo es logica pura.
 #  - ATESTACION VERIFICADA EN EL ENDPOINT ANTES DE APLICAR: aegis-update no aplica
 #    una actualizacion cuya atestacion no case con el SBOM y la politica. En el
 #    camino critico, no en un informe.
@@ -17,7 +20,7 @@ cd "$(dirname "$0")/.."
 
 VERDE=$'\033[32m'; ROJO=$'\033[31m'; FIN=$'\033[0m'
 
-echo "==> AegisProvenance: transparencia (inclusion+consistencia), cadena, gate y reproducibilidad"
+echo "==> AegisProvenance: transparencia (inclusion+consistencia), cadena, gate y decision de reproducibilidad"
 if cargo test -p aegis-procedencia >/tmp/aegis-procedencia.log 2>&1; then
     echo "    ${VERDE}OK${FIN} (la inclusion y la consistencia del registro Merkle verifican para todo"
     echo "    ${VERDE}  ${FIN} tamano; un registro reescrito NO es consistente; la cadena de linaje"
@@ -36,11 +39,7 @@ else
     echo "    ${ROJO}FALLO${FIN}: aegis-update no consulta la procedencia antes de aplicar."; exit 1
 fi
 
-echo "==> AegisProvenance: construccion reproducible bit a bit"
-if ./tools/construir-reproducible.sh; then
-    :
-else
-    echo "    ${ROJO}FALLO${FIN}: la construccion no es reproducible (ver arriba el motivo declarado)."
-    exit 1
-fi
+# La reproducibilidad de los instalables NO se mide aqui: es el grupo
+# `reproducible` de make ci. Hasta H-06 se llamaba desde aqui a un script que
+# compilaba un fib.rs de juguete, y su «OK» afirmaba lo que no se habia medido.
 exit 0

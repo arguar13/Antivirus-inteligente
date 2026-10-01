@@ -90,6 +90,13 @@ BTF_SELLO  := $(BUILD)/vmlinux.origen
 # mismo Makefile promete del BTF: "da igual cual sea mientras tenga BTF". Con
 # -isystem, los avisos del codigo propio siguen siendo errores y los del
 # generado no.
+#
+# -ffile-prefix-map: con -g, el objeto guarda en su DWARF la ruta de $(BUILD),
+# donde vive vmlinux.h. Cuando compila cargo, $(BUILD) es el OUT_DIR, que cambia
+# con el directorio de destino; y el .o va empotrado en el agente (con su HMAC),
+# asi que dos construcciones del mismo arbol en dos destinos darian dos agentes
+# distintos. Con el remapeo, esa ruta es siempre la misma (H-06,
+# tools/construir-reproducible.sh). El bytecode no cambia.
 BPF_CFLAGS := -target bpf -O2 -g \
               -Wall -Wextra -Werror \
               -Wno-unused-parameter \
@@ -97,6 +104,7 @@ BPF_CFLAGS := -target bpf -O2 -g \
               -isystem $(CLANG_INC) \
               -isystem /usr/include \
               -isystem $(BUILD) -Iinclude -I$(ABI_INC) \
+              -ffile-prefix-map=$(BUILD)=/aegis-bpf-out \
               -D__TARGET_ARCH_$(ARCH)
 
 VERIFY_CFLAGS := -O2 -Wall -Wextra -Werror -Iinclude -I$(ABI_INC)

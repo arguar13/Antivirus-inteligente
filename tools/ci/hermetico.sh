@@ -21,6 +21,8 @@
 #
 # Uso:  tools/ci/hermetico.sh
 #   AEGIS_PIE=0  produce binarios estaticos NO-PIE (ver mas abajo)
+#   AEGIS_DIST=DIR             deja los artefactos en DIR y no en dist-hermetico/
+#   AEGIS_REMAP_OBJETIVOS=A:B  destinos que se remapean a /objetivo (ver mas abajo)
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/_comun.sh"
 cd "$RAIZ"
@@ -30,7 +32,10 @@ titulo "Job: hermetico (artefactos estaticos universales)"
 TRIPLE="x86_64-unknown-linux-musl"
 SYSROOT="${AEGIS_MUSL_SYSROOT:-/opt/aegis/musl-sysroot}"
 CCWRAP="$SYSROOT/bin/aegis-musl-gcc"
-DIST="$RAIZ/dist-hermetico"
+# AEGIS_DIST: otro destino para los artefactos. Lo usa la comprobacion de
+# reproducibilidad (tools/construir-reproducible.sh) para construir dos veces
+# sin tocar dist-hermetico/, que es lo que prueba la matriz de kernels.
+DIST="${AEGIS_DIST:-$RAIZ/dist-hermetico}"
 
 # Binarios que se publican, con las caracteristicas que necesita cada uno para
 # ser el artefacto REAL. La lista NO se escribe aqui: sale de
@@ -47,6 +52,8 @@ fi
 # hacia que, con el directorio de compilacion fuera del arbol (lo normal en CI),
 # un binario construido bien se diera por AUSENTE.
 DIR_TARGET="${CARGO_TARGET_DIR:-$RAIZ/target}"
+# Absoluto: se remapea por prefijo (mas abajo), y cargo lo resuelve desde aqui.
+case "$DIR_TARGET" in /*) ;; *) DIR_TARGET="$RAIZ/$DIR_TARGET" ;; esac
 
 # --- El sysroot -------------------------------------------------------------
 paso "sysroot musl"
@@ -97,7 +104,42 @@ export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$CCWRAP"
 # link-self-contained=no: los objetos de arranque, la libc, libm y el
 # desenrollador salen TODOS del sysroot. Con el valor por defecto, rustc anade
 # ademas SU copia de musl y quedan dos libc en la misma linea de enlace.
-export RUSTFLAGS="-C link-self-contained=no $FLAGS_EXTRA"
+#
+# Rutas: se remapean las que el compilador puede incrustar en un binario —el
+# arbol fuente, CARGO_HOME (las fuentes de las dependencias) y el directorio de
+# destino (lo que los build.rs generan en OUT_DIR)— a nombres fijos. Sin eso el
+# binario depende de DONDE se compilo, y dos construcciones en directorios
+# distintos no pueden coincidir (H-06). Los de destino van detras porque, si uno
+# esta dentro del arbol, gana el ultimo remapeo que casa.
+#
+# AEGIS_REMAP_OBJETIVOS (lista separada por ':', por defecto el destino de esta
+# construccion) remapea varios destinos con los MISMOS flags: asi las dos
+# construcciones de tools/construir-reproducible.sh pasan a rustc la misma linea.
+#
+# Van en CARGO_ENCODED_RUSTFLAGS y no en RUSTFLAGS porque la ruta del
+# repositorio puede llevar espacios, y RUSTFLAGS se parte por espacios.
+FLAGS_RUST=(-C link-self-contained=no)
+if [ -n "$FLAGS_EXTRA" ]; then
+    read -r -a extra <<< "$FLAGS_EXTRA"
+    FLAGS_RUST+=("${extra[@]}")
+fi
+FLAGS_RUST+=("--remap-path-prefix=$RAIZ=/aegis")
+FLAGS_RUST+=("--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo")
+IFS=':' read -r -a OBJETIVOS <<< "${AEGIS_REMAP_OBJETIVOS:-$DIR_TARGET}"
+for o in "${OBJETIVOS[@]}"; do
+    [ -n "$o" ] && FLAGS_RUST+=("--remap-path-prefix=$o=/objetivo")
+done
+CARGO_ENCODED_RUSTFLAGS="$(IFS=$'\x1f'; printf '%s' "${FLAGS_RUST[*]}")"
+export CARGO_ENCODED_RUSTFLAGS
+unset RUSTFLAGS
+
+# La fecha de la construccion es la del commit, no la del reloj: si algo (un
+# build.rs, el compilador de C) la incrusta, dos construcciones del mismo arbol
+# no pueden diferir por la hora a la que se lanzaron.
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+    SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD 2>/dev/null || true)"
+fi
+[ -n "${SOURCE_DATE_EPOCH:-}" ] && export SOURCE_DATE_EPOCH
 
 rm -rf "$DIST"; mkdir -p "$DIST"
 FALLOS=0
@@ -211,6 +253,8 @@ enlazado      : $MODO
 sysroot       : $SYSROOT
 compilador C  : $($CCWRAP --version 2>/dev/null | head -1)
 compilador    : $(rustc --version 2>/dev/null)
+rustflags     : ${FLAGS_RUST[*]}
+fecha fuente  : SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-sin fijar}
 construido    : $(date -u +"%Y-%m-%dT%H:%M:%SZ") (UTC)
 binarios      : ${CONSTRUIDOS[*]}
 MAN
