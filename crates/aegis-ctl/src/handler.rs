@@ -26,6 +26,11 @@ pub trait StatusSource: Send + Sync {
     fn events_escalated(&self) -> u64;
     /// Estado textual.
     fn state(&self) -> String;
+    /// El detalle del ultimo informe del agente, una linea por pieza. Por
+    /// defecto, nada: quien no tenga motores que contar no cuenta nada.
+    fn detalle(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Manejador de control del agente.
@@ -121,6 +126,7 @@ impl<S: StatusSource> AgentControl<S> {
             events_received: self.status.events_received(),
             events_escalated: self.status.events_escalated(),
             state: self.status.state(),
+            detalle: self.status.detalle(),
         })
     }
 

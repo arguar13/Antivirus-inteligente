@@ -145,6 +145,11 @@ pub struct StatusInfo {
     pub events_escalated: u64,
     /// Estado textual (p. ej. "running", "isolated").
     pub state: String,
+    /// El detalle del agente, una linea por pieza: el arbitro y su camino
+    /// caliente, cada motor con su latencia y sus «sin datos», el trabajador
+    /// confinado y la perdida de eventos por familia. Son las mismas lineas que
+    /// el agente publica en su registro, en su ultimo informe.
+    pub detalle: Vec<String>,
 }
 
 /// Resultado de un escaneo bajo demanda.
@@ -173,10 +178,18 @@ impl Response {
     /// Serializa la respuesta al formato de texto.
     pub fn encode(&self) -> String {
         match self {
-            Response::Status(s) => format!(
-                "OK\nrss_kb={}\nuptime_s={}\nevents_received={}\nevents_escalated={}\nstate={}\n",
-                s.rss_kb, s.uptime_s, s.events_received, s.events_escalated, s.state
-            ),
+            Response::Status(s) => {
+                let mut out = format!(
+                    "OK\nrss_kb={}\nuptime_s={}\nevents_received={}\nevents_escalated={}\nstate={}\n",
+                    s.rss_kb, s.uptime_s, s.events_received, s.events_escalated, s.state
+                );
+                for d in &s.detalle {
+                    // Una linea de protocolo por linea de detalle: un salto de
+                    // linea dentro partiria la respuesta.
+                    out.push_str(&format!("detalle={}\n", d.replace(['\n', '\r'], " ")));
+                }
+                out
+            }
             Response::Scan(s) => {
                 let mut out = format!("OK\npath={}\ndetected={}\n", s.path, s.detected);
                 for r in &s.rules {
@@ -240,6 +253,7 @@ impl Response {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(0),
                 state,
+                detalle: todos("detalle"),
             }));
         }
         if let Some(detected) = get("detected") {

@@ -121,6 +121,9 @@ fn imprimir(resp: &Response) {
                 "eventos:       {} recibidos, {} escalados",
                 s.events_received, s.events_escalated
             );
+            for d in &s.detalle {
+                println!("  {d}");
+            }
         }
         Response::Scan(s) => {
             if s.detected {
