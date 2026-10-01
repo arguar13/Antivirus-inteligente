@@ -10,6 +10,7 @@ mod config;
 mod docs;
 mod enlace;
 mod incrustados;
+mod invariantes;
 mod kernels;
 mod matriz;
 mod nombres;
@@ -133,6 +134,7 @@ fn ejecutar(args: &[String]) -> Resultado<()> {
                 nombres::comprobar(&repo),
                 amenazas::comprobar(&repo),
                 incrustados::comprobar(&repo),
+                invariantes::comprobar(&repo),
             ];
             let mut fallos = Vec::new();
             for r in resultados {

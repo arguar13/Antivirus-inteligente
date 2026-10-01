@@ -1,9 +1,9 @@
-# 75 · AegisProof — las quince invariantes, demostradas sobre el producto completo
+# 75 · AegisProof — las invariantes, demostradas sobre el producto completo
 
 > FASE 80. `tools/verificar-invariantes.sh`, `tools/lineabase-agente.txt`,
 > `tools/lineabase-unsafe.txt`, `server/crates/aegis-tejido/tests/autonomia.rs`.
 
-## Por qué esta puerta existe aparte de las otras veintiocho
+## Por qué esta puerta existe aparte de las demás
 
 Cada `tools/verificar-<fase>.sh` comprueba lo suyo, y lo comprueba mejor que ésta.
 Lo que **ninguna** puede comprobar es lo que se rompe al **sumar**:
@@ -21,30 +21,38 @@ antes de dar el trabajo por terminado, aunque obligue a volver sobre una fase
 anterior. Una invariante que se relaja «sólo esta vez» deja de ser una invariante
 y pasa a ser una aspiración.
 
-## Las quince
+## Las invariantes
 
-Ocho estructurales, una de autoataque con sus siete pruebas, cuatro doctrinales
-que el producto ya sostenía y que aquí se comprueban mecánicamente en vez de
-afirmarse, y dos que añadió el MEGAPROMPT 10: el almacén histórico (14) y la
-automatización de respuesta (15).
+Ocho estructurales, una de autoataque, cuatro doctrinales que el producto ya
+sostenía y que aquí se comprueban mecánicamente en vez de afirmarse, y las que
+añadió el MEGAPROMPT 10: el almacén histórico (14), la automatización de respuesta
+(15) y la emulación sin residuo (16).
+
+**Este documento no repite cuántas son ni cuánto miden.** Las cifras de cada una
+—crates con `forbid`, dependencias justificadas, pruebas de autoataque, techos de
+memoria del perfil— las da `tools/verificar-invariantes.sh` al ejecutarse, que es
+la única fuente. Escritas aquí a mano se quedaban viejas: el título decía «quince»
+cuando ya eran dieciséis (FASE 1 del MP-16). La puerta `arquitectura` exige una
+fila de esta tabla por cada invariante que define el verificador.
 
 | # | Invariante | Cómo se comprueba |
 |---:|---|---|
-| 1 | **Presupuesto** | El agente arranca de verdad y se mide su RSS contra el reparto de su perfil y contra la línea base; y el kernel lo impone desde fuera (`MemoryHigh` 321 MiB, `MemoryMax` 482 MiB) |
-| 2 | **Seguridad de memoria** | Todo crate del agente **o** declara `#![forbid(unsafe_code)]` **o** está en `tools/lineabase-unsafe.txt` con su razón escrita — hoy **44 y 22** |
-| 3 | **Árbol de dependencias** | Las **40** dependencias directas del agente están en `tools/lineabase-agente.txt` con su justificación |
+| 1 | **Presupuesto** | El agente arranca de verdad y se mide su RSS contra el reparto de su perfil y contra la línea base; y el kernel lo impone desde fuera con el `MemoryHigh` y el `MemoryMax` del perfil del host (`aegis-presupuesto`) |
+| 2 | **Seguridad de memoria** | Todo crate del agente **o** declara `#![forbid(unsafe_code)]` **o** está en `tools/lineabase-unsafe.txt` con su razón escrita |
+| 3 | **Árbol de dependencias** | Toda dependencia directa del agente está en `tools/lineabase-agente.txt` con su justificación |
 | 4 | **Determinismo** | El circuito completo repetido: mismo veredicto, mismo caso, misma propuesta de contención |
 | 5 | **Explicabilidad** | Se recorren **todas** las combinaciones del árbitro exigiendo frase no vacía |
 | 6 | **Tri-estado** | Los **siete** enumerados de veredicto tienen su variante de duda, y las pruebas que la ejercen pasan |
-| 7 | **Autonomía** | `tests/autonomia.rs`: **7** pruebas con el enlace cortado de verdad, y el producto entero sigue dando veredicto |
+| 7 | **Autonomía** | `tests/autonomia.rs`: con el enlace cortado de verdad, el producto entero sigue dando veredicto |
 | 8 | **Los cinco frenos** | Las pruebas de contención de `aegis-predict`, y otra vez sobre el grafo del circuito completo |
-| 9 | **Autoataque** | Doce capacidades usadas **contra** el producto, con **259** pruebas |
+| 9 | **Autoataque** | Cada capacidad de la tabla `ATAQUES` del verificador, usada **contra** el producto |
 | 10 | **Doctrina del enjambre** | La carga tiene dos variantes y **ninguna es una orden** |
 | 11 | **Un solo estrangulamiento** | Los cuatro canales de salida pasan por el mismo juez |
-| 12 | **La ausencia es la frontera** | Siete tipos **sin** su variante peligrosa (entre ellos: la auditoría de firmware no puede escribir, el confinamiento no nace obligatorio, el inventario del agente no sabe salir de la máquina) |
-| 13 | **El identificador único** | Once subsistemas, un identificador (FASE 79) |
+| 12 | **La ausencia es la frontera** | Tipos **sin** su variante peligrosa (entre ellos: la auditoría de firmware no puede escribir, el confinamiento no nace obligatorio, el inventario del agente no sabe salir de la máquina) |
+| 13 | **El identificador único** | Todos los subsistemas del circuito, un identificador (FASE 79) |
 | 14 | **Una consulta no tumba el almacén** | Del MEGAPROMPT 10 (FASE 96): una consulta que barrería demasiados días sin acotar se rechaza contra PostgreSQL real **antes de leer un solo segmento**, y el único camino de lectura del almacén pasa por el planificador |
 | 15 | **Una automatización sin freno es un arma** | Del MEGAPROMPT 10 (FASE 97): contra mil máquinas en PostgreSQL real, aislar la flota entera —firmado, o expandido en mil pasos de una máquina— y bloquear `0.0.0.0/0` se **detienen y escalan** sin tocar una fila; y por estructura, el motor tiene una sola llamada que aplica un efecto, precedida por los frenos y el permiso, y `revertir` no tiene cuerpo por defecto |
+| 16 | **Una emulación no deja residuo** | Del MEGAPROMPT 10 (FASE 99): tras medir el catálogo entero de técnicas en el rango no queda ni un marcador, una técnica no aplicable nunca cuenta como detectada, y `revertir` no tiene cuerpo por defecto en el rasgo `Tecnica` |
 
 ## 1 · Presupuesto: por qué no son 46 080 KB
 
@@ -192,7 +200,7 @@ se comprueba aquí, y por esta razón» y el silencio.
 | `verificar-vmi.sh` | El recorrido de EPT, el parser del kernel desde memoria física | Arrancar el hipervisor necesita VT-x/AMD-V |
 | `verificar-presupuesto.sh` | El agente arranca de verdad y se mide su RSS; el drop-in impone los dos límites | Se omite si el agente no arranca en este entorno, **diciéndolo** |
 | `verificar-estado.sh` | Las 52 tablas contra el sistema real de esta máquina, las 6 peligrosas negándose sin filtro, el rechazo en compilación, las diez consultas medidas | **osquery no está instalado**: sus cifras se citan, no se miden. Lo que esta máquina no tiene (TPM, contenedores, `/proc/modules`) se ejerce por su **motivo** |
-| `verificar-invariantes.sh` | Las quince, sobre el producto completo | — |
+| `verificar-invariantes.sh` | Todas, sobre el producto completo | — |
 
 ## Lo que esta fase encontró
 
