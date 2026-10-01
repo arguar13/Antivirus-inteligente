@@ -62,13 +62,77 @@ impl std::fmt::Debug for BpfViews {
 }
 
 fn map_err(op: &'static str, e: libbpf_rs::Error) -> KiError {
-    if e.kind() == libbpf_rs::ErrorKind::PermissionDenied {
+    if errno_de(&e) == Some(libc::EPERM) {
         return KiError::InsufficientPrivileges;
     }
     KiError::Bpf {
         op,
         detail: e.to_string(),
     }
+}
+
+/// El errno de verdad de un error de libbpf.
+///
+/// `ErrorKind::PermissionDenied` no sirve para decidir: agrupa EPERM (falta
+/// CAP_BPF) con EACCES (el verificador rechazo el programa), que piden
+/// remedios opuestos. Se busca el `io::Error` con codigo en la cadena de causas.
+fn errno_de(e: &libbpf_rs::Error) -> Option<i32> {
+    let mut causa: Option<&(dyn std::error::Error + 'static)> = Some(e);
+    while let Some(c) = causa {
+        if let Some(io) = c.downcast_ref::<std::io::Error>() {
+            if let Some(n) = io.raw_os_error() {
+                return Some(n);
+            }
+        }
+        causa = c.source();
+    }
+    None
+}
+
+/// Las ultimas lineas que libbpf ha escrito, para explicar un rechazo.
+///
+/// libbpf solo sabe avisar por una funcion global sin estado, asi que el
+/// registro es un anillo estatico y acotado. Se instala unicamente mientras se
+/// carga este objeto y despues se restaura el anterior.
+static REGISTRO: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+const LINEAS_REGISTRO: usize = 64;
+
+fn anotar(_nivel: libbpf_rs::PrintLevel, mensaje: String) {
+    if let Ok(mut r) = REGISTRO.lock() {
+        for l in mensaje.lines() {
+            if r.len() == LINEAS_REGISTRO {
+                r.remove(0);
+            }
+            r.push(l.trim_end().to_string());
+        }
+    }
+}
+
+/// Lo que explica el rechazo: la cola del registro del verificador, sin lineas
+/// vacias ni los marcadores de comienzo y fin.
+fn motivo_del_rechazo() -> String {
+    let r = REGISTRO.lock().map(|g| g.clone()).unwrap_or_default();
+    let utiles: Vec<&String> = r
+        .iter()
+        // Las lineas propias de libbpf («failed to load object», «failed to
+        // load: -13») resumen el fallo; la causa la dice el verificador.
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty()
+                && !t.contains("PROG LOAD LOG")
+                && !t.starts_with("libbpf:")
+                && !t.starts_with("processed ")
+        })
+        .collect();
+    // De la ultima a la primera: el verificador escribe su veredicto al final,
+    // y quien lea un motivo acotado tiene que ver eso antes que el contexto.
+    utiles
+        .iter()
+        .rev()
+        .take(6)
+        .map(|l| l.trim())
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
 
 impl BpfViews {
@@ -92,15 +156,22 @@ impl BpfViews {
         let abierto = builder
             .open_memory(OBJETO)
             .map_err(|e| map_err("open_memory", e))?;
-        let obj = abierto.load().map_err(|e| {
-            if e.kind() == libbpf_rs::ErrorKind::PermissionDenied {
-                KiError::InsufficientPrivileges
-            } else {
-                KiError::Unsupported(format!(
-                    "el kernel rechazo el verificador ({e}). Hacen falta los kfuncs \
-                     bpf_task_from_pid (Linux 6.1) y bpf_iter_task_* (Linux 6.7)."
-                ))
-            }
+        if let Ok(mut r) = REGISTRO.lock() {
+            r.clear();
+        }
+        let previo = libbpf_rs::set_print(Some((libbpf_rs::PrintLevel::Warn, anotar)));
+        let cargado = abierto.load();
+        libbpf_rs::set_print(previo);
+        let obj = cargado.map_err(|e| match errno_de(&e) {
+            Some(libc::EPERM) => KiError::InsufficientPrivileges,
+            n => KiError::Unsupported(format!(
+                "el kernel rechazo el verificador (errno {}): {}",
+                n.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                match motivo_del_rechazo() {
+                    m if m.is_empty() => e.to_string(),
+                    m => m,
+                }
+            )),
         })?;
 
         Ok(BpfViews { obj, gen: 0 })
