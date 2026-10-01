@@ -258,6 +258,8 @@ pub enum Motor {
     Itdr,
     /// Auditoria de firmware.
     FirmwareAudit,
+    /// Integridad del kernel: procesos que el sistema esconde.
+    Nucleo,
     /// Detonacion en microVM.
     Detonate,
     /// Inteligencia compartida.
@@ -281,6 +283,7 @@ impl Motor {
             Motor::L7Hunter => "l7hunter",
             Motor::Itdr => "itdr",
             Motor::FirmwareAudit => "fwaudit",
+            Motor::Nucleo => "nucleo",
             Motor::Detonate => "detonate",
             Motor::Intel => "intel",
             Motor::Enjambre => "enjambre",
@@ -305,7 +308,7 @@ impl Motor {
             Motor::MemHunter => Plano::Memoria,
             Motor::Wire | Motor::Ips | Motor::L7Hunter => Plano::Red,
             Motor::Itdr => Plano::Identidad,
-            Motor::FirmwareAudit => Plano::Plataforma,
+            Motor::FirmwareAudit | Motor::Nucleo => Plano::Plataforma,
             Motor::Intel | Motor::Enjambre => Plano::Externo,
         }
     }
@@ -319,6 +322,7 @@ impl Motor {
     /// |---|---|---|
     /// | `Detonate` | 99 | **Vio** la muestra ejecutarse y hacer lo que hizo |
     /// | `MemHunter` | 95 | Vio el codigo inyectado en la memoria del proceso |
+    /// | `Nucleo` | 90 | Tres censos y varias confirmaciones; lo que ve es una ausencia |
     /// | `Conductual`, `SyscallGuard` | 90 | Vieron la accion; la intencion se deduce |
     /// | `Ips`, `Wire`, `L7Hunter` | 85 | Vieron el trafico; el contenido puede ir cifrado |
     /// | `Itdr`, `FirmwareAudit` | 85 | Vieron el hecho en su plano |
@@ -330,7 +334,7 @@ impl Motor {
         Confianza(match self {
             Motor::Detonate => 99,
             Motor::MemHunter => 95,
-            Motor::Conductual | Motor::SyscallGuard => 90,
+            Motor::Conductual | Motor::SyscallGuard | Motor::Nucleo => 90,
             Motor::Ips | Motor::Wire | Motor::L7Hunter | Motor::Itdr | Motor::FirmwareAudit => 85,
             Motor::Estatico => 80,
             Motor::Intel | Motor::Enjambre => 75,
@@ -352,6 +356,7 @@ impl Motor {
             Motor::L7Hunter,
             Motor::Itdr,
             Motor::FirmwareAudit,
+            Motor::Nucleo,
             Motor::Detonate,
             Motor::Intel,
             Motor::Enjambre,
@@ -470,7 +475,7 @@ mod pruebas {
     fn todos_los_motores_tienen_plano_y_tope_declarados() {
         // Una tabla de traduccion que no se ejecuta se desvia: alguien añade un
         // motor y la tabla se queda con los de ayer. Esto lo impide.
-        assert_eq!(Motor::todos().len(), 13);
+        assert_eq!(Motor::todos().len(), 14);
         let mut nombres: Vec<&str> = Motor::todos().iter().map(|m| m.nombre()).collect();
         nombres.sort_unstable();
         let antes = nombres.len();

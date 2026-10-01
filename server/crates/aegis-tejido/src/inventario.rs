@@ -181,6 +181,14 @@ pub const CENSO: &[Fila] = &[
         derivacion: "matricula de la maquina",
     },
     Fila {
+        motor: Motor::Nucleo,
+        crate_: "aegis-kintegrity",
+        fase: 25,
+        vocabulario_nativo: "AnomalyKind{dkom, oculto-en-userland, ...} + severidad /100",
+        clase: Clase::Maquina,
+        derivacion: "matricula de la maquina: lo comprometido es el kernel que miente",
+    },
+    Fila {
         motor: Motor::Detonate,
         crate_: "aegis-detonate",
         fase: 73,

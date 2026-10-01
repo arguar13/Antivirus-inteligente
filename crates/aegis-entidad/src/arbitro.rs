@@ -819,7 +819,8 @@ mod pruebas {
                 }
             }
         }
-        assert_eq!(combinaciones, 13 * 4 * 13 * 4 * 2);
+        let (m, j) = (Motor::todos().len(), Juicio::todos().len());
+        assert_eq!(combinaciones, m * j * m * j * 2);
     }
 
     #[test]
