@@ -24,7 +24,7 @@ máquina.
 
 | Espacio de trabajo | Producto | Condicional | Biblioteca | Herramienta |
 |---|---:|---:|---:|---:|
-| Agente (`crates/`) | 6 | 0 | 66 | 1 |
+| Agente (`crates/`) | 8 | 1 | 63 | 1 |
 | Plano de control (`server/crates/`) | 0 | 0 | 19 | 1 |
 | Enjambre (`swarm-net/`) | 0 | 0 | 1 | 0 |
 
@@ -35,8 +35,8 @@ máquina.
 | Magnitud | Agente | Plano de control | Enjambre |
 |---|---:|---:|---:|
 | Crates | 73 | 20 | 1 |
-| Funciones de prueba | 3.350 | 1.216 | 6 |
-| Líneas de Rust | 235.839 | 92.627 | 555 |
+| Funciones de prueba | 3.369 | 1.216 | 6 |
+| Líneas de Rust | 237.727 | 92.635 | 555 |
 
 Además: **3.962** líneas de C propio (sondas eBPF y driver de Windows, sin contar el `vmlinux.h` generado), **58** verificadores `tools/verificar-*.sh`, **39** dependencias directas del agente con su justificación en [`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y **5** ejecutables instalables.
 
@@ -108,7 +108,7 @@ proceso que puede estar comprometido o simplemente tener un fallo:
 ```mermaid
 flowchart LR
     subgraph endpoint["Endpoint Linux"]
-        aegis_agent["<b>aegis-agent</b><br/>El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje.<br/><i>invoca 21 crates</i>"]
+        aegis_agent["<b>aegis-agent</b><br/>El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje.<br/><i>invoca 25 crates</i>"]
         aegisctl["<b>aegisctl</b><br/>CLI de administración local sobre el socket de control del agente.<br/><i>invoca 1 crate</i>"]
         aegis_watchdog["<b>aegis-watchdog</b><br/>Supervisor: reinicia el agente ante caída, cuelgue o exceso de memoria.<br/><i>invoca 2 crates</i>"]
         aegis_fleet["<b>aegis-fleet</b><br/>Demostración autocontenida del canal de flota (gRPC sobre mTLS): hoy no se conecta al servidor real.<br/><i>invoca 2 crates</i>"]
@@ -150,7 +150,7 @@ scripts de construcción, la matriz y este documento.
 
 | Ejecutable | Lado | Qué es | Crates que enlaza | Crates que invoca |
 |---|---|---|---:|---:|
-| `aegis-agent` | endpoint | El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje. | 23 | 21 |
+| `aegis-agent` | endpoint | El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje. | 29 | 25 |
 | `aegisctl` | endpoint | CLI de administración local sobre el socket de control del agente. | 5 | 1 |
 | `aegis-watchdog` | endpoint | Supervisor: reinicia el agente ante caída, cuelgue o exceso de memoria. | 2 | 2 |
 | `aegis-fleet` | endpoint | Demostración autocontenida del canal de flota (gRPC sobre mTLS): hoy no se conecta al servidor real. | 2 | 2 |
@@ -218,7 +218,7 @@ Corre en cada endpoint, con privilegios.
 
 | Crate | Qué hace | Capa | Estado | Pruebas | `forbid(unsafe)` |
 |---|---|---|---|---:|:---:|
-| [`aegis-agent`](crates/aegis-agent) | Agente de deteccion de AegisCore: consumidor de telemetria, grafo de linaje y triaje | E/S | Producto | 75 | — |
+| [`aegis-agent`](crates/aegis-agent) | Agente de deteccion de AegisCore: consumidor de telemetria, grafo de linaje y triaje | E/S | Producto | 90 | — |
 | [`aegis-attest`](crates/aegis-attest) | Atestacion remota con raiz de confianza en el TPM 2.0 (FASE 49) | motores | Biblioteca | 27 | sí |
 | [`aegis-audit`](crates/aegis-audit) | Registro local de auditoria cifrado con rotacion automatica | plataforma | Biblioteca | 9 | sí |
 | [`aegis-behavior`](crates/aegis-behavior) | Motor conductual de AegisCore: grafo dirigido de procesos, tecnicas MITRE ATT&CK y puntuacion de riesgo | motores | Producto | 22 | sí |
@@ -250,16 +250,16 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-hunt`](crates/aegis-hunt) | AegisQLRunner: ejecucion de consultas AegisQL contra el estado real del endpoint | E/S | Biblioteca | 44 | sí |
 | [`aegis-ingest`](crates/aegis-ingest) | Ingesta y normalizacion de registros de cualquier origen, con contrapresion y punto de control durable | E/S | Biblioteca | 201 | sí |
 | [`aegis-instrumentar`](crates/aegis-instrumentar) |  | motores | Biblioteca | 42 | sí |
-| [`aegis-integridad`](crates/aegis-integridad) | Integridad sin carrera y por significado: cambios con autor del gancho LSM, linea base firmada y sellada contra el TPM, y cobertura mas alla del fichero | motores | Biblioteca | 23 | sí |
+| [`aegis-integridad`](crates/aegis-integridad) | Integridad sin carrera y por significado: cambios con autor del gancho LSM, linea base firmada y sellada contra el TPM, y cobertura mas alla del fichero | motores | Producto | 27 | sí |
 | [`aegis-intel`](crates/aegis-intel) | Cliente de reputacion con k-anonimato y cache local | E/S | Biblioteca | 22 | sí |
 | [`aegis-invitado`](crates/aegis-invitado) | Agente invitado de detonacion: traza el comportamiento de una muestra y lo sube por vsock | E/S | Biblioteca | 38 | — |
 | [`aegis-ipc`](crates/aegis-ipc) | Contrato ABI y consumidor del ring buffer compartido Ring 0 <-> Ring 3 de AegisCore | núcleo | Biblioteca | 17 | — |
 | [`aegis-ips`](crates/aegis-ips) | Prevencion en linea: decide que flujos cortar y baja el veredicto al kernel | motores | Biblioteca | 80 | sí |
 | [`aegis-kguard`](crates/aegis-kguard) | Integridad del bytecode eBPF y bloqueo de permisos de mapas | plataforma | Biblioteca | 11 | sí |
-| [`aegis-kintegrity`](crates/aegis-kintegrity) | Verificacion cruzada de la integridad del kernel: deteccion de rootkits DKOM y procesos ocultos | motores | Biblioteca | 24 | — |
+| [`aegis-kintegrity`](crates/aegis-kintegrity) | Verificacion cruzada de la integridad del kernel: deteccion de rootkits DKOM y procesos ocultos | motores | Producto | 24 | — |
 | [`aegis-l7hunter`](crates/aegis-l7hunter) | AegisL7Hunter: extraccion de telemetria L7 en claro por uprobes de eBPF sobre SSL_read/SSL_write, y caza de balizas C2 sin romper el certificate pinning | motores | Biblioteca | 74 | sí |
 | [`aegis-macho`](crates/aegis-macho) | Lector de binarios de macOS (Mach-O y universales), endurecido contra entrada hostil | núcleo | Biblioteca | 28 | sí |
-| [`aegis-memhunter`](crates/aegis-memhunter) | AegisMemHunter: analisis de VAD y de la tabla de paginas (PTE) para delatar codigo sin fichero, inyeccion reflexiva y module stomping, sin leer la memoria del proceso | motores | Biblioteca | 39 | — |
+| [`aegis-memhunter`](crates/aegis-memhunter) | AegisMemHunter: analisis de VAD y de la tabla de paginas (PTE) para delatar codigo sin fichero, inyeccion reflexiva y module stomping, sin leer la memoria del proceso | motores | Condicional | 39 | — |
 | [`aegis-mesh`](crates/aegis-mesh) | Malla P2P de la red local: propagacion cifrada y autenticada de vacunas entre agentes | E/S | Biblioteca | 19 | — |
 | [`aegis-ml`](crates/aegis-ml) | Extraccion de atributos estaticos PE/ELF e inferencia local ONNX para AegisCore | motores | Biblioteca | 22 | sí |
 | [`aegis-motor`](crates/aegis-motor) | Contrato unico de motor de deteccion y arbitro del agente: presupuesto por motor, SinDatos con causa y un solo punto de entrada | motores | Producto | 17 | sí |
@@ -403,7 +403,7 @@ Corre en cada endpoint, con privilegios.
 | 72 | [72 · AegisEnrich — preguntar a muchas fuentes sin contar lo que no toca](docs/72-enrich.md) |
 | 73 | [73 · AegisShare — inteligencia con difusión impuesta en el código](docs/73-share.md) |
 | 74 | [74 · AegisFabric — un solo modelo de entidad, un solo veredicto](docs/74-fabric.md) |
-| 75 | [75 · AegisProof — las quince invariantes, demostradas sobre el producto completo](docs/75-invariantes.md) |
+| 75 | [75 · AegisProof — las invariantes, demostradas sobre el producto completo](docs/75-invariantes.md) |
 | 76 | [76 · AegisState — el estado del endpoint, entero y consultable](docs/76-estado.md) |
 | 77 | [77 · AegisArtifact — la evidencia que se puede sostener](docs/77-custodia.md) |
 | 78 | [78 · AegisWin — el ejecutable de Windows por dentro](docs/78-windows-pe.md) |

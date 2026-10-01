@@ -22,7 +22,7 @@ El estado **real** de cada crate de AegisCore: qué llega a una máquina, qué s
 
 | Espacio de trabajo | Producto | Condicional | Biblioteca | Herramienta |
 |---|---:|---:|---:|---:|
-| Agente (`crates/`) | 6 | 0 | 66 | 1 |
+| Agente (`crates/`) | 8 | 1 | 63 | 1 |
 | Plano de control (`server/crates/`) | 0 | 0 | 19 | 1 |
 | Enjambre (`swarm-net/`) | 0 | 0 | 1 | 0 |
 
@@ -34,8 +34,8 @@ El estado **real** de cada crate de AegisCore: qué llega a una máquina, qué s
 
 El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje.
 
-- **Invoca** (21): `aegis-agent`, `aegis-behavior`, `aegis-ctl`, `aegis-disasm`, `aegis-emu`, `aegis-entidad`, `aegis-harden`, `aegis-ipc`, `aegis-kguard`, `aegis-macho`, `aegis-ml`, `aegis-motor`, `aegis-patron`, `aegis-pe`, `aegis-ransom`, `aegis-resp`, `aegis-sandbox`, `aegis-scal`, `aegis-scan`, `aegis-trabajador`, `aegis-watchdog`
-- **Enlaza sin invocar** (2): `aegis-edgeml`, `aegis-presupuesto`
+- **Invoca** (25): `aegis-agent`, `aegis-behavior`, `aegis-ctl`, `aegis-disasm`, `aegis-emu`, `aegis-entidad`, `aegis-harden`, `aegis-integridad`, `aegis-ipc`, `aegis-kguard`, `aegis-kintegrity`, `aegis-l7hunter`, `aegis-macho`, `aegis-memhunter`, `aegis-ml`, `aegis-motor`, `aegis-patron`, `aegis-pe`, `aegis-ransom`, `aegis-resp`, `aegis-sandbox`, `aegis-scal`, `aegis-scan`, `aegis-trabajador`, `aegis-watchdog`
+- **Enlaza sin invocar** (4): `aegis-edgeml`, `aegis-pqc`, `aegis-presupuesto`, `aegis-sensor`
 
 ### `aegisctl` (endpoint)
 
@@ -92,12 +92,14 @@ Cada prueba de extremo a extremo se ejecuta dentro de una microVM con el kernel 
 
 | Prueba e2e | Qué demuestra | Crates que ejerce |
 |---|---|---:|
-| `agente-en-vivo` | El agente publicado engancha sus sondas, consume actividad real y para limpio sin perder eventos. | 21 |
+| `agente-en-vivo` | El agente publicado engancha sus sondas, consume actividad real y para limpio sin perder eventos. | 25 |
 | `red-en-vivo` | Una conexión TCP real llega del kernel con su dirección, su puerto y la marca de loopback. | 3 |
 | `ejecucion-en-vivo` | Una ejecución llega del kernel con su ruta y sus argumentos exactos. | 3 |
 | `ficheros-en-vivo` | Cada vía de apertura para escritura (open, creat, openat, openat2) llega del kernel con su ruta. | 3 |
 | `prioridad-en-vivo` | Con el ring saturado de aperturas de fichero, ninguna ejecución se pierde: la prioridad baja cede su sitio y la pérdida queda atribuida a su familia. | 3 |
-| `trabajador-en-vivo` | El trabajador confinado muere varias veces ejecutando ELF malformados y el agente sigue protegiendo: los eventos siguen llegando y el watchdog no lo reinicia. | 22 |
+| `trabajador-en-vivo` | El trabajador confinado muere varias veces ejecutando ELF malformados y el agente sigue protegiendo: los eventos siguen llegando y el watchdog no lo reinicia. | 26 |
+| `integridad-en-vivo` | Una puerta trasera en sshd_config (PermitRootLogin yes) con el agente en marcha: el agente dice qué cambió en el fichero y quién lo cambió. | 25 |
+| `nucleo-en-vivo` | Con la máquina en reposo el verificador cruzado de tareas no acusa a nadie, y un proceso escondido de /proc con un montaje encima sale como oculto-en-userland; donde el kernel no tiene los kfuncs de tareas, el motor queda degradado con su motivo. | 25 |
 
 ## Excepciones de arquitectura
 
@@ -113,32 +115,32 @@ Dependencias que hoy suben de capa ([`tools/config/capas.toml`](../tools/config/
 
 | Crate | Capa | Estado | Invocado por | Gancho | Prueba e2e | Medidas | Qué le falta |
 |---|---|---|---|---|---|---|---|
-| `aegis-agent` | E/S | **Producto** | `aegis-agent` | [crates/aegis-agent/src/main.rs:1](../crates/aegis-agent/src/main.rs#L1) | `agente-en-vivo`, `red-en-vivo`, `ejecucion-en-vivo`, `ficheros-en-vivo`, `prioridad-en-vivo`, `trabajador-en-vivo` | eventos_emitidos (eventos), eventos_perdidos (eventos), p99_triaje (ns), rss_en_vivo (KiB) | — |
+| `aegis-agent` | E/S | **Producto** | `aegis-agent` | [crates/aegis-agent/src/main.rs:1](../crates/aegis-agent/src/main.rs#L1) | `agente-en-vivo`, `red-en-vivo`, `ejecucion-en-vivo`, `ficheros-en-vivo`, `prioridad-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | eventos_emitidos (eventos), eventos_perdidos (eventos), p99_triaje (ns), rss_en_vivo (KiB) | — |
 | `aegis-almacen` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-almacen-pcap` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-attest` | motores | **Biblioteca** | — | — | — | — | enlazado, pero ningún símbolo sobrevive en el binario; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-audit` | plataforma | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-behavior` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/conducta.rs:23](../crates/aegis-agent/src/motores/conducta.rs#L23) | `agente-en-vivo`, `trabajador-en-vivo` | p99_evaluacion (ns) | — |
+| `aegis-behavior` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/conducta.rs:23](../crates/aegis-agent/src/motores/conducta.rs#L23) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | p99_evaluacion (ns) | — |
 | `aegis-captura` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-case` | núcleo | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/api.rs:1857](../server/crates/aegis-server/src/api.rs#L1857) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-cloudnative` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-confinar` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-conocimiento` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-consola` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-ctl` | E/S | **Biblioteca** | `aegis-agent`, `aegisctl` | [crates/aegis-agent/src/main.rs:211](../crates/aegis-agent/src/main.rs#L211) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-ctl` | E/S | **Biblioteca** | `aegis-agent`, `aegisctl` | [crates/aegis-agent/src/main.rs:227](../crates/aegis-agent/src/main.rs#L227) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-custodia` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-deception` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-decompile` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-detonate` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-disasm` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-trabajador/src/analizadores.rs:415](../crates/aegis-trabajador/src/analizadores.rs#L415) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-disasm` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-trabajador/src/analizadores.rs:415](../crates/aegis-trabajador/src/analizadores.rs#L415) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-disectores` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-e2e` | herramienta | **Herramienta** | — | — | — | — | — |
 | `aegis-edgeml` | motores | **Biblioteca** | — | — | — | — | enlazado, pero ningún símbolo sobrevive en el binario; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-emu` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-trabajador/src/analizadores.rs:489](../crates/aegis-trabajador/src/analizadores.rs#L489) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-emu` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-trabajador/src/analizadores.rs:489](../crates/aegis-trabajador/src/analizadores.rs#L489) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-emular` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-enforce` | plataforma | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-enrich` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-entidad` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/main.rs:287](../crates/aegis-agent/src/main.rs#L287) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-entidad` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/main.rs:307](../crates/aegis-agent/src/main.rs#L307) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-estado` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-evasion` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-firehose` | E/S | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/firehose.rs:27](../server/crates/aegis-server/src/firehose.rs#L27) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
@@ -147,31 +149,31 @@ Dependencias que hoy suben de capa ([`tools/config/capas.toml`](../tools/config/
 | `aegis-flujo` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-forensics` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-fwaudit` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-harden` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/main.rs:240](../crates/aegis-agent/src/main.rs#L240) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-harden` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/main.rs:259](../crates/aegis-agent/src/main.rs#L259) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-hardsense` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-honeytoken` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-hunt` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-ingest` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-instrumentar` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-integridad` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
+| `aegis-integridad` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/integridad.rs:26](../crates/aegis-agent/src/motores/integridad.rs#L26) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | segundos_hasta_veredicto (s) | — |
 | `aegis-intel` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-invitado` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-ipc` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/decode.rs:9](../crates/aegis-agent/src/decode.rs#L9) | `agente-en-vivo`, `red-en-vivo`, `ejecucion-en-vivo`, `ficheros-en-vivo`, `prioridad-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-ipc` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/decode.rs:9](../crates/aegis-agent/src/decode.rs#L9) | `agente-en-vivo`, `red-en-vivo`, `ejecucion-en-vivo`, `ficheros-en-vivo`, `prioridad-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-ips` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-itdr` | motores | **Biblioteca** | `aegis-server` | [server/crates/aegis-orchestrator/src/lib.rs:45](../server/crates/aegis-orchestrator/src/lib.rs#L45) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-kguard` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/bpf.rs:46](../crates/aegis-agent/src/bpf.rs#L46) | `agente-en-vivo`, `red-en-vivo`, `ejecucion-en-vivo`, `ficheros-en-vivo`, `prioridad-en-vivo`, `trabajador-en-vivo` | — | sin medida |
-| `aegis-kintegrity` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-l7hunter` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-macho` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-trabajador/src/analizadores.rs:360](../crates/aegis-trabajador/src/analizadores.rs#L360) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
-| `aegis-memhunter` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
+| `aegis-kguard` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/bpf.rs:46](../crates/aegis-agent/src/bpf.rs#L46) | `agente-en-vivo`, `red-en-vivo`, `ejecucion-en-vivo`, `ficheros-en-vivo`, `prioridad-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
+| `aegis-kintegrity` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/nucleo.rs:29](../crates/aegis-agent/src/motores/nucleo.rs#L29) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | falsos_en_reposo (veredictos) | requiere kernel con los kfuncs de tareas bpf_iter_task_* y bpf_task_from_pid (Linux 6.7+ o backport) (sin ello: sin los kfuncs no hay verificacion cruzada de tareas: un proceso escondido por DKOM o de /proc no se ve) |
+| `aegis-l7hunter` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/motores/baliza.rs:30](../crates/aegis-agent/src/motores/baliza.rs#L30) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
+| `aegis-macho` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-trabajador/src/analizadores.rs:360](../crates/aegis-trabajador/src/analizadores.rs#L360) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
+| `aegis-memhunter` | motores | **Condicional** | `aegis-agent` | [crates/aegis-agent/src/motores/memoria.rs:36](../crates/aegis-agent/src/motores/memoria.rs#L36) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida; requiere CAP_SYS_PTRACE en el agente y Yama ptrace_scope por debajo de 3 (sin ello: sin leer la memoria ajena no hay forense en vivo: codigo sin fichero, carga reflexiva y module stomping quedan sin mirar) |
 | `aegis-mesh` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-ml` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-ransom/src/engine.rs:286](../crates/aegis-ransom/src/engine.rs#L286) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
-| `aegis-motor` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/main.rs:23](../crates/aegis-agent/src/main.rs#L23) | `agente-en-vivo`, `trabajador-en-vivo` | p99_camino_caliente (ns) | — |
+| `aegis-ml` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-ransom/src/engine.rs:286](../crates/aegis-ransom/src/engine.rs#L286) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
+| `aegis-motor` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/main.rs:31](../crates/aegis-agent/src/main.rs#L31) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | p99_camino_caliente (ns) | — |
 | `aegis-net` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-orchestrator` | motores | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/main.rs:156](../server/crates/aegis-server/src/main.rs#L156) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-parser` | núcleo | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/api.rs:1083](../server/crates/aegis-server/src/api.rs#L1083) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-patron` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-scan/src/yara.rs:24](../crates/aegis-scan/src/yara.rs#L24) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
-| `aegis-pe` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-macho/src/macho.rs:27](../crates/aegis-macho/src/macho.rs#L27) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-patron` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-scan/src/yara.rs:24](../crates/aegis-scan/src/yara.rs#L24) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
+| `aegis-pe` | núcleo | **Biblioteca** | `aegis-agent` | [crates/aegis-macho/src/macho.rs:27](../crates/aegis-macho/src/macho.rs#L27) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-pipeline` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-postura` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-pqc` | núcleo | **Biblioteca** | `aegis-fleet`, `aegis-server` | [crates/aegis-fleet/src/error.rs:61](../crates/aegis-fleet/src/error.rs#L61) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
@@ -180,17 +182,17 @@ Dependencias que hoy suben de capa ([`tools/config/capas.toml`](../tools/config/
 | `aegis-procedencia` | núcleo | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-ptguard` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-rango` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-ransom` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/secuestro.rs:20](../crates/aegis-agent/src/motores/secuestro.rs#L20) | `agente-en-vivo`, `trabajador-en-vivo` | p99_evaluacion (ns) | — |
-| `aegis-resp` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-ctl/src/handler.rs:12](../crates/aegis-ctl/src/handler.rs#L12) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-ransom` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/secuestro.rs:20](../crates/aegis-agent/src/motores/secuestro.rs#L20) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | p99_evaluacion (ns) | — |
+| `aegis-resp` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-ctl/src/handler.rs:12](../crates/aegis-ctl/src/handler.rs#L12) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-rollback` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-ruleforge` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-sandbox` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-trabajador/src/confinamiento.rs:158](../crates/aegis-trabajador/src/confinamiento.rs#L158) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-sandbox` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-trabajador/src/confinamiento.rs:158](../crates/aegis-trabajador/src/confinamiento.rs#L158) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-sbom` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-scal` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/motores/conducta.rs:26](../crates/aegis-agent/src/motores/conducta.rs#L26) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-scal` | plataforma | **Biblioteca** | `aegis-agent` | [crates/aegis-agent/src/motores/conducta.rs:26](../crates/aegis-agent/src/motores/conducta.rs#L26) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-scale` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-scan` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-ctl/src/handler.rs:13](../crates/aegis-ctl/src/handler.rs#L13) | `agente-en-vivo`, `trabajador-en-vivo` | — | sin medida |
+| `aegis-scan` | motores | **Biblioteca** | `aegis-agent` | [crates/aegis-ctl/src/handler.rs:13](../crates/aegis-ctl/src/handler.rs#L13) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | — | sin medida |
 | `aegis-selfdefense` | motores | **Biblioteca** | — | — | — | — | enlazado, pero ningún símbolo sobrevive en el binario; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-sensor` | plataforma | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
+| `aegis-sensor` | plataforma | **Biblioteca** | — | — | — | — | enlazado, pero ningún símbolo sobrevive en el binario; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-server` | E/S | **Biblioteca** | `aegis-server` | [server/crates/aegis-server/src/main.rs:1](../server/crates/aegis-server/src/main.rs#L1) | — | — | sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-share` | núcleo | **Biblioteca** | — | — | — | — | enlazado, pero ningún símbolo sobrevive en el binario; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-swarm` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
@@ -198,12 +200,12 @@ Dependencias que hoy suben de capa ([`tools/config/capas.toml`](../tools/config/
 | `aegis-sync` | núcleo | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-syscallguard` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-tejido` | E/S | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-trabajador` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/estatico.rs:35](../crates/aegis-agent/src/motores/estatico.rs#L35) | `agente-en-vivo`, `trabajador-en-vivo` | muertes_sin_interrupcion (muertes), p99_analisis (ns) | — |
+| `aegis-trabajador` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/estatico.rs:35](../crates/aegis-agent/src/motores/estatico.rs#L35) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | muertes_sin_interrupcion (muertes), p99_analisis (ns) | — |
 | `aegis-unpacker` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-update` | plataforma | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-vmi` | plataforma | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-volcado` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-vuln` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
-| `aegis-watchdog` | E/S | **Producto** | `aegis-agent`, `aegis-watchdog` | [crates/aegis-agent/src/main.rs:308](../crates/aegis-agent/src/main.rs#L308) | `agente-en-vivo`, `trabajador-en-vivo` | reinicios_del_agente (reinicios) | — |
+| `aegis-watchdog` | E/S | **Producto** | `aegis-agent`, `aegis-watchdog` | [crates/aegis-agent/src/main.rs:338](../crates/aegis-agent/src/main.rs#L338) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | reinicios_del_agente (reinicios) | — |
 | `aegis-wire` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `fleet-simulator` | herramienta | **Herramienta** | — | — | — | — | — |

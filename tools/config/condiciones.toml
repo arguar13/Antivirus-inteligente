@@ -24,5 +24,18 @@
 #    deteccion = { fichero = "crates/aegis-ptguard/src/lib.rs", contiene = "fn soportado" }
 #    degradacion = "sin Intel PT la detección ROP/JOP por traza queda SinDatos"
 #
-#  Hoy no hay ninguna entrada: ningún crate dependiente de hardware lo invoca
-#  todavía un instalable (ver docs/matriz-capacidades.md).
+#  Las primeras entradas llegan con la ola A de la FASE 2 del MP-16: dependen
+#  del KERNEL del cliente (kfuncs, Yama), no de hardware, y el agente lo detecta
+#  al registrar el motor y lo publica como DEGRADADO con su motivo.
+
+[[condicional]]
+crate = "aegis-kintegrity"
+requisito = "kernel con los kfuncs de tareas bpf_iter_task_* y bpf_task_from_pid (Linux 6.7+ o backport)"
+deteccion = { fichero = "crates/aegis-agent/src/motores/mod.rs", contiene = "fn kfuncs_tareas" }
+degradacion = "sin los kfuncs no hay verificacion cruzada de tareas: un proceso escondido por DKOM o de /proc no se ve"
+
+[[condicional]]
+crate = "aegis-memhunter"
+requisito = "CAP_SYS_PTRACE en el agente y Yama ptrace_scope por debajo de 3"
+deteccion = { fichero = "crates/aegis-agent/src/motores/mod.rs", contiene = "fn memoria_ajena" }
+degradacion = "sin leer la memoria ajena no hay forense en vivo: codigo sin fichero, carga reflexiva y module stomping quedan sin mirar"

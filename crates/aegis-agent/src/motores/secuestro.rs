@@ -284,7 +284,8 @@ impl aegis_motor::Motor<crate::motores::EventoAgente> for MotorSecuestro {
             + self.etapa.engine().tracker().tracked() * 256
     }
 
-    fn mantener(&mut self, ahora_ns: u64) {
+    fn mantener(&mut self, ahora_ns: u64) -> Vec<(aegis_entidad::Eid, aegis_motor::Dictamen)> {
         self.etapa.maintain(ahora_ns);
+        Vec::new()
     }
 }

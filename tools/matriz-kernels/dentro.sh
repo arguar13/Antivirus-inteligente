@@ -217,6 +217,9 @@ trabajador_en_vivo() {
     fi
 
     rm -rf "$malos"
+    # Lo suyo, al salir: un latido que sobrevive a su agente engaña a la
+    # siguiente prueba que espere uno.
+    rm -rf /run/aegiscore
     reinicios="$(grep -c -- '-> reiniciado' "$T/vigilado.log")"
     ultima="$(grep 'aegis-agent: trabajador:' "$T/vigilado.log" | tail -n 1)"
     contadas="$(printf '%s' "$ultima" | sed -n 's/.* muertes=\([0-9]*\) .*/\1/p')"
@@ -233,6 +236,201 @@ trabajador_en_vivo() {
     else
         linea "AEGIS-MATRIZ|prueba|$id|falla|muertes=$muertes contadas=${contadas:-?} reinicios=$reinicios eventos=${antes:-?}->${despues:-?}"
         volcar "$T/vigilado.log" 60
+    fi
+}
+
+# ── Arrancar el agente publicado y esperar a ESE agente ─────────────────────
+# Uso: agente_listo <unidad> [argumentos del agente...]
+#
+# El agente se instala como se instala de verdad y corre como servicio. Late en
+# un fichero PROPIO de esta prueba, creado ahora: esperar a «algun latido» en la
+# ruta comun dejaba pasar el de un agente anterior, y la prueba actuaba antes de
+# que el suyo tuviera las sondas enganchadas y la linea base tomada. Devuelve 1
+# si el agente no late en 300 s.
+agente_listo() {
+    unidad="$1"
+    shift
+    install -m 0755 "$C/bin/aegis-agent" /usr/local/bin/aegis-agent
+    command -v restorecon > /dev/null 2>&1 && restorecon /usr/local/bin/aegis-agent
+    mkdir -p /run/aegiscore
+    latido="/run/aegiscore/$unidad.heartbeat"
+    rm -f "$latido"
+    systemd-run --quiet --unit="$unidad" --property=RemainAfterExit=yes \
+        /usr/local/bin/aegis-agent --latido "$latido" "$@"
+    i=0
+    while [ "$i" -lt 300 ] && [ ! -s "$latido" ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    [ -s "$latido" ]
+}
+
+# ── Integridad: una puerta trasera en sshd_config ───────────────────────────
+# (Funcion para tools/matriz-kernels/dentro.sh; POSIX sh. FASE 2, ola A.)
+#
+# La condicion de verdad del megaprompt: una puerta trasera en un fichero de
+# configuracion. Con el agente publicado en marcha se añade `PermitRootLogin yes`
+# a /etc/ssh/sshd_config (con copia y restauracion), y se exige que el agente
+# emita un veredicto sobre ese fichero que DIGA que cambio y quien lo cambio.
+# Solo-auditoria: el agente señala; restaurar el fichero lo hace la prueba.
+integridad_en_vivo() {
+    id="$1"
+    cfg=/etc/ssh/sshd_config
+    if [ ! -f "$cfg" ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|no aplica: la imagen no trae sshd_config"
+        return
+    fi
+    cp -p "$cfg" "$T/sshd_config.orig"
+    # El agente toma la linea base al arrancar: se espera a que ESTE lata.
+    agente_listo aegis-integridad --stats-interval 1
+    # La puerta trasera va ARRIBA, como la pondria quien quiere que surta efecto:
+    # sshd aplica el primer valor de cada directiva, asi que una linea al final
+    # no cambia nada si antes hay otra o un Include que la fija.
+    #
+    # Y tiene que CAMBIAR algo: hay imagenes que ya traen `PermitRootLogin yes`
+    # (openSUSE Leap), y ahi añadirlo no cambia lo que sshd aplica —el motor
+    # acierta al callar—. `PermitEmptyPasswords yes` no lo trae activo ninguna
+    # distribucion, asi que con las dos lineas siempre hay un cambio real.
+    t0="$(date +%s)"
+    { printf 'PermitRootLogin yes\nPermitEmptyPasswords yes\n'; cat "$T/sshd_config.orig"; } > "$cfg"
+    # En emulacion (TCG) el agente va decenas de veces mas lento: el plazo se
+    # ajusta a la maquina, la exigencia no.
+    plazo=30
+    [ "$(systemd-detect-virt 2> /dev/null)" = "kvm" ] || plazo=120
+    visto=""
+    i=0
+    while [ "$i" -lt "$plazo" ] && [ -z "$visto" ]; do
+        sleep 1
+        visto="$(journalctl -u aegis-integridad --no-pager -o cat 2> /dev/null \
+            | grep '^\[SEÑAL\] .* conductual ' | grep -iE 'PermitRootLogin|permitemptypasswords' \
+            | head -n 1)"
+        i=$((i + 1))
+    done
+    t_det=$(( $(date +%s) - t0 ))
+    cp -p "$T/sshd_config.orig" "$cfg"
+    systemctl stop aegis-integridad
+    journalctl -u aegis-integridad --no-pager -o cat > "$T/integridad.log" 2>&1
+    systemctl reset-failed aegis-integridad > /dev/null 2>&1
+    rm -rf /run/aegiscore
+
+    linea "AEGIS-MEDIDA|aegis-integridad|segundos_hasta_veredicto|${t_det}|s"
+    if [ -n "$visto" ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|$(printf '%s' "$visto" | cut -c1-160)"
+    else
+        linea "AEGIS-MATRIZ|prueba|$id|falla|ningun veredicto sobre sshd_config en $plazo s"
+        grep -nE '^[[:space:]]*(PermitRootLogin|PermitEmptyPasswords|Include|Match)' "$T/sshd_config.orig" \
+            > "$T/sshd.diag" 2>&1
+        volcar "$T/sshd.diag" 10
+        {
+            grep -aE 'integridad: vigila|motor [a-z]+ registrado$|DEGRADADO|SEÑAL|VEREDICTO' "$T/integridad.log"
+            grep -a 'motor integridad:' "$T/integridad.log" | tail -n 3
+        } > "$T/integridad.diag"
+        volcar "$T/integridad.diag" 30
+    fi
+}
+
+# ── Nucleo: un proceso escondido de /proc ───────────────────────────────────
+# (Funcion para tools/matriz-kernels/dentro.sh; POSIX sh. FASE 2, ola A.)
+#
+# Dos condiciones, y las dos cuentan:
+#   1. En reposo, NINGUNA señal del motor nucleo durante dos barridos: un
+#      detector de rootkits que acusa a una maquina limpia es peor que ninguno.
+#   2. Un `sleep` escondido montando un directorio vacio encima de su
+#      /proc/<pid> —la tecnica de ocultacion en espacio de usuario mas simple
+#      que existe, sin modulo de kernel— sale como oculto-en-userland.
+#
+# Donde el kernel no declara los kfuncs de tareas, el agente deja el motor
+# DEGRADADO con el motivo y la prueba lo comprueba en vez de fingir.
+nucleo_en_vivo() {
+    id="$1"
+    agente_listo aegis-nucleo --stats-interval 5
+    log() { journalctl -u aegis-nucleo --no-pager -o cat 2> /dev/null; }
+
+    if log | grep -q 'DEGRADADO motor=nucleo'; then
+        motivo="$(log | grep 'DEGRADADO motor=nucleo' | head -n 1)"
+        systemctl stop aegis-nucleo
+        systemctl reset-failed aegis-nucleo > /dev/null 2>&1
+        rm -rf /run/aegiscore
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|no aplica, declarado: $(printf '%s' "$motivo" | cut -c1-140)"
+        return
+    fi
+
+    # 1. Reposo: el motor barre cada 30 s; se esperan dos barridos.
+    sleep 65
+    falsos="$(log | grep -c '^\[SEÑAL\] .* nucleo ')"
+    linea "AEGIS-MEDIDA|aegis-kintegrity|falsos_en_reposo|${falsos}|veredictos"
+
+    # Un kernel puede declarar los kfuncs y aun asi no dejarlos usar desde un
+    # programa de tipo `syscall` (Linux 6.8): el agente lo descubre al cargar y
+    # lo publica como motivo de «sin datos». Eso es una degradacion declarada
+    # en ejecucion, y se dice como tal.
+    rechazo="$(log | grep 'motor nucleo:' | grep -o 'ultimo_sin_datos=«no se cargo el verificador[^»]*' | tail -n 1)"
+    if [ -n "$rechazo" ]; then
+        systemctl stop aegis-nucleo
+        systemctl reset-failed aegis-nucleo > /dev/null 2>&1
+        rm -rf /run/aegiscore
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|no aplica, declarado en ejecucion: $(printf '%s' "${rechazo#ultimo_sin_datos=«}" | cut -c1-200)"
+        return
+    fi
+
+    # 2. Ocultacion, en el espacio de montaje del SISTEMA (el de PID 1), que es
+    # donde lo haria quien quiere esconderse de todos y donde vive el agente:
+    # esta prueba corre dentro de cloud-init, que puede tener el suyo propio, y
+    # un montaje hecho ahi no lo ve nadie mas. El directorio vacio va en /run,
+    # compartido, y no en $T, que puede ser un /tmp privado.
+    sistema() { nsenter --mount=/proc/1/ns/mnt "$@"; }
+    sleep 600 &
+    victima=$!
+    sistema mkdir -p /run/aegis-prueba-vacio
+    # Si el kernel o la politica (SELinux) impiden montar sobre /proc/<pid>, la
+    # tecnica no funciona en esta maquina: no hay nada que detectar y se dice.
+    if ! error="$(sistema mount --bind /run/aegis-prueba-vacio "/proc/$victima" 2>&1)"; then
+        kill "$victima" 2> /dev/null
+        sistema rmdir /run/aegis-prueba-vacio 2> /dev/null
+        systemctl stop aegis-nucleo
+        systemctl reset-failed aegis-nucleo > /dev/null 2>&1
+        rm -rf /run/aegiscore
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|no aplica: esta maquina impide la ocultacion por montaje sobre /proc: $(printf '%s' "$error" | tr '\n' ' ' | cut -c1-160)"
+        return
+    fi
+    # La prueba comprueba su propia premisa: si el directorio del proceso sigue
+    # legible para el sistema, no hay nada escondido y fallar seria culpar al
+    # detector de un montaje que no ocurrio.
+    if sistema ls "/proc/$victima/task" > /dev/null 2>&1; then
+        sistema umount "/proc/$victima" 2> /dev/null
+        kill "$victima" 2> /dev/null
+        systemctl stop aegis-nucleo
+        systemctl reset-failed aegis-nucleo > /dev/null 2>&1
+        rm -rf /run/aegiscore
+        linea "AEGIS-MATRIZ|prueba|$id|falla|el montaje no escondio /proc/$victima en el espacio del sistema: la prueba no pudo plantear la ocultacion"
+        return
+    fi
+    visto=""
+    i=0
+    while [ "$i" -lt 100 ] && [ -z "$visto" ]; do
+        sleep 1
+        visto="$(log | grep '^\[SEÑAL\] .* nucleo ' | grep 'oculto-en-userland' | grep "tid $victima" | head -n 1)"
+        i=$((i + 1))
+    done
+    sistema umount "/proc/$victima"
+    sistema rmdir /run/aegis-prueba-vacio 2> /dev/null
+    kill "$victima" 2> /dev/null
+    wait "$victima" 2> /dev/null
+    systemctl stop aegis-nucleo
+    log > "$T/nucleo.log" 2>&1
+    systemctl reset-failed aegis-nucleo > /dev/null 2>&1
+    rm -rf /run/aegiscore
+
+    if [ "$falsos" -ne 0 ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|falla|${falsos} veredictos de nucleo con la maquina en reposo"
+        grep -aE 'nucleo|SEÑAL|DEGRADADO' "$T/nucleo.log" | tail -n 30 > "$T/nucleo.diag"
+        volcar "$T/nucleo.diag" 30
+    elif [ -z "$visto" ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|falla|el proceso $victima escondido de /proc no se señalo en 100 s"
+        grep -aE 'nucleo|SEÑAL|DEGRADADO' "$T/nucleo.log" | tail -n 30 > "$T/nucleo.diag"
+        volcar "$T/nucleo.diag" 30
+    else
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|$(printf '%s' "$visto" | cut -c1-160)"
     fi
 }
 
@@ -271,6 +469,8 @@ while IFS='|' read -r tipo a b c; do
             case "$a" in
             agente-en-vivo) agente_en_vivo "$a" ;;
             trabajador-en-vivo) trabajador_en_vivo "$a" ;;
+            integridad-en-vivo) integridad_en_vivo "$a" ;;
+            nucleo-en-vivo) nucleo_en_vivo "$a" ;;
             *) linea "AEGIS-MATRIZ|prueba|$a|falla|prueba sin arnes: $a ($c)" ;;
             esac
             ;;

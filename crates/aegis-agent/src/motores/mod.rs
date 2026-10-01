@@ -5,9 +5,15 @@
 //! el arbitro lo invoca. La puerta `motores` de make ci comprueba que ningun otro
 //! sitio del agente llame a un motor ni combine veredictos por su cuenta.
 
+pub mod baliza;
 pub mod conducta;
 #[cfg(target_os = "linux")]
 pub mod estatico;
+pub mod integridad;
+#[cfg(target_os = "linux")]
+pub mod memoria;
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+pub mod nucleo;
 pub mod secuestro;
 pub mod triaje;
 
@@ -142,13 +148,112 @@ impl Host for HostAgente<'_> {
                     Err("no hay /dev/kvm".into())
                 }
             }
+            Requisito::MemoriaAjena => memoria_ajena(
+                std::fs::read_to_string("/proc/self/status").ok().as_deref(),
+                leer_primera_linea(Path::new("/proc/sys/kernel/yama/ptrace_scope")).as_deref(),
+            ),
+            Requisito::KfuncsTareas => match std::fs::read("/sys/kernel/btf/vmlinux") {
+                Ok(btf) => kfuncs_tareas(&btf),
+                Err(e) => Err(format!("sin /sys/kernel/btf/vmlinux: {e}")),
+            },
         }
     }
+}
+
+/// Los kfuncs que necesita la verificacion cruzada de tareas.
+const KFUNCS_TAREAS: [&str; 3] = [
+    "bpf_iter_task_new",
+    "bpf_iter_task_next",
+    "bpf_task_from_pid",
+];
+
+/// Si el BTF del kernel declara los kfuncs de tareas.
+///
+/// Se busca el nombre ENTRE NUL en la tabla de cadenas del BTF: la
+/// version del kernel no sirve, porque RHEL los trae por backport y otros los
+/// quitan de la configuracion.
+fn kfuncs_tareas(btf: &[u8]) -> Result<(), String> {
+    let faltan: Vec<&str> = KFUNCS_TAREAS
+        .iter()
+        .copied()
+        .filter(|k| {
+            let mut aguja = vec![0u8];
+            aguja.extend_from_slice(k.as_bytes());
+            aguja.push(0);
+            !btf.windows(aguja.len()).any(|w| w == aguja.as_slice())
+        })
+        .collect();
+    if faltan.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "el kernel no declara {} (Linux 6.7+)",
+            faltan.join(", ")
+        ))
+    }
+}
+
+/// CAP_SYS_PTRACE en el conjunto efectivo.
+const CAP_SYS_PTRACE: u32 = 19;
+
+/// Si este proceso puede leer la memoria de otros, segun su `status` y Yama.
+///
+/// Se decide sobre el texto para poder probar cada rama sin privilegios.
+fn memoria_ajena(status: Option<&str>, yama: Option<&str>) -> Result<(), String> {
+    if yama == Some("3") {
+        return Err("Yama ptrace_scope=3: nadie puede leer memoria ajena, root incluido".into());
+    }
+    let status = status.ok_or("sin /proc/self/status")?;
+    let cap_eff = status
+        .lines()
+        .find_map(|l| l.strip_prefix("CapEff:"))
+        .and_then(|h| u64::from_str_radix(h.trim(), 16).ok())
+        .ok_or("CapEff ilegible en /proc/self/status")?;
+    if cap_eff & (1u64 << CAP_SYS_PTRACE) == 0 {
+        return Err("sin CAP_SYS_PTRACE en el conjunto efectivo".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod pruebas {
     use super::*;
+
+    #[test]
+    fn los_kfuncs_se_buscan_como_nombres_completos() {
+        let todo = b"\0bpf_iter_task_new\0bpf_iter_task_next\0bpf_task_from_pid\0";
+        assert!(kfuncs_tareas(todo).is_ok());
+        // Ni un prefijo ni un sufijo valen: bpf_iter_task_new_x y
+        // xbpf_iter_task_new no declaran bpf_iter_task_new.
+        let prefijo = b"\0bpf_iter_task_new_x\0bpf_iter_task_next\0bpf_task_from_pid\0";
+        assert!(kfuncs_tareas(prefijo)
+            .unwrap_err()
+            .contains("bpf_iter_task_new"));
+        let sufijo = b"\0xbpf_iter_task_new\0bpf_iter_task_next\0bpf_task_from_pid\0";
+        assert!(kfuncs_tareas(sufijo).is_err());
+        let viejo = b"\0bpf_task_from_pid\0";
+        let e = kfuncs_tareas(viejo).unwrap_err();
+        assert!(
+            e.contains("bpf_iter_task_new") && e.contains("bpf_iter_task_next"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn memoria_ajena_exige_la_capacidad_y_que_yama_no_la_cierre() {
+        let root = "Name:\taegis\nCapEff:\t000001ffffffffff\n";
+        let sin = "Name:\taegis\nCapEff:\t0000000000000000\n";
+        assert!(memoria_ajena(Some(root), Some("1")).is_ok());
+        assert!(memoria_ajena(Some(root), None).is_ok());
+        assert!(memoria_ajena(Some(root), Some("3"))
+            .unwrap_err()
+            .contains("Yama"));
+        assert!(memoria_ajena(Some(sin), Some("0"))
+            .unwrap_err()
+            .contains("CAP_SYS_PTRACE"));
+        assert!(memoria_ajena(Some("sin campo"), None).is_err());
+        assert!(memoria_ajena(None, None).is_err());
+    }
 
     #[test]
     fn el_boot_id_da_un_entero_estable() {

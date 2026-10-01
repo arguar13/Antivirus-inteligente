@@ -17,7 +17,7 @@ default = ["bpf"]
 # probar la logica de correlacion en maquinas sin clang, sin BTF o sin
 # privilegios: esa logica es la mayor parte del valor y no debe depender de
 # poder cargar codigo en el kernel.
-bpf = ["dep:libbpf-rs", "dep:libc"]
+bpf = ["dep:libbpf-rs", "dep:libc", "dep:aegis-kintegrity"]
 # Construccion hermetica: libbpf, libelf y zlib se compilan DESDE FUENTE y se
 # enlazan estaticamente en vez de tomarse del sistema.
 #
@@ -56,6 +56,18 @@ aegis-entidad = { path = "../aegis-entidad" }
 # (FASE 1 del MP-16), y el latido que vigila aegis-watchdog.
 aegis-trabajador = { path = "../aegis-trabajador" }
 aegis-watchdog = { path = "../aegis-watchdog" }
+# Ola A de la FASE 2 del MP-16: integridad de ficheros de configuracion por
+# significado, forense de memoria en vivo, verificacion cruzada de tareas del
+# kernel y balizas de C2 por el ritmo de las conexiones. Todos entran como
+# motores detras del arbitro y nacen en solo-auditoria. aegis-l7hunter trae
+# tract-onnx, que el agente ya enlazaba por aegis-edgeml.
+aegis-integridad = { path = "../aegis-integridad" }
+aegis-memhunter = { path = "../aegis-memhunter" }
+aegis-l7hunter = { path = "../aegis-l7hunter" }
+# El verificador eBPF de kintegrity solo existe con la telemetria de kernel.
+aegis-kintegrity = { path = "../aegis-kintegrity", optional = true }
+# Resumen del contenido ya notificado de un fichero vigilado (integridad).
+blake3 = "1"
 dashmap = "6"
 thiserror = "2"
 libbpf-rs = { version = "0.24", optional = true }

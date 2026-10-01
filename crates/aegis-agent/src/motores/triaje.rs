@@ -108,7 +108,8 @@ impl Motor<EventoAgente> for MotorTriaje {
             + self.pipeline.triage.tracked_ptrace_sessions() * BYTES_POR_SESION
     }
 
-    fn mantener(&mut self, ahora_ns: u64) {
+    fn mantener(&mut self, ahora_ns: u64) -> Vec<(aegis_entidad::Eid, aegis_motor::Dictamen)> {
         self.pipeline.maintain(ahora_ns);
+        Vec::new()
     }
 }

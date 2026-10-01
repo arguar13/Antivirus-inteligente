@@ -9,9 +9,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[cfg(all(target_os = "linux", feature = "bpf"))]
+use aegis_agent::motores::baliza::MotorBaliza;
+#[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::conducta::MotorConducta;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::estatico::{EstadoAnalista, MotorEstatico, MotorModelo, Resultado};
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+use aegis_agent::motores::integridad::MotorIntegridad;
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+use aegis_agent::motores::memoria::MotorMemoria;
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+use aegis_agent::motores::nucleo::MotorNucleo;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::secuestro::MotorSecuestro;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
@@ -57,6 +65,12 @@ struct Opciones {
 
 /// Ruta del latido que lee el watchdog (`aegis-watchdog --heartbeat`).
 const LATIDO_POR_DEFECTO: &str = "/run/aegiscore/agent.heartbeat";
+
+/// Cada cuanto, como mucho, se mantiene el arbitro y se recoge lo que el camino
+/// frio de los motores termino. Cada motor se dosifica despues por su cuenta:
+/// esto solo acota la frecuencia del recorrido.
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+const MANTENER_CADA: Duration = Duration::from_secs(1);
 
 const AYUDA: &str = "aegis-agent - agente de deteccion de AegisCore
      
@@ -205,6 +219,8 @@ fn informar_capacidades(maquina: bool) -> std::process::ExitCode {
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 struct EstadoPipeline {
     pipeline: Arc<Pipeline>,
+    /// Las lineas del ultimo informe: las mismas que van al registro.
+    informe: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 #[cfg(all(target_os = "linux", feature = "bpf"))]
@@ -223,6 +239,9 @@ impl aegis_ctl::StatusSource for EstadoPipeline {
     }
     fn state(&self) -> String {
         "running".to_string()
+    }
+    fn detalle(&self) -> Vec<String> {
+        self.informe.lock().map(|g| g.clone()).unwrap_or_default()
     }
 }
 
@@ -279,6 +298,7 @@ fn blindar(agresivo: bool) {
 struct Bucle {
     arbitro: Arbitro<EventoAgente>,
     ultimo_informe: Instant,
+    ultimo_mantenimiento: Instant,
     ultimo_latido: Option<Instant>,
     latido_roto: bool,
 }
@@ -286,6 +306,16 @@ struct Bucle {
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 fn veredicto(v: &aegis_entidad::Veredicto) {
     println!("[VEREDICTO] {} {}", v.entidad, v.resumen());
+    for s in &v.senales {
+        println!(
+            "[SEÑAL] {} {} {} {}: {}",
+            v.entidad,
+            s.motor.nombre(),
+            s.severidad.nombre(),
+            s.confianza,
+            s.porque
+        );
+    }
 }
 
 /// Entrega al arbitro lo que el camino frio termino de analizar.
@@ -353,6 +383,7 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
     // en un hilo aparte. Lo caro del control (YARA) se carga en diferido, asi
     // que el hilo en reposo no anade memoria al presupuesto.
     let control_stop = Arc::new(AtomicBool::new(false));
+    let ultimo_informe: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
     let control_hilo = o.control_socket.as_ref().and_then(|ruta| {
         match aegis_ctl::ControlServer::bind(ruta) {
             Ok(server) => {
@@ -362,6 +393,7 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
                     /*isolate_dry_run=*/ false,
                     Arc::new(EstadoPipeline {
                         pipeline: Arc::clone(&pipeline),
+                        informe: Arc::clone(&ultimo_informe),
                     }),
                 );
                 let parar = Arc::clone(&control_stop);
@@ -404,6 +436,12 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
     let mut arbitro: Arbitro<EventoAgente> = Arbitro::nuevo(ConfigArbitro::default());
     {
         let host = HostAgente::nuevo(&caps, host_trabajador);
+        let integridad = MotorIntegridad::nuevo(identidad.clone());
+        eprintln!(
+            "aegis-agent: integridad: vigila {} fichero(s): {}",
+            integridad.vigilados().len(),
+            integridad.vigilados().join(" ")
+        );
         let motores: Vec<Box<dyn aegis_motor::Motor<EventoAgente>>> = vec![
             Box::new(MotorTriaje::nuevo(
                 Arc::clone(&pipeline),
@@ -413,6 +451,10 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
             Box::new(MotorSecuestro::nuevo(identidad.clone())),
             Box::new(estatico),
             Box::new(MotorModelo),
+            Box::new(integridad),
+            Box::new(MotorMemoria::nuevo()),
+            Box::new(MotorNucleo::nuevo(&identidad)),
+            Box::new(MotorBaliza::nuevo()),
         ];
         for m in motores {
             let nombre = m.ficha().nombre;
@@ -438,6 +480,7 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
     let bucle = RefCell::new(Bucle {
         arbitro,
         ultimo_informe: Instant::now(),
+        ultimo_mantenimiento: Instant::now(),
         ultimo_latido: None,
         latido_roto: false,
     });
@@ -457,12 +500,24 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
             let mut b = bucle.borrow_mut();
             drenar(resultados.as_ref(), &mut b);
             latir(&latido, &mut b);
-            // Mantenimiento y estadisticas en el pulso, nunca por evento.
+            // Mantenimiento y estadisticas en el pulso, nunca por evento. El
+            // camino frio de los motores entrega aqui lo que termino.
+            if b.ultimo_mantenimiento.elapsed() >= MANTENER_CADA {
+                b.ultimo_mantenimiento = Instant::now();
+                for v in b.arbitro.mantener(bpf::ahora_boot_ns()) {
+                    veredicto(&v);
+                }
+            }
             if b.ultimo_informe.elapsed() >= o.intervalo {
                 b.ultimo_informe = Instant::now();
-                b.arbitro.mantener(bpf::ahora_boot_ns());
-                informar(&p, &b.arbitro, analista.as_deref());
-                informar_kernel(contadores);
+                let mut lineas = informar(&p, &b.arbitro, analista.as_deref());
+                lineas.push(informar_kernel(contadores));
+                for l in &lineas {
+                    eprintln!("aegis-agent: {l}");
+                }
+                if let Ok(mut g) = ultimo_informe.lock() {
+                    *g = lineas;
+                }
             }
         },
     );
@@ -533,37 +588,38 @@ fn por_familia(p: &[(aegis_agent::capacidades::Familia, u64)]) -> String {
 /// Lo que el kernel lleva emitido y perdido, por familia: la perdida se ve en
 /// cada informe, no solo al parar.
 #[cfg(all(target_os = "linux", feature = "bpf"))]
-fn informar_kernel(c: &aegis_agent::bpf::Contadores<'_>) {
-    eprintln!(
-        "aegis-agent: kernel: emitidos={} perdidos={} cedidos={} perdidas_por_familia={}",
+fn informar_kernel(c: &aegis_agent::bpf::Contadores<'_>) -> String {
+    format!(
+        "kernel: emitidos={} perdidos={} cedidos={} perdidas_por_familia={}",
         c.emitidos(),
         c.perdidos(),
         c.cedidos(),
         por_familia(&c.perdidas_por_familia())
-    );
+    )
 }
 
 /// Contadores del pipeline, del arbitro, de cada motor y del trabajador, en una
-/// linea cada uno.
+/// linea cada uno, sin el prefijo del registro.
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 fn informar(
     p: &Pipeline,
     arbitro: &Arbitro<EventoAgente>,
     analista: Option<&std::sync::Mutex<EstadoAnalista>>,
-) {
+) -> Vec<String> {
+    let mut lineas = Vec::new();
     let s = p.stats.snapshot();
-    eprintln!(
-        "aegis-agent: pipeline: {} | nodos={} ptrace_sesiones={}",
+    lineas.push(format!(
+        "pipeline: {} | nodos={} ptrace_sesiones={}",
         s.iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect::<Vec<_>>()
             .join(" "),
         p.graph.len(),
         p.triage.tracked_ptrace_sessions()
-    );
+    ));
     let h = arbitro.por_evento();
-    eprintln!(
-        "aegis-agent: arbitro: eventos={} p50_ns={} p99_ns={} max_ns={} veredictos={} expedientes={} expulsados={}",
+    lineas.push(format!(
+        "arbitro: eventos={} p50_ns={} p99_ns={} max_ns={} veredictos={} expedientes={} expulsados={}",
         h.cuenta(),
         h.percentil(50.0),
         h.percentil(99.0),
@@ -571,10 +627,10 @@ fn informar(
         arbitro.veredictos(),
         arbitro.expedientes(),
         arbitro.expulsados()
-    );
+    ));
     for m in arbitro.estado() {
-        eprintln!(
-            "aegis-agent: motor {}: camino={} evaluaciones={} senales={} p99_ns={} excesos={} suspensiones={} sin_datos={:?} memoria={}",
+        lineas.push(format!(
+            "motor {}: camino={} evaluaciones={} senales={} p99_ns={} excesos={} suspensiones={} sin_datos={:?} memoria={}{}",
             m.nombre,
             m.camino.nombre(),
             m.evaluaciones,
@@ -583,13 +639,17 @@ fn informar(
             m.excesos,
             m.suspensiones,
             m.sin_datos,
-            m.memoria
-        );
+            m.memoria,
+            m.ultimo_sin_datos
+                .as_deref()
+                .map(|u| format!(" ultimo_sin_datos=«{u}»"))
+                .unwrap_or_default()
+        ));
     }
     if let Some(e) = analista.and_then(|a| a.lock().ok().map(|g| g.clone())) {
         let t = &e.trabajador;
-        eprintln!(
-            "aegis-agent: trabajador: arranques={} muertes={} por_memoria={} plazos={} analisis={} no_pudo={} enfriamientos={} p99_ns={} | analista: encargos={} aciertos={} ilegibles={} enormes={} perdidos={} ultimo_ilegible={}",
+        lineas.push(format!(
+            "trabajador: arranques={} muertes={} por_memoria={} plazos={} analisis={} no_pudo={} enfriamientos={} p99_ns={} | analista: encargos={} aciertos={} ilegibles={} enormes={} perdidos={} ultimo_ilegible={}",
             t.arranques,
             t.muertes,
             t.muertes_por_memoria,
@@ -604,8 +664,9 @@ fn informar(
             e.enormes,
             e.perdidos,
             e.ultimo_ilegible.as_deref().unwrap_or("-")
-        );
+        ));
     }
+    lineas
 }
 
 #[cfg(not(all(target_os = "linux", feature = "bpf")))]

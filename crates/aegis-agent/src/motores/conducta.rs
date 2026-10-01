@@ -384,7 +384,8 @@ impl aegis_motor::Motor<crate::motores::EventoAgente> for MotorConducta {
             + self.puente.conocidos.len() * 32
     }
 
-    fn mantener(&mut self, ahora_ns: u64) {
+    fn mantener(&mut self, ahora_ns: u64) -> Vec<(aegis_entidad::Eid, aegis_motor::Dictamen)> {
         self.puente.maintain(ahora_ns);
+        Vec::new()
     }
 }
