@@ -22,7 +22,7 @@ El estado **real** de cada crate de AegisCore: qué llega a una máquina, qué s
 
 | Espacio de trabajo | Producto | Condicional | Biblioteca | Herramienta |
 |---|---:|---:|---:|---:|
-| Agente (`crates/`) | 8 | 1 | 63 | 1 |
+| Agente (`crates/`) | 8 | 1 | 63 | 2 |
 | Plano de control (`server/crates/`) | 0 | 0 | 19 | 1 |
 | Enjambre (`swarm-net/`) | 0 | 0 | 1 | 0 |
 
@@ -93,10 +93,10 @@ Cada prueba de extremo a extremo se ejecuta dentro de una microVM con el kernel 
 | Prueba e2e | Qué demuestra | Crates que ejerce |
 |---|---|---:|
 | `agente-en-vivo` | El agente publicado engancha sus sondas, consume actividad real y para limpio sin perder eventos. | 25 |
-| `red-en-vivo` | Una conexión TCP real llega del kernel con su dirección, su puerto y la marca de loopback. | 3 |
-| `ejecucion-en-vivo` | Una ejecución llega del kernel con su ruta y sus argumentos exactos. | 3 |
-| `ficheros-en-vivo` | Cada vía de apertura para escritura (open, creat, openat, openat2) llega del kernel con su ruta. | 3 |
-| `prioridad-en-vivo` | Con el ring saturado de aperturas de fichero, ninguna ejecución se pierde: la prioridad baja cede su sitio y la pérdida queda atribuida a su familia. | 3 |
+| `red-en-vivo` | Una conexión TCP real llega del kernel con su dirección, su puerto y la marca de loopback. | 4 |
+| `ejecucion-en-vivo` | Una ejecución llega del kernel con su ruta y sus argumentos exactos. | 4 |
+| `ficheros-en-vivo` | Cada vía de apertura para escritura (open, creat, openat, openat2) llega del kernel con su ruta. | 4 |
+| `prioridad-en-vivo` | Con el ring saturado de aperturas de fichero, ninguna ejecución se pierde: la prioridad baja cede su sitio y la pérdida queda atribuida a su familia. | 4 |
 | `trabajador-en-vivo` | El trabajador confinado muere varias veces ejecutando ELF malformados y el agente sigue protegiendo: los eventos siguen llegando y el watchdog no lo reinicia. | 26 |
 | `integridad-en-vivo` | Una puerta trasera en sshd_config (PermitRootLogin yes) con el agente en marcha: el agente dice qué cambió en el fichero y quién lo cambió. | 25 |
 | `nucleo-en-vivo` | Con la máquina en reposo el verificador cruzado de tareas no acusa a nadie, y un proceso escondido de /proc con un montaje encima sale como oculto-en-userland; donde el kernel no tiene los kfuncs de tareas, el motor queda degradado con su motivo. | 25 |
@@ -180,6 +180,7 @@ Dependencias que hoy suben de capa ([`tools/config/capas.toml`](../tools/config/
 | `aegis-predict` | motores | **Biblioteca** | — | — | — | — | enlazado, pero ningún símbolo sobrevive en el binario; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-presupuesto` | núcleo | **Biblioteca** | `aegis-watchdog` | [crates/aegis-watchdog/src/bin/aegis-watchdog.rs:79](../crates/aegis-watchdog/src/bin/aegis-watchdog.rs#L79) | `trabajador-en-vivo` | — | sin medida |
 | `aegis-procedencia` | núcleo | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
+| `aegis-prueba` | herramienta | **Herramienta** | — | — | `red-en-vivo`, `ejecucion-en-vivo`, `ficheros-en-vivo`, `prioridad-en-vivo` | — | — |
 | `aegis-ptguard` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-rango` | motores | **Biblioteca** | — | — | — | — | ningún instalable lo enlaza; sin prueba e2e en la matriz de kernels; sin medida |
 | `aegis-ransom` | motores | **Producto** | `aegis-agent` | [crates/aegis-agent/src/motores/secuestro.rs:20](../crates/aegis-agent/src/motores/secuestro.rs#L20) | `agente-en-vivo`, `trabajador-en-vivo`, `integridad-en-vivo`, `nucleo-en-vivo` | p99_evaluacion (ns) | — |

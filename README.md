@@ -24,7 +24,7 @@ máquina.
 
 | Espacio de trabajo | Producto | Condicional | Biblioteca | Herramienta |
 |---|---:|---:|---:|---:|
-| Agente (`crates/`) | 8 | 1 | 63 | 1 |
+| Agente (`crates/`) | 8 | 1 | 63 | 2 |
 | Plano de control (`server/crates/`) | 0 | 0 | 19 | 1 |
 | Enjambre (`swarm-net/`) | 0 | 0 | 1 | 0 |
 
@@ -34,9 +34,9 @@ máquina.
 
 | Magnitud | Agente | Plano de control | Enjambre |
 |---|---:|---:|---:|
-| Crates | 73 | 20 | 1 |
-| Funciones de prueba | 3.369 | 1.216 | 6 |
-| Líneas de Rust | 237.727 | 92.635 | 555 |
+| Crates | 74 | 20 | 1 |
+| Funciones de prueba | 3.378 | 1.216 | 6 |
+| Líneas de Rust | 238.636 | 92.686 | 555 |
 
 Además: **3.962** líneas de C propio (sondas eBPF y driver de Windows, sin contar el `vmlinux.h` generado), **58** verificadores `tools/verificar-*.sh`, **39** dependencias directas del agente con su justificación en [`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y **5** ejecutables instalables.
 
@@ -270,6 +270,7 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-pqc`](crates/aegis-pqc) | Criptografia post-cuantica hibrida (ML-KEM-768 + ML-DSA-65) para el canal C2 y el firmado de actualizaciones | núcleo | Biblioteca | 39 | sí |
 | [`aegis-presupuesto`](crates/aegis-presupuesto) | Presupuesto de memoria del agente: reparto por host, regimenes y obligacion desde el kernel | núcleo | Biblioteca | 50 | sí |
 | [`aegis-procedencia`](crates/aegis-procedencia) | Procedencia del propio producto: construccion reproducible, atestacion verificada en el endpoint antes de aplicar, y registro de transparencia propio verificable sin conexion | núcleo | Biblioteca | 15 | sí |
+| [`aegis-prueba`](crates/aegis-prueba) | Apoyo a las pruebas de los tres workspaces: una prueba que no puede ejercerse lo dice, se cuenta y, si su requisito se exige, falla | herramienta | Herramienta | 9 | sí |
 | [`aegis-ptguard`](crates/aegis-ptguard) | Trazado de ejecucion por hardware (Intel PT) para detectar ROP/JOP (FASE 51) | motores | Biblioteca | 12 | — |
 | [`aegis-ransom`](crates/aegis-ransom) | Motor de deteccion y contencion de ransomware en tiempo real | motores | Producto | 22 | sí |
 | [`aegis-resp`](crates/aegis-resp) | Motor de respuesta activa de AegisCore: terminacion, cuarentena y aislamiento | plataforma | Biblioteca | 22 | — |
@@ -435,6 +436,7 @@ Corre en cada endpoint, con privilegios.
 | 107 | [AegisSupremacy: la demostración sobre las 63 categorías (FASE 112)](docs/107-supremacia.md) |
 | 108 | [AegisTruth: verdad, CI remoto y matriz de kernels (FASE 0 del MP-15)](docs/108-verdad.md) |
 | 109 | [La columna vertebral del agente (FASE 1 del MP-16)](docs/109-columna-vertebral.md) |
+| 110 | [Integración, ola A: cuatro motores detrás del árbitro (FASE 2 del MP-16)](docs/110-ola-a.md) |
 
 ## Desarrollo
 
