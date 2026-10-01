@@ -37,16 +37,15 @@ fn confianza_de(sev: Severidad) -> Confianza {
 #[must_use]
 pub fn senal_de_cambio(cambio: &CambioConAutor, semantico: &CambioSemantico) -> Senal {
     let sev = semantico.severidad();
+    let credenciales = match &cambio.autor.credenciales {
+        Some(c) if c.escalo() => format!("uid {}, euid {} — escalada", c.uid, c.euid),
+        Some(c) => format!("uid {}", c.uid),
+        None => "credenciales no capturadas".to_string(),
+    };
     let porque = format!(
-        "{}; lo hizo {} (uid {}{}){}",
+        "{}; lo hizo {} ({credenciales}){}",
         semantico.porque(),
         cambio.autor.proceso,
-        cambio.autor.credenciales.uid,
-        if cambio.autor.credenciales.escalo() {
-            format!(", euid {} — escalada", cambio.autor.credenciales.euid)
-        } else {
-            String::new()
-        },
         if cambio.autor.linaje.is_empty() {
             String::new()
         } else {
@@ -95,6 +94,7 @@ mod pruebas {
     #[test]
     fn un_cambio_critico_produce_una_senal_sospechosa_con_autor_en_la_frase() {
         let sem = CambioSemantico::PermitRootLogin {
+            ambito: None,
             antes: "no".to_string(),
             despues: "yes".to_string(),
         };

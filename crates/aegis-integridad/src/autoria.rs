@@ -57,8 +57,9 @@ impl Credenciales {
 pub struct Autor {
     /// El proceso que hizo el cambio.
     pub proceso: Eid,
-    /// Sus credenciales en el instante del cambio.
-    pub credenciales: Credenciales,
+    /// Sus credenciales en el instante del cambio, si se capturaron. `None` se
+    /// dice como tal: un uid inventado se leeria como un uid.
+    pub credenciales: Option<Credenciales>,
     /// Los ancestros, del padre hacia la raiz. Vacio si no se pudo reconstruir la
     /// cadena (y entonces se dice, no se inventa).
     pub linaje: Vec<Eid>,
@@ -70,7 +71,17 @@ impl Autor {
     pub fn nuevo(proceso: Eid, credenciales: Credenciales, linaje: Vec<Eid>) -> Autor {
         Autor {
             proceso,
-            credenciales,
+            credenciales: Some(credenciales),
+            linaje,
+        }
+    }
+
+    /// Un autor del que no se pudieron capturar las credenciales.
+    #[must_use]
+    pub fn sin_credenciales(proceso: Eid, linaje: Vec<Eid>) -> Autor {
+        Autor {
+            proceso,
+            credenciales: None,
             linaje,
         }
     }
@@ -112,6 +123,24 @@ impl CambioConAutor {
             ruta_capturada: evento.ruta().map(str::to_string),
             autor,
             cuando_ns: evento.cuando_ns,
+        }
+    }
+
+    /// Nace de una captura que no es un evento del sensor —la telemetria de
+    /// ficheros de las sondas del agente—, con los mismos campos: el objeto
+    /// cambiado, su ruta tal y como se capturo, el autor y el instante.
+    #[must_use]
+    pub fn nuevo(
+        objetivo: Eid,
+        ruta: Option<String>,
+        autor: Autor,
+        cuando_ns: u64,
+    ) -> CambioConAutor {
+        CambioConAutor {
+            objetivo,
+            ruta_capturada: ruta,
+            autor,
+            cuando_ns,
         }
     }
 

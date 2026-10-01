@@ -37,6 +37,9 @@ pub enum CambioSemantico {
         antes: String,
         /// Valor nuevo.
         despues: String,
+        /// `None` si es el valor global; `Some("Match ...")` si solo vale para
+        /// las conexiones que cumplen ese bloque.
+        ambito: Option<String>,
     },
     /// Cambio de cualquier otra directiva de SSH que reconocemos como sensible.
     DirectivaSsh {
@@ -46,6 +49,8 @@ pub enum CambioSemantico {
         antes: Option<String>,
         /// Valor nuevo, si existe.
         despues: Option<String>,
+        /// `None` si es el valor global; `Some("Match ...")` si es condicional.
+        ambito: Option<String>,
     },
     /// Se concedio `NOPASSWD` a un principal (usuario o `%grupo`): sudo sin
     /// contrasena es una escalada permanente.
@@ -95,17 +100,24 @@ impl CambioSemantico {
     #[must_use]
     pub fn porque(&self) -> String {
         match self {
-            CambioSemantico::PermitRootLogin { antes, despues } => {
-                format!("PermitRootLogin cambio de «{antes}» a «{despues}»")
-            }
+            CambioSemantico::PermitRootLogin {
+                antes,
+                despues,
+                ambito,
+            } => format!(
+                "PermitRootLogin cambio de «{antes}» a «{despues}»{}",
+                en_ambito(ambito.as_deref())
+            ),
             CambioSemantico::DirectivaSsh {
                 clave,
                 antes,
                 despues,
+                ambito,
             } => format!(
-                "directiva SSH «{clave}» cambio de {} a {}",
+                "directiva SSH «{clave}» cambio de {} a {}{}",
                 antes.as_deref().unwrap_or("(ausente)"),
-                despues.as_deref().unwrap_or("(ausente)")
+                despues.as_deref().unwrap_or("(ausente)"),
+                en_ambito(ambito.as_deref())
             ),
             CambioSemantico::NopasswdConcedido { principal } => {
                 format!("se concedio NOPASSWD a «{principal}»: sudo sin contrasena")
@@ -168,41 +180,96 @@ fn util(linea: &str) -> Option<&str> {
     }
 }
 
-/// Parsea `sshd_config` a un mapa `directiva_en_minusculas -> valor`. La ultima
-/// aparicion gana, como hace el propio sshd.
-fn parsear_sshd(texto: &str) -> std::collections::BTreeMap<String, String> {
-    let mut m = std::collections::BTreeMap::new();
+fn en_ambito(ambito: Option<&str>) -> String {
+    ambito
+        .map(|m| format!(" (solo con «{m}»)"))
+        .unwrap_or_default()
+}
+
+/// Lo que `sshd` aplica de un `sshd_config`: los valores globales y los de cada
+/// bloque `Match`, por separado.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Sshd {
+    /// Directiva en minusculas -> valor, antes del primer `Match`.
+    global: std::collections::BTreeMap<String, String>,
+    /// Condicion del `Match` (normalizada) -> sus directivas.
+    bloques: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+}
+
+/// Parsea `sshd_config` como lo lee `sshd` (sshd_config(5)): **para cada
+/// directiva vale el PRIMER valor obtenido**, y todo lo que sigue a un `Match`
+/// solo aplica a las conexiones que lo cumplen, hasta el siguiente `Match`.
+///
+/// Leerlo al reves —la ultima aparicion gana— era un hueco: `PermitRootLogin
+/// yes` insertado al principio, con un `PermitRootLogin no` debajo, abre root y
+/// se calculaba «no». `Include` no se resuelve aqui (el crate recibe el texto
+/// de UN fichero); los ficheros incluidos se vigilan por separado.
+fn parsear_sshd(texto: &str) -> Sshd {
+    let mut s = Sshd::default();
+    let mut bloque: Option<String> = None;
     for linea in texto.lines() {
         let Some(t) = util(linea) else { continue };
-        let mut it = t.splitn(2, char::is_whitespace);
-        let Some(clave) = it.next() else { continue };
-        let valor = it.next().unwrap_or("").trim().to_string();
-        m.insert(clave.to_ascii_lowercase(), valor);
+        // sshd admite `Clave valor` y `Clave=valor`.
+        let (clave, valor) = match t.find(|c: char| c.is_whitespace() || c == '=') {
+            Some(i) => (
+                &t[..i],
+                t[i..].trim_start_matches(|c: char| c.is_whitespace() || c == '='),
+            ),
+            None => (t, ""),
+        };
+        let clave = clave.to_ascii_lowercase();
+        if clave == "match" {
+            let cond = valor.split_whitespace().collect::<Vec<_>>().join(" ");
+            bloque = Some(format!("Match {cond}"));
+            continue;
+        }
+        let mapa = match &bloque {
+            None => &mut s.global,
+            Some(b) => s.bloques.entry(b.clone()).or_default(),
+        };
+        mapa.entry(clave)
+            .or_insert_with(|| valor.trim().to_string());
     }
-    m
+    s
 }
 
 fn diff_sshd(antes: &str, despues: &str) -> Vec<CambioSemantico> {
     let a = parsear_sshd(antes);
     let d = parsear_sshd(despues);
+    let vacio = std::collections::BTreeMap::new();
+    let mut ambitos: Vec<Option<&String>> = vec![None];
+    let conds: std::collections::BTreeSet<&String> =
+        a.bloques.keys().chain(d.bloques.keys()).collect();
+    ambitos.extend(conds.into_iter().map(Some));
     let mut cambios = Vec::new();
-    for clave in DIRECTIVAS_SSH_SENSIBLES {
-        let va = a.get(*clave);
-        let vd = d.get(*clave);
-        if va == vd {
-            continue;
-        }
-        if *clave == "permitrootlogin" {
-            cambios.push(CambioSemantico::PermitRootLogin {
-                antes: va.cloned().unwrap_or_else(|| "(por defecto)".to_string()),
-                despues: vd.cloned().unwrap_or_else(|| "(por defecto)".to_string()),
-            });
-        } else {
-            cambios.push(CambioSemantico::DirectivaSsh {
-                clave: (*clave).to_string(),
-                antes: va.cloned(),
-                despues: vd.cloned(),
-            });
+    for ambito in ambitos {
+        let (ma, md) = match ambito {
+            None => (&a.global, &d.global),
+            Some(c) => (
+                a.bloques.get(c).unwrap_or(&vacio),
+                d.bloques.get(c).unwrap_or(&vacio),
+            ),
+        };
+        for clave in DIRECTIVAS_SSH_SENSIBLES {
+            let va = ma.get(*clave);
+            let vd = md.get(*clave);
+            if va == vd {
+                continue;
+            }
+            if *clave == "permitrootlogin" {
+                cambios.push(CambioSemantico::PermitRootLogin {
+                    antes: va.cloned().unwrap_or_else(|| "(por defecto)".to_string()),
+                    despues: vd.cloned().unwrap_or_else(|| "(por defecto)".to_string()),
+                    ambito: ambito.cloned(),
+                });
+            } else {
+                cambios.push(CambioSemantico::DirectivaSsh {
+                    clave: (*clave).to_string(),
+                    antes: va.cloned(),
+                    despues: vd.cloned(),
+                    ambito: ambito.cloned(),
+                });
+            }
         }
     }
     cambios
@@ -278,6 +345,59 @@ fn diff_authorized_keys(antes: &str, despues: &str) -> Vec<CambioSemantico> {
 mod pruebas {
     use super::*;
 
+    /// La evasion que dejaba abierta la lectura «la ultima gana»: sshd aplica
+    /// la PRIMERA, asi que insertar arriba abre root aunque debajo diga «no».
+    #[test]
+    fn un_permitrootlogin_insertado_arriba_abre_root_y_se_ve() {
+        let antes = "Include /etc/ssh/sshd_config.d/*.conf\nPermitRootLogin no\n";
+        let despues =
+            "PermitRootLogin yes\nInclude /etc/ssh/sshd_config.d/*.conf\nPermitRootLogin no\n";
+        let c = diff_sshd(antes, despues);
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert!(matches!(
+            &c[0],
+            CambioSemantico::PermitRootLogin { despues, ambito: None, .. } if despues == "yes"
+        ));
+        assert_eq!(c[0].severidad(), Severidad::Critica);
+    }
+
+    /// Y la otra cara: añadir abajo lo que ya fijo una linea anterior no cambia
+    /// lo que sshd aplica. No es un cambio de significado.
+    #[test]
+    fn un_permitrootlogin_añadido_debajo_de_otro_no_cambia_nada() {
+        let antes = "PermitRootLogin no\n";
+        let despues = "PermitRootLogin no\nPermitRootLogin yes\n";
+        assert!(diff_sshd(antes, despues).is_empty());
+    }
+
+    /// Una concesion condicionada es una puerta trasera con cerradura: se dice
+    /// con su condicion, y abrir root sigue siendo critico.
+    #[test]
+    fn un_bloque_match_se_analiza_aparte_y_se_nombra() {
+        let antes = "PermitRootLogin no\n";
+        let despues = "PermitRootLogin no\nMatch Address 203.0.113.7\n    PermitRootLogin yes\n";
+        let c = diff_sshd(antes, despues);
+        assert_eq!(c.len(), 1, "{c:?}");
+        let CambioSemantico::PermitRootLogin {
+            ambito, despues, ..
+        } = &c[0]
+        else {
+            panic!("{c:?}")
+        };
+        assert_eq!(ambito.as_deref(), Some("Match Address 203.0.113.7"));
+        assert_eq!(despues, "yes");
+        assert_eq!(c[0].severidad(), Severidad::Critica);
+        assert!(c[0].porque().contains("Match Address 203.0.113.7"));
+    }
+
+    #[test]
+    fn la_forma_clave_igual_valor_tambien_cuenta() {
+        let c = diff_sshd("", "PermitRootLogin=yes\n");
+        assert!(
+            matches!(&c[0], CambioSemantico::PermitRootLogin { despues, .. } if despues == "yes")
+        );
+    }
+
     #[test]
     fn un_comentario_nuevo_no_es_un_cambio_semantico() {
         // EL punto de la fase: un diff de hash dispararia; aqui no pasa nada,
@@ -295,7 +415,7 @@ mod pruebas {
         assert_eq!(c.len(), 1);
         assert!(matches!(
             &c[0],
-            CambioSemantico::PermitRootLogin { antes, despues }
+            CambioSemantico::PermitRootLogin { antes, despues, ambito: None }
                 if antes == "no" && despues == "yes"
         ));
         assert_eq!(c[0].severidad(), Severidad::Critica);

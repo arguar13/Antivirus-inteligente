@@ -125,6 +125,7 @@ impl LineaBase {
                     // Un binario cambiado no tiene «significado» que parsear; se
                     // expresa como una directiva opaca para que el arbitro lo vea.
                     vec![CambioSemantico::DirectivaSsh {
+                        ambito: None,
                         clave: format!("contenido-binario::{ruta}"),
                         antes: Some("(hash conocido-bueno)".to_string()),
                         despues: Some("(hash distinto)".to_string()),

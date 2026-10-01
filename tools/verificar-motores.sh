@@ -57,7 +57,39 @@ if grep -rn 'arbitrar(' "$AGENTE/src" > "$TMP/x"; then
     fallo "el agente combina veredictos por su cuenta (solo el arbitro de aegis-motor combina):"
     sed 's/^/    | /' "$TMP/x"
 fi
-if grep -rnE '\.evaluar\(' "$AGENTE/src" > "$TMP/x"; then
+# Las pruebas UNITARIAS de un motor (su bloque `#[cfg(test)]`) si lo invocan: es
+# el unico modo de mirar su estado interno. Se excluye exactamente ese bloque,
+# contando llaves desde el atributo hasta que cierra, y no «desde ahi hasta el
+# final del fichero»: una llamada de produccion escrita despues de las pruebas
+# tiene que seguir saliendo aqui.
+fuera_de_pruebas() {
+    awk '
+        /^[[:space:]]*#\[cfg\(test\)\]/ { prueba = 1; abierto = 0; prof = 0; next }
+        {
+            if (prueba) {
+                n = gsub(/\{/, "{"); c = gsub(/\}/, "}")
+                prof += n - c
+                if (n > 0) abierto = 1
+                if (abierto && prof <= 0) prueba = 0
+                next
+            }
+            print FILENAME ":" FNR ":" $0
+        }' "$@"
+}
+# La exclusion no puede tapar de mas: se comprueba sobre un fichero hecho a
+# proposito, con una llamada de produccion DESPUES del bloque de pruebas.
+cat > "$TMP/muerde.rs" <<'RS'
+fn a() {}
+#[cfg(test)]
+mod pruebas {
+    fn b() { m.evaluar(&e, &p); }
+}
+fn c() { m.evaluar(&e, &p); }
+RS
+if [ "$(fuera_de_pruebas "$TMP/muerde.rs" | grep -c '\.evaluar(')" != "1" ]; then
+    fallo "la exclusion del bloque de pruebas tapa codigo de produccion (autocomprobacion)"
+fi
+if fuera_de_pruebas $(find "$AGENTE/src" -name '*.rs' | sort) | grep -E '\.evaluar\(' > "$TMP/x"; then
     fallo "el agente llama a un motor sin pasar por el arbitro:"
     sed 's/^/    | /' "$TMP/x"
 fi
