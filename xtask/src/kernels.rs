@@ -237,6 +237,44 @@ fn artefactos(repo: &Repo, arq: &str) -> Artefactos {
     }
 }
 
+/// La huella del arbol de trabajo, de su unica definicion (`tools/huella-arbol.sh`).
+fn huella_del_arbol(repo: &Repo) -> Resultado<String> {
+    let salida = ejecutar_cmd(
+        Command::new(repo.raiz.join("tools/huella-arbol.sh")).current_dir(&repo.raiz),
+        "tools/huella-arbol.sh",
+    )?;
+    let h = salida.trim().to_string();
+    if h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(h)
+    } else {
+        Err(format!("tools/huella-arbol.sh no devolvio una huella: «{h}»").into())
+    }
+}
+
+/// Que los binarios que van a la VM salgan de ESTE arbol.
+///
+/// La matriz llego a probar en x86-64 un agente de una tanda anterior: el grupo
+/// `kernels` tomaba el de dist-hermetico/ sin preguntar de que arbol salia, y los
+/// motores recien integrados no estaban en las VMs (FASE 2 del MP-16). Una matriz
+/// verde sobre otro binario es un verde falso, asi que sin huella, o con otra, no
+/// se arranca ninguna VM.
+fn procedencia(grabada: Option<&str>, actual: &str, dist: &Path, remedio: &str) -> Resultado<()> {
+    match grabada.map(str::trim) {
+        Some(h) if h == actual => Ok(()),
+        Some(h) => Err(format!(
+            "los binarios de {} se construyeron sobre otro arbol (huella {h}, este es {actual}): \
+             reconstruyelos con {remedio}",
+            dist.display()
+        )
+        .into()),
+        None => Err(format!(
+            "{} no dice de que arbol salen sus binarios (falta HUELLA): reconstruyelos con {remedio}",
+            dist.display()
+        )
+        .into()),
+    }
+}
+
 /// Compone el disco de carga de una arquitectura.
 fn preparar_carga(repo: &Repo, k: &Kernels, arq: &str, dir: &Path) -> Resultado<PathBuf> {
     let a = artefactos(repo, arq);
@@ -257,6 +295,9 @@ fn preparar_carga(repo: &Repo, k: &Kernels, arq: &str, dir: &Path) -> Resultado<
             .into());
         }
     }
+    let actual = huella_del_arbol(repo)?;
+    let grabada = std::fs::read_to_string(a.dist.join("HUELLA")).ok();
+    procedencia(grabada.as_deref(), &actual, &a.dist, &remedio)?;
     let carga = dir.join(format!("carga-{arq}"));
     let _ = std::fs::remove_dir_all(&carga);
     for sub in ["bin", "bpf", "pruebas"] {
@@ -1038,6 +1079,17 @@ fn resumen(imagenes: &[Imagen], res: &BTreeMap<String, Resultado1>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_matriz_solo_prueba_binarios_de_este_arbol() {
+        let d = Path::new("dist-hermetico");
+        let h = "a".repeat(64);
+        assert!(procedencia(Some(&format!("{h}\n")), &h, d, "x").is_ok());
+        let otra = procedencia(Some(&"b".repeat(64)), &h, d, "x").unwrap_err();
+        assert!(otra.to_string().contains("otro arbol"), "{otra}");
+        let sin = procedencia(None, &h, d, "x").unwrap_err();
+        assert!(sin.to_string().contains("falta HUELLA"), "{sin}");
+    }
 
     #[test]
     fn sumas_en_formato_gnu_y_bsd() {

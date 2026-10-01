@@ -192,11 +192,20 @@ if [ "$MUERTOS" -eq 0 ]; then ok "todos ejecutan"; else
 # --- Procedencia ------------------------------------------------------------
 paso "sumas y manifiesto"
 ( cd "$DIST" && sha256sum "${CONSTRUIDOS[@]}" > SHA256SUMS )
+# De que arbol salen estos binarios, con la misma huella con la que la matriz de
+# kernels compara antes de probarlos. Sin huella no se publica nada: un binario
+# de procedencia desconocida no puede entrar en la matriz.
+if ! HUELLA="$("$RAIZ/tools/huella-arbol.sh")"; then
+    fallo "no se pudo calcular la huella del arbol (git no responde sobre $RAIZ)"
+    exit 1
+fi
+printf '%s\n' "$HUELLA" > "$DIST/HUELLA"
 cat > "$DIST/MANIFIESTO.txt" <<MAN
 AegisCore - artefactos hermeticos
 =================================
 commit        : $(git rev-parse HEAD 2>/dev/null || echo "desconocido")
 arbol limpio  : $([ -z "$(git status --porcelain 2>/dev/null)" ] && echo "si" || echo "NO")
+huella        : $HUELLA
 objetivo      : $TRIPLE
 enlazado      : $MODO
 sysroot       : $SYSROOT

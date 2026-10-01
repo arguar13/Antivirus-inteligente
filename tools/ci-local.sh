@@ -169,18 +169,9 @@ PLAZO_POR_GRUPO="${PLAZO_POR_GRUPO:-45m}"
 # una garantia en una suposicion. Si no se puede saber si el arbol cambio, lo
 # correcto es decirlo y parar, no seguir con un numero que no significa nada.
 huella_del_arbol() {
-    # Se comprueba primero que git responde de verdad sobre este arbol.
-    if ! git rev-parse HEAD >/dev/null 2>&1; then
-        return 1
-    fi
-    {
-        git rev-parse HEAD
-        git diff HEAD --binary
-        git ls-files --others --exclude-standard | sort | while read -r f; do
-            printf '%s ' "$f"
-            sha256sum "$f" 2>/dev/null || echo "?"
-        done
-    } | sha256sum | cut -d' ' -f1
+    # Una sola definicion para todo el repositorio: la de los artefactos y la
+    # de la matriz tienen que ser exactamente esta.
+    ./tools/huella-arbol.sh
 }
 
 # Los grupos, EN SU ORDEN, sacados de este mismo fichero.

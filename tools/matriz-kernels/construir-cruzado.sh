@@ -103,6 +103,11 @@ aarch64() {
         fi
         file "dist-hermetico-aarch64/$b" 2>/dev/null || true
     done
+    # La procedencia, con la huella que compara la matriz (tools/huella-arbol.sh).
+    tools/huella-arbol.sh > dist-hermetico-aarch64/HUELLA || {
+        echo "FALLO: no se pudo calcular la huella del arbol" >&2
+        exit 1
+    }
     echo "artefactos aarch64 listos"
 }
 
