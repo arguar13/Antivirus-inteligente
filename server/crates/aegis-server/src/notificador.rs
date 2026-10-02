@@ -100,9 +100,14 @@ impl Notificador {
         tokio::spawn(async move {
             let mut generacion = 0u64;
             let (mut g_pol, mut g_caza, mut g_cua) = (0u64, 0u64, 0u64);
+            let mut fallos: u32 = 0;
             loop {
                 match escucha.recv().await {
                     Ok(aviso) => {
+                        if fallos > 0 {
+                            tracing::info!(fallos, "escucha de avisos restablecida");
+                            fallos = 0;
+                        }
                         generacion = generacion.wrapping_add(1);
                         let anterior = tx.borrow().version_politica;
                         // Un aviso de cuarentena NO pasa por el canal de los
@@ -143,12 +148,21 @@ impl Notificador {
                         }
                     }
                     Err(e) => {
-                        tracing::error!(
-                            error = %e,
-                            "la escucha de avisos se detuvo; los empujes de politica y las \
-                             cacerias dejan de propagarse entre instancias hasta reiniciar"
+                        // H-42 (FASE 6.4): `PgListener::recv` reconecta solo en
+                        // la siguiente llamada. Salir del bucle aqui dejaba las
+                        // instancias sordas a politica, cazas y cuarentena hasta
+                        // reiniciar, tras CUALQUIER corte de PostgreSQL.
+                        fallos = fallos.saturating_add(1);
+                        let espera = std::time::Duration::from_millis(
+                            250u64.saturating_mul(1u64 << fallos.min(7)),
                         );
-                        break;
+                        tracing::warn!(
+                            error = %e,
+                            fallos,
+                            espera_ms = espera.as_millis() as u64,
+                            "la escucha de avisos perdio PostgreSQL; se reintentara"
+                        );
+                        tokio::time::sleep(espera).await;
                     }
                 }
             }

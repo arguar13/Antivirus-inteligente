@@ -41,9 +41,9 @@ ram_gib = 768
 #
 #  Cada relación lleva su EVIDENCIA: un fichero del repositorio y un texto que
 #  tiene que contener. Si la evidencia no está, `cargo xtask docs` falla: el
-#  diagrama no puede dibujar algo que el código no hace. Por eso no hay flecha
-#  del agente al cliente de flota, ni del cliente de flota al servidor real: hoy
-#  no existen (ver docs/matriz-capacidades.md).
+#  diagrama no puede dibujar algo que el código no hace. La flecha del agente al
+#  plano de control existe desde H-23 (enlace en solo-auditoría); la del binario
+#  de demostración aegis-fleet al servidor real, no (ver docs/matriz-capacidades.md).
 
 [[c4.externo]]
 id = "kernel"
@@ -88,6 +88,12 @@ desde = "navegador"
 hacia = "aegis-server"
 etiqueta = "HTTP y WebSocket, sin TLS propio (AM-3.4)"
 evidencia = { fichero = "server/crates/aegis-server/src/panel.rs", contiene = "include_str!(\"../../../panel/index.html\")" }
+
+[[c4.relacion]]
+desde = "aegis-agent"
+hacia = "aegis-server"
+etiqueta = "veredictos y estado de motores por mTLS nativo (solo auditoría)"
+evidencia = { fichero = "crates/aegis-agent/src/plano.rs", contiene = "ConectorFlota::nuevo(" }
 
 [[c4.relacion]]
 desde = "aegis-server"

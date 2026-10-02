@@ -16,6 +16,9 @@ workspace = true
 # cronologia, rastro encadenado y metricas— vive alli como funciones puras; aqui
 # solo se pone en PostgreSQL.
 aegis-case = { path = "../aegis-case" }
+# RBAC (FASE 6.2): la tabla de roles y permisos de la consola, ahora cableada
+# en la API (`crate::autorizacion`). Sin dependencias nuevas: es del workspace.
+aegis-consola = { path = "../aegis-consola" }
 # --- Transporte nativo de la flota -----------------------------------------
 # El agente (aegis-fleet, FASE 34) habla protobuf con el enmarcado de gRPC sobre
 # mTLS crudo, NO sobre HTTP/2. Depender del propio crate del agente garantiza que

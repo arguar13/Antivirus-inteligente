@@ -289,9 +289,16 @@ impl AegisFleet for ServicioGrpc {
             Ok(id) => Ok(Response::new(AckEvento {
                 recibido: true,
                 id_incidente: id.to_string(),
+                reintentar: false,
             })),
             Err(e) => {
                 tracing::error!(error = %e, "EVENTO DE SEGURIDAD NO PERSISTIDO (gRPC)");
+                // Transitorio: UNAVAILABLE, que un cliente gRPC reintenta.
+                if e.es_transitorio() {
+                    return Err(Status::unavailable(
+                        "base de datos no disponible; reintentar",
+                    ));
+                }
                 Err(Status::internal("no se pudo registrar el evento"))
             }
         }

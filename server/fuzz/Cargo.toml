@@ -1,0 +1,39 @@
+# Fuzzing de la API del plano de control (E6.13 de la FASE 6.2 del MP-16).
+#
+# Workspace APARTE, como `fuzz/` en la raiz: libFuzzer y el sanitizador exigen
+# el nightly fijado (tools/toolchain/nightly-fuzz.txt) y no pueden contaminar el
+# build del servidor. Lo lanza `tools/fuzz.sh` con los objetivos `servidor_*`.
+#
+# Compilar aegis-server con el sanitizador cuesta lo suyo (sqlx, tonic, axum):
+# corre en el nocturno de la forja; make ci solo exige que cada ruta tenga
+# esquema (`tests/rbac_matriz.rs`).
+[package]
+name = "aegis-fuzz-servidor"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+aegis-server = { path = "../crates/aegis-server" }
+prost = "0.13"
+
+# Workspace propio: desacopla este crate del workspace del servidor.
+[workspace]
+
+[[bin]]
+name = "api_cuerpos"
+path = "fuzz_targets/api_cuerpos.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "grpc_mensajes"
+path = "fuzz_targets/grpc_mensajes.rs"
+test = false
+doc = false
+bench = false

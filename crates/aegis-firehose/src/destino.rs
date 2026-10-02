@@ -33,4 +33,14 @@ pub trait Destino: Send {
     /// destino que no vuelve nunca: el socket queda medio abierto, las
     /// escrituras «funcionan» y nada llega.
     fn reiniciar(&mut self) {}
+
+    /// Si la conexion con el destino sigue viva AHORA, sin enviar nada.
+    ///
+    /// La usa la retencion de la bomba (`Bomba::con_retencion`) antes de dar
+    /// por guardado un lote en un destino SIN acuse: un colector que murio
+    /// con el lote en su bufer no lo guardo, aunque el envio diera `Ok`. Por
+    /// defecto `true`: un destino con acuse no la necesita.
+    fn vivo(&mut self) -> bool {
+        true
+    }
 }

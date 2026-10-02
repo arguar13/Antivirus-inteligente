@@ -221,7 +221,8 @@ impl ServicioFlota {
     ) -> Resultado<String> {
         // El identificador de flota se deriva del CN autenticado: un agente no
         // puede elegir en que flota entra declarandolo en el mensaje.
-        let id_flota = format!("flota-{}", cn.split('.').next_back().unwrap_or("principal"));
+        // La misma regla con la que la API decide de quien es un agente.
+        let id_flota = crate::autorizacion::inquilino_de_cn(cn);
         self.almacen
             .enrolar(
                 cn,
@@ -398,6 +399,45 @@ fn recortar(s: &str, max: usize) -> String {
     s[..fin].to_string()
 }
 
+/// Tamano maximo del estado que declara un agente, en bytes.
+pub const MAX_ESTADO_AGENTE: usize = 16 * 1024;
+
+/// Valida el estado que declara un agente antes de guardarlo (H-23).
+///
+/// Tiene que ser un objeto JSON y caber en [`MAX_ESTADO_AGENTE`]. Su forma la
+/// decide el agente —motores, omitidos, cuentas del enlace—, pero su tamano no:
+/// sin techo, un agente comprometido convertiria el latido en una escritura
+/// arbitraria en el inventario de la flota.
+pub fn normalizar_estado_agente(json: &str) -> Resultado<serde_json::Value> {
+    let recorte = json.trim();
+    if recorte.len() > MAX_ESTADO_AGENTE {
+        return Err(crate::error::ErrorServidor::Config(format!(
+            "el estado del agente ocupa {} bytes y el maximo es {MAX_ESTADO_AGENTE}",
+            recorte.len()
+        )));
+    }
+    let valor: serde_json::Value = serde_json::from_str(recorte).map_err(|e| {
+        crate::error::ErrorServidor::Config(format!("el estado del agente no es JSON: {e}"))
+    })?;
+    if !valor.is_object() {
+        return Err(crate::error::ErrorServidor::Config(
+            "el estado del agente tiene que ser un objeto JSON".to_string(),
+        ));
+    }
+    Ok(valor)
+}
+
+impl ServicioFlota {
+    /// Guarda el estado de motores y del enlace que declara el agente (H-23).
+    ///
+    /// `cn` viene del certificado, no del mensaje. Reemplaza el anterior: es un
+    /// estado, no un historico.
+    pub async fn estado_agente(&self, cn: &str, json: &str) -> Resultado<()> {
+        let valor = normalizar_estado_agente(json)?;
+        self.almacen.registrar_estado_agente(cn, &valor).await
+    }
+}
+
 #[cfg(test)]
 mod pruebas {
     use super::*;
@@ -464,5 +504,15 @@ mod pruebas {
         // Una marca reciente y legitima SI se respeta.
         let buena_unix = (ahora.timestamp() - 60) as u64;
         assert_eq!(momento_o_ahora(buena_unix).timestamp(), buena_unix as i64);
+    }
+
+    #[test]
+    fn el_estado_del_agente_se_valida_antes_de_guardarse() {
+        let bueno = r#"{"agente":null,"enlace":{"enviados":1,"cuadra":true}}"#;
+        assert!(normalizar_estado_agente(bueno).is_ok());
+        assert!(normalizar_estado_agente("[1, 2]").is_err());
+        assert!(normalizar_estado_agente("no es json").is_err());
+        let enorme = format!("{{\"x\":\"{}\"}}", "a".repeat(MAX_ESTADO_AGENTE));
+        assert!(normalizar_estado_agente(&enorme).is_err());
     }
 }

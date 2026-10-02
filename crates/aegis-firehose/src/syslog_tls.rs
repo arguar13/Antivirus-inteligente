@@ -180,6 +180,39 @@ impl Destino for DestinoSyslog {
         Ok(())
     }
 
+    /// Lee, sin bloquear, lo que el colector haya mandado. Un fin de flujo, un
+    /// RST o un `close_notify` significan que murio: lo enviado desde entonces
+    /// (y lo que tuviera sin leer) no se guardo. Sin datos pendientes y sin
+    /// error, sigue vivo.
+    fn vivo(&mut self) -> bool {
+        let Some(tls) = self.tls.as_mut() else {
+            return false;
+        };
+        if tls.sock.set_nonblocking(true).is_err() {
+            self.tls = None;
+            return false;
+        }
+        let vivo = loop {
+            let t = &mut *tls;
+            match t.conn.read_tls(&mut t.sock) {
+                Ok(0) => break false,
+                Ok(_) => match t.conn.process_new_packets() {
+                    Ok(estado) if estado.peer_has_closed() => break false,
+                    Ok(_) => continue,
+                    Err(_) => break false,
+                },
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break true,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break false,
+            }
+        };
+        let _ = tls.sock.set_nonblocking(false);
+        if !vivo {
+            self.tls = None;
+        }
+        vivo
+    }
+
     fn reiniciar(&mut self) {
         // Reutilizar una conexion que acaba de fallar convierte un corte de dos
         // segundos en un destino que no vuelve: el socket queda medio abierto,

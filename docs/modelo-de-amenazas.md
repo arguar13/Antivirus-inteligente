@@ -98,9 +98,9 @@ contenido de ficheros. Un fallo aquí es ejecución de código como root.
 
 | ID | Amenaza | Control | Estado | Evidencia | Plan |
 |---|---|---|---|---|---|
-| AM-4.1 | Aislar o matar en masa | RBAC por acción y frenos de automatización | **ausente** | — | `aegis-consola` (RBAC) y `aegis-flujo` (frenos) no están conectados al servidor |
+| AM-4.1 | Aislar o matar en masa | RBAC por acción y frenos de automatización | **parcial** | `server/crates/aegis-server/src/autorizacion.rs`, `server/crates/aegis-server/tests/rbac_matriz.rs`, `docs/generado/matriz-rbac.md` | El RBAC por acción cubre cada ruta de la API (matriz generada del código y recorrida entera); los frenos de automatización (`aegis-flujo`) siguen sin conectar al servidor |
 | AM-4.2 | Actuar sin dejar rastro atribuible | Registro de cada acción sobre un endpoint con su usuario | **parcial** | `server/crates/aegis-server/src/api.rs` | Se registra, pero el usuario no está autenticado (AM-3.3): la atribución se puede falsificar |
-| AM-4.3 | Ver datos de otro inquilino | Aislamiento por flota en la base de datos | **parcial** | `server/crates/aegis-server/tests/escala_real.rs` | El aislamiento ligado a la sesión (`aegis-consola`) no está conectado |
+| AM-4.3 | Ver datos de otro inquilino | Aislamiento por inquilino ligado a la sesión en toda ruta y en AegisQL | **existente** | `server/crates/aegis-server/src/inquilino.rs`, `server/crates/aegis-server/tests/inquilino_hostil.rs` | Sin RLS: el aislamiento lo aplica el servidor, no la base de datos; un acceso directo a PostgreSQL lo salta |
 | AM-4.4 | Sacar datos por una exportación | Un único juez de difusión (TLP/PAP) | **ausente** | — | `aegis-share` no lo enlaza el servidor |
 | AM-4.5 | Alterar la historia de un caso | Rastro de caso encadenado | **parcial** | `server/crates/aegis-server/src/casos.rs` | Sin anclaje externo del encadenado en el camino instalado |
 

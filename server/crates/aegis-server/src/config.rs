@@ -54,6 +54,12 @@ pub struct Config {
     /// un SIEM caido un fin de semana llena el disco del servidor y el plano de
     /// control deja de funcionar por intentar no perder un registro.
     pub firehose_presupuesto_bytes: u64,
+    /// Retencion de un lote entregado al SIEM antes de confirmarlo (FASE 6.4):
+    /// si el colector muere en ese tiempo, el lote se reenvia.
+    pub firehose_retencion: Duration,
+    /// Vida del certificado del plano de control; se renueva a la mitad
+    /// (H-39).
+    pub validez_cert_servidor: Duration,
 }
 
 /// Lee una variable de entorno o devuelve el valor por defecto.
@@ -112,6 +118,17 @@ impl Config {
             firehose_presupuesto_bytes: var("AEGIS_FIREHOSE_PRESUPUESTO", "4294967296")
                 .parse()
                 .unwrap_or(4 * 1024 * 1024 * 1024),
+            firehose_retencion: Duration::from_millis(
+                var("AEGIS_FIREHOSE_RETENCION_MS", "2000")
+                    .parse()
+                    .unwrap_or(2000),
+            ),
+            validez_cert_servidor: Duration::from_secs(
+                var("AEGIS_VALIDEZ_CERT_SERVIDOR_SEG", "86400")
+                    .parse::<u64>()
+                    .unwrap_or(86_400)
+                    .max(2),
+            ),
         })
     }
 }

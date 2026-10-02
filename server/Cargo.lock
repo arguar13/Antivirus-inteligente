@@ -451,6 +451,7 @@ version = "0.1.0"
 dependencies = [
  "aegis-attest",
  "aegis-case",
+ "aegis-consola",
  "aegis-firehose",
  "aegis-firmware",
  "aegis-fleet",

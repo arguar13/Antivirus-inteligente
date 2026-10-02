@@ -118,3 +118,18 @@ path = "fuzz_targets/trabajador_emulacion.rs"
 test = false
 doc = false
 bench = false
+
+# AegisQL del historico y coste del plan (FASE 6.2 del MP-16).
+[[bin]]
+name = "aegisql_historico"
+path = "fuzz_targets/aegisql_historico.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "aegisql_coste"
+path = "fuzz_targets/aegisql_coste.rs"
+test = false
+doc = false
+bench = false

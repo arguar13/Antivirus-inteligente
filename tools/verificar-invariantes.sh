@@ -284,6 +284,23 @@ if toca 7; then
         veredicto 7 "autonomia" no "ver /tmp/inv-autonomia.log"
         tail -25 /tmp/inv-autonomia.log | sed 's/^/     | /'
     fi
+    # Extendida (FASE 6.4 del MP-16): tampoco una caida del PLANO DE CONTROL
+    # produce perdida silenciosa. Los escenarios corren con procesos reales en
+    # el grupo `caos-plano`; aqui se exige que existan los seis y el grupo.
+    caos=server/crates/aegis-server/tests/caos.rs
+    faltan=""
+    for f in caos_postgresql_cae caos_redis_cae caos_certificado_de_agente \
+             caos_certificado_del_servidor caos_reloj_del_agente caos_siem_muere; do
+        grep -q "fn $f" "$caos" 2>/dev/null || faltan="$faltan $f"
+    done
+    grep -q '"$SOLO" = "caos-plano"' tools/ci-local.sh || faltan="$faltan grupo-caos-plano"
+    if [ -z "$faltan" ]; then
+        veredicto 7 "autonomia-plano-control" si "6 escenarios de caos con procesos reales (make ci SOLO=caos-plano)"
+        porque "PostgreSQL, Redis, certificados, reloj y SIEM caen de verdad, y la cuenta"
+        porque "ofrecidos = persistidos + pendientes + perdidos declarados tiene que cuadrar."
+    else
+        veredicto 7 "autonomia-plano-control" no "faltan:$faltan"
+    fi
 fi
 
 # ── 08. LOS CINCO FRENOS ───────────────────────────────────────────────────────

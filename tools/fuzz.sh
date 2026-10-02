@@ -46,6 +46,10 @@ TODOS=(
     firmware_uefi
     scal_maps
     aegisql
+    aegisql_historico
+    aegisql_coste
+    servidor_api_cuerpos
+    servidor_grpc_mensajes
     trabajador_protocolo
     trabajador_modelo
     trabajador_pe
@@ -95,10 +99,17 @@ for objetivo in "${OBJETIVOS[@]}"; do
     # arranca donde quedo la anterior. El segundo, las semillas y regresiones
     # versionadas. Topes por entrada: 512 MiB y 10 s, el techo del trabajador con
     # margen para el sanitizador; pasarlos es un fallo, no ruido.
-    mkdir -p "fuzz/corpus/$objetivo"
+    # Los objetivos del plano de control viven en server/fuzz (otro workspace,
+    # FASE 6.2 del MP-16) y se nombran aqui con el prefijo `servidor_`.
+    dir_fuzz=fuzz
+    nombre="$objetivo"
+    case "$objetivo" in
+        servidor_*) dir_fuzz=server/fuzz; nombre="${objetivo#servidor_}" ;;
+    esac
+    mkdir -p "$dir_fuzz/corpus/$nombre"
     semillas=()
-    [ -d "fuzz/semillas/$objetivo" ] && semillas=("fuzz/semillas/$objetivo")
-    if cargo "+$NIGHTLY" fuzz run --fuzz-dir fuzz "$objetivo" "fuzz/corpus/$objetivo" "${semillas[@]}" -- \
+    [ -d "$dir_fuzz/semillas/$nombre" ] && semillas=("$dir_fuzz/semillas/$nombre")
+    if cargo "+$NIGHTLY" fuzz run --fuzz-dir "$dir_fuzz" "$nombre" "$dir_fuzz/corpus/$nombre" "${semillas[@]}" -- \
         -max_total_time="$SEGUNDOS" -rss_limit_mb=512 -timeout=10 -print_final_stats=1 \
         > "$REGISTROS/$objetivo.log" 2>&1; then
         stats=$(grep -E "^#[0-9]+\s+DONE" "$REGISTROS/$objetivo.log" | tail -1 \

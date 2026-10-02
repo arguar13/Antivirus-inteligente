@@ -43,7 +43,7 @@ fila de esta tabla por cada invariante que define el verificador.
 | 4 | **Determinismo** | El circuito completo repetido: mismo veredicto, mismo caso, misma propuesta de contención |
 | 5 | **Explicabilidad** | Se recorren **todas** las combinaciones del árbitro exigiendo frase no vacía |
 | 6 | **Tri-estado** | Los **siete** enumerados de veredicto tienen su variante de duda, y las pruebas que la ejercen pasan |
-| 7 | **Autonomía** | `tests/autonomia.rs`: con el enlace cortado de verdad, el producto entero sigue dando veredicto |
+| 7 | **Autonomía** | `tests/autonomia.rs`: con el enlace cortado de verdad, el producto entero sigue dando veredicto. **Extendida (FASE 6.4 del MP-16):** ninguna caída de una dependencia del plano de control (PostgreSQL, Redis, certificados, reloj, SIEM) produce pérdida silenciosa: `server/crates/aegis-server/tests/caos.rs` con procesos reales (grupo `caos-plano`), cuenta exacta ofrecidos = persistidos + pendientes + perdidos declarados |
 | 8 | **Los cinco frenos** | Las pruebas de contención de `aegis-predict`, y otra vez sobre el grafo del circuito completo |
 | 9 | **Autoataque** | Cada capacidad de la tabla `ATAQUES` del verificador, usada **contra** el producto |
 | 10 | **Doctrina del enjambre** | La carga tiene dos variantes y **ninguna es una orden** |

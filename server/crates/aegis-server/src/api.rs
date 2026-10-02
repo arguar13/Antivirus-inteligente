@@ -299,12 +299,17 @@ async fn salud(State(estado): State<EstadoApi>) -> axum::response::Response {
     let cache_ok = estado.cache.ping().await.is_ok();
     let listo = bd_ok && cache_ok;
 
-    let cuerpo = serde_json::json!({
+    let mut cuerpo = serde_json::json!({
         "estado": if listo { "listo" } else { "degradado" },
         "postgres": bd_ok,
         "redis": cache_ok,
         "pool": { "conexiones": pool.size(), "ociosas": pool.num_idle() },
     });
+    // FASE 6.4: la salida al SIEM se reconcilia con estos numeros. Son
+    // cuentas, no datos de ningun cliente.
+    if let Some(f) = estado.servicio.firehose() {
+        cuerpo["firehose"] = f.estado();
+    }
 
     // 503 cuando falta una dependencia: es lo que un balanceador entiende.
     let codigo = if listo {
@@ -391,8 +396,28 @@ async fn abrir_sesion(
     {
         tracing::warn!(error = %e, "no se pudo anotar el ultimo acceso del operador");
     }
-    match estado.cache.abrir_sesion(&usuario).await {
-        Ok(token) => (StatusCode::OK, Json(serde_json::json!({"token": token}))).into_response(),
+    // Rol e inquilino salen de `operadores`, nunca de la peticion (FASE 6.2).
+    let (rol, inquilino) =
+        match crate::autorizacion::operador(estado.servicio.almacen().pool(), &usuario).await {
+            Ok(Some(ri)) => ri,
+            Ok(None) => return no_autorizado("credenciales invalidas"),
+            Err(e) => return error_500(e).into_response(),
+        };
+    let sesion = crate::autorizacion::SesionOperador {
+        usuario: usuario.clone(),
+        rol,
+        inquilino,
+    };
+    match estado.cache.abrir_sesion_operador(&sesion).await {
+        Ok(token) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "token": token,
+                "rol": sesion.rol.nombre(),
+                "inquilino": sesion.inquilino,
+            })),
+        )
+            .into_response(),
         Err(e) => error_500(e).into_response(),
     }
 }
@@ -410,7 +435,7 @@ pub struct Operador(pub String);
 /// excepcion posible y se exige sesion: la capa falla cerrada.
 async fn exigir_sesion(
     State(estado): State<EstadoApi>,
-    mut peticion: axum::extract::Request,
+    peticion: axum::extract::Request,
     siguiente: axum::middleware::Next,
 ) -> axum::response::Response {
     let patron = peticion
@@ -424,14 +449,46 @@ async fn exigir_sesion(
     let Some(token) = token_de(&peticion, &patron) else {
         return no_autorizado("falta Authorization: Bearer <token>");
     };
-    match estado.cache.usuario_de_sesion(&token).await {
-        Ok(Some(usuario)) => {
-            peticion.extensions_mut().insert(Operador(usuario));
-            siguiente.run(peticion).await
-        }
-        Ok(None) => no_autorizado("sesion invalida o caducada"),
-        Err(e) => error_500(e).into_response(),
+    let sesion = match estado.cache.sesion_operador(&token).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return no_autorizado("sesion invalida o caducada"),
+        Err(e) => return error_500(e).into_response(),
+    };
+    // Autorizacion (FASE 6.2): rol, contenido de plataforma y dueno del
+    // recurso, con los parametros de la ruta ya decodificados.
+    let (mut partes, cuerpo) = peticion.into_parts();
+    let parametros: Vec<(String, String)> = match <axum::extract::RawPathParams as axum::extract::FromRequestParts<()>>::from_request_parts(&mut partes, &()).await {
+        Ok(p) => p
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+    let mut peticion = axum::extract::Request::from_parts(partes, cuerpo);
+    if let Err(d) = crate::autorizacion::autorizar(
+        estado.servicio.almacen().pool(),
+        &sesion,
+        peticion.method().as_str(),
+        &patron,
+        &parametros,
+    )
+    .await
+    {
+        tracing::warn!(
+            usuario = %sesion.usuario,
+            inquilino = %sesion.inquilino,
+            metodo = %peticion.method(),
+            patron = %patron,
+            motivo = ?d,
+            "peticion denegada"
+        );
+        return d.respuesta();
     }
+    peticion
+        .extensions_mut()
+        .insert(Operador(sesion.usuario.clone()));
+    peticion.extensions_mut().insert(sesion);
+    siguiente.run(peticion).await
 }
 
 /// Token de la peticion: la cabecera `Authorization: Bearer`, o, SOLO en el
@@ -626,15 +683,17 @@ async fn listar_remediaciones(
 async fn resumen(
     State(estado): State<EstadoApi>,
     cabeceras: header::HeaderMap,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
 ) -> axum::response::Response {
     if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
         return r;
     }
-    match estado
-        .servicio
-        .almacen()
-        .resumen(estado.margen_desconexion_seg)
-        .await
+    match crate::inquilino::resumen(
+        estado.servicio.almacen().pool(),
+        &sesion.inquilino,
+        estado.margen_desconexion_seg,
+    )
+    .await
     {
         Ok(r) => (StatusCode::OK, Json(r)).into_response(),
         Err(e) => error_500(e).into_response(),
@@ -654,6 +713,7 @@ struct Limite {
 async fn listar_agentes(
     State(estado): State<EstadoApi>,
     cabeceras: header::HeaderMap,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
     Query(q): Query<Limite>,
 ) -> axum::response::Response {
     if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
@@ -662,11 +722,13 @@ async fn listar_agentes(
     // El limite lo controla el cliente: se acota para que una peticion no pueda
     // pedir la flota entera y tumbar la memoria del servidor.
     let limite = q.limite.unwrap_or(200).clamp(1, 5_000);
-    match estado
-        .servicio
-        .almacen()
-        .listar_agentes(estado.margen_desconexion_seg, limite)
-        .await
+    match crate::inquilino::listar_agentes(
+        estado.servicio.almacen().pool(),
+        &sesion.inquilino,
+        estado.margen_desconexion_seg,
+        limite,
+    )
+    .await
     {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => error_500(e).into_response(),
@@ -703,17 +765,20 @@ async fn listar_alertas_de_agente(
 async fn listar_alertas(
     State(estado): State<EstadoApi>,
     cabeceras: header::HeaderMap,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
     Query(q): Query<Limite>,
 ) -> axum::response::Response {
     if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
         return r;
     }
     let limite = q.limite.unwrap_or(100).clamp(1, 5_000);
-    match estado
-        .servicio
-        .almacen()
-        .listar_alertas(limite, q.abiertas.unwrap_or(false))
-        .await
+    match crate::inquilino::listar_alertas(
+        estado.servicio.almacen().pool(),
+        &sesion.inquilino,
+        limite,
+        q.abiertas.unwrap_or(false),
+    )
+    .await
     {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => error_500(e).into_response(),
@@ -1190,13 +1255,6 @@ async fn obtener_grafo(
     }
 }
 
-/// Token de sesion para la conexion en tiempo real.
-#[derive(Deserialize)]
-struct TokenWs {
-    /// Token emitido por `/api/sesion`.
-    token: Option<String>,
-}
-
 /// Abre la conexion en tiempo real del panel.
 ///
 /// # Por que el token viaja en la consulta y no en una cabecera
@@ -1210,39 +1268,35 @@ struct TokenWs {
 /// se pueden cerrar. En produccion, ademas, esto viaja siempre sobre TLS.
 async fn websocket(
     State(estado): State<EstadoApi>,
-    Query(q): Query<TokenWs>,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
     ws: WebSocketUpgrade,
 ) -> axum::response::Response {
-    let token = q.token.unwrap_or_default();
-    let usuario = match estado.cache.usuario_de_sesion(&token).await {
-        Ok(Some(u)) => u,
-        Ok(None) => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": "sesion invalida o caducada"})),
-            )
-                .into_response()
-        }
-        Err(e) => return error_500(e).into_response(),
-    };
-
-    ws.on_upgrade(move |socket| atender_websocket(socket, estado, usuario))
+    // La sesion ya la valido la capa (`exigir_sesion`): con el token de la
+    // cabecera o, solo en este handshake, el de la consulta.
+    ws.on_upgrade(move |socket| atender_websocket(socket, estado, sesion))
 }
 
 /// Bombea los eventos del bus hacia una consola conectada.
-async fn atender_websocket(mut socket: WebSocket, estado: EstadoApi, usuario: String) {
+async fn atender_websocket(
+    mut socket: WebSocket,
+    estado: EstadoApi,
+    sesion: crate::autorizacion::SesionOperador,
+) {
+    let usuario = sesion.usuario.clone();
     let mut receptor = estado.servicio.bus().suscribir();
     tracing::info!(usuario = %usuario, consolas = estado.servicio.bus().consolas(),
         "consola conectada al tiempo real");
 
     // Primer mensaje: una instantanea, para que la consola pinte algo de
     // inmediato en vez de una pantalla vacia hasta que ocurra el primer suceso.
-    let resumen = estado
-        .servicio
-        .almacen()
-        .resumen(estado.margen_desconexion_seg)
-        .await
-        .ok();
+    // La instantanea es la del inquilino de la sesion (FASE 6.2).
+    let resumen = crate::inquilino::resumen(
+        estado.servicio.almacen().pool(),
+        &sesion.inquilino,
+        estado.margen_desconexion_seg,
+    )
+    .await
+    .ok();
     if let Some(r) = resumen {
         let inicial = serde_json::json!({"tipo": "instantanea", "resumen": r});
         if socket
@@ -1259,6 +1313,10 @@ async fn atender_websocket(mut socket: WebSocket, estado: EstadoApi, usuario: St
             // Eventos del bus hacia la consola.
             recibido = receptor.recv() => match recibido {
                 Ok(evento) => {
+                    // El bus es uno para todos: solo sale lo de su inquilino.
+                    if !crate::autorizacion::evento_visible(&sesion, &evento) {
+                        continue;
+                    }
                     let Ok(texto) = serde_json::to_string(&evento) else { continue };
                     if socket.send(Message::Text(texto.into())).await.is_err() {
                         break;
@@ -1356,12 +1414,43 @@ struct NuevaCaza {
 async fn lanzar_caza(
     State(estado): State<EstadoApi>,
     cabeceras: header::HeaderMap,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
     Json(p): Json<NuevaCaza>,
 ) -> axum::response::Response {
     let operador = match usuario_autenticado(&estado, &cabeceras).await {
         Ok(u) => u,
         Err(r) => return r,
     };
+
+    // FASE 6.2 (H-25): techos ANTES de analizar, persistir y difundir.
+    if p.consulta.len() > crate::autorizacion::MAX_CONSULTA_BYTES {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(serde_json::json!({
+                "error": format!(
+                    "la consulta pasa de {} bytes",
+                    crate::autorizacion::MAX_CONSULTA_BYTES
+                )
+            })),
+        )
+            .into_response();
+    }
+    match crate::inquilino::cazas_abiertas(estado.servicio.almacen().pool(), &sesion.inquilino)
+        .await
+    {
+        Ok(n) if n >= crate::autorizacion::MAX_CAZAS_ABIERTAS => {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({
+                    "error": format!("ya hay {n} cazas abiertas; cierra alguna antes"),
+                    "maximo": crate::autorizacion::MAX_CAZAS_ABIERTAS,
+                })),
+            )
+                .into_response()
+        }
+        Ok(_) => {}
+        Err(e) => return error_500(e).into_response(),
+    }
 
     let consulta = match aegis_parser::sintaxis::analizar(&p.consulta) {
         Ok(c) => c,
@@ -1381,6 +1470,19 @@ async fn lanzar_caza(
     };
 
     let plan = aegis_parser::plan::planificar(consulta);
+    // El coste se decide AQUI, antes de guardar y difundir (H-25).
+    let tope = crate::autorizacion::coste_maximo_de(sesion.rol);
+    if plan.coste_maximo > tope {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "error": "la caza supera el coste que permite el rol",
+                "coste": format!("{:?}", plan.coste_maximo).to_lowercase(),
+                "tope": format!("{tope:?}").to_lowercase(),
+            })),
+        )
+            .into_response();
+    }
     let columnas: Vec<String> = match &plan.consulta.proyeccion {
         aegis_parser::ast::Proyeccion::Columnas(c) => {
             c.iter().map(|c| c.nombre.to_string()).collect()
@@ -1395,18 +1497,19 @@ async fn lanzar_caza(
     };
 
     let almacen = estado.servicio.almacen();
-    match almacen
-        .lanzar_caza(
-            &p.consulta,
-            plan.consulta.tabla,
-            &columnas,
-            &operador,
-            // El margen de desconexion es tres intervalos de latido: un
-            // endpoint que se pierde uno sigue contando como en linea, y el
-            // denominador de la cobertura no baja por un paquete perdido.
-            (estado.servicio.intervalo_latido_seg() * 3) as i64,
-        )
-        .await
+    match crate::inquilino::lanzar_caza(
+        almacen.pool(),
+        &sesion.inquilino,
+        &p.consulta,
+        plan.consulta.tabla,
+        &columnas,
+        &operador,
+        // El margen de desconexion es tres intervalos de latido: un
+        // endpoint que se pierde uno sigue contando como en linea, y el
+        // denominador de la cobertura no baja por un paquete perdido.
+        (estado.servicio.intervalo_latido_seg() * 3) as i64,
+    )
+    .await
     {
         Ok(id) => {
             let objetivo = almacen
@@ -1447,13 +1550,20 @@ async fn lanzar_caza(
 async fn listar_cacerias(
     State(estado): State<EstadoApi>,
     cabeceras: header::HeaderMap,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
     Query(q): Query<Limite>,
 ) -> axum::response::Response {
     if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
         return r;
     }
     let limite = q.limite.unwrap_or(50).clamp(1, 500);
-    match estado.servicio.almacen().listar_cacerias(limite).await {
+    match crate::inquilino::listar_cacerias(
+        estado.servicio.almacen().pool(),
+        &sesion.inquilino,
+        limite,
+    )
+    .await
+    {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
         Err(e) => error_500(e).into_response(),
     }
@@ -1463,6 +1573,7 @@ async fn listar_cacerias(
 async fn obtener_caza(
     State(estado): State<EstadoApi>,
     cabeceras: header::HeaderMap,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
     Path(id): Path<String>,
     Query(q): Query<Limite>,
 ) -> axum::response::Response {
@@ -1479,10 +1590,13 @@ async fn obtener_caza(
     let almacen = estado.servicio.almacen();
     let limite = q.limite.unwrap_or(200).clamp(1, 5_000);
 
+    // Solo cuentan las respuestas de agentes del inquilino: un agente ajeno
+    // podria subir una respuesta con el identificador de esta caza.
+    let pool = almacen.pool();
     let (caza, resumen, respuestas) = tokio::join!(
         almacen.obtener_caza(id),
-        almacen.resumen_caza(id),
-        almacen.respuestas_caza(id, limite)
+        crate::inquilino::resumen_caza(pool, id, &sesion.inquilino),
+        crate::inquilino::respuestas_caza(pool, id, &sesion.inquilino, limite)
     );
 
     let caza = match caza {
@@ -2032,9 +2146,11 @@ async fn listar_cuarentena(
 // que ve el panel.
 
 /// Filtro de listado de casos.
+///
+/// Sin `inquilino` (FASE 6.2): lo fija la sesion. Un `?inquilino=` en la
+/// consulta se ignora.
 #[derive(Debug, serde::Deserialize)]
 struct FiltroCasos {
-    inquilino: Option<String>,
     limite: Option<i64>,
 }
 
@@ -2086,6 +2202,7 @@ fn conflicto(e: crate::error::ErrorServidor) -> axum::response::Response {
 async fn listar_casos(
     State(estado): State<EstadoApi>,
     cabeceras: header::HeaderMap,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
     Query(q): Query<FiltroCasos>,
 ) -> axum::response::Response {
     if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
@@ -2093,7 +2210,7 @@ async fn listar_casos(
     }
     let limite = q.limite.unwrap_or(50);
     match servicio_casos(&estado)
-        .listar(q.inquilino.as_deref(), limite)
+        .listar(Some(&sesion.inquilino), limite)
         .await
     {
         Ok(v) => (StatusCode::OK, Json(v)).into_response(),
@@ -2278,13 +2395,13 @@ async fn anclar_caso(
 async fn metricas_soc(
     State(estado): State<EstadoApi>,
     cabeceras: header::HeaderMap,
-    Query(q): Query<FiltroCasos>,
+    axum::Extension(sesion): axum::Extension<crate::autorizacion::SesionOperador>,
 ) -> axum::response::Response {
     if let Err(r) = usuario_autenticado(&estado, &cabeceras).await {
         return r;
     }
     match servicio_casos(&estado)
-        .metricas(q.inquilino.as_deref())
+        .metricas(Some(&sesion.inquilino))
         .await
     {
         Ok(r) => {
@@ -2335,5 +2452,139 @@ async fn metricas_soc(
                 .into_response()
         }
         Err(e) => error_500(e).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Validacion de entradas: la superficie del fuzzing de la API (E6.13, FASE 6.2)
+// ---------------------------------------------------------------------------
+
+/// Error de [`validar_cuerpo`] para una ruta sin esquema declarado.
+pub const SIN_ESQUEMA: &str = "ruta sin esquema de cuerpo";
+
+/// Lo que la API hace con el CUERPO de una peticion antes de tocar la base de
+/// datos: el MISMO tipo y los MISMOS validadores que el manejador de la ruta.
+///
+/// Es la superficie del objetivo de fuzzing `api_cuerpos` (server/fuzz). Una
+/// ruta de escritura nueva sin entrada aqui hace fallar
+/// `tests/rbac_matriz.rs`, asi que ninguna ruta queda sin fuzzing.
+///
+/// # Errors
+///
+/// El motivo del rechazo, o [`SIN_ESQUEMA`].
+pub fn validar_cuerpo(metodo: &str, patron: &str, cuerpo: &[u8]) -> Result<(), String> {
+    fn json<T: serde::de::DeserializeOwned>(b: &[u8]) -> Result<T, String> {
+        serde_json::from_slice(b).map_err(|e| e.to_string())
+    }
+    match (metodo, patron) {
+        ("POST", "/api/sesion") => {
+            let c: Credenciales = json(cuerpo)?;
+            let _ = (c.usuario.len(), c.clave.len());
+            Ok(())
+        }
+        // Rutas de escritura sin cuerpo.
+        ("DELETE", "/api/sesion")
+        | ("POST", "/api/agentes/{cn}/aislar")
+        | ("POST", "/api/agentes/{cn}/liberar")
+        | ("DELETE", "/api/reglas/{id}")
+        | ("POST", "/api/casos/{id}/auditoria/anclar")
+        | ("POST", "/api/cacerias/{id}/cerrar") => Ok(()),
+        ("POST", "/api/politicas") => {
+            let p: NuevaPolitica = json(cuerpo)?;
+            let _ = (p.nombre, p.contenido);
+            Ok(())
+        }
+        ("POST", "/api/reglas") => {
+            let r: NuevaRegla = json(cuerpo)?;
+            let tipo = crate::reglas::TipoRegla::de_str(&r.tipo).ok_or("tipo desconocido")?;
+            crate::reglas::validar(tipo, &r.parametros).map_err(|e| e.to_string())?;
+            let _ = (r.nombre, r.severidad);
+            Ok(())
+        }
+        ("POST", "/api/reglas/{id}/activa") => json::<CambioActiva>(cuerpo).map(|c| {
+            let _ = c.activa;
+        }),
+        ("POST", "/api/casos/{id}/estado") => json::<CambioEstado>(cuerpo).map(|c| {
+            let _ = c.estado;
+        }),
+        ("POST", "/api/casos/{id}/cerrar") => json::<CierreCaso>(cuerpo).map(|c| {
+            let _ = (c.veredicto, c.justificacion);
+        }),
+        ("POST", "/api/casos/{id}/tareas") => json::<TareaNueva>(cuerpo).map(|t| {
+            let _ = t.titulo;
+        }),
+        ("POST", "/api/casos/{id}/tareas/{tarea}/cerrar") => json::<CierreTarea>(cuerpo).map(|c| {
+            let _ = c.motivo;
+        }),
+        ("POST", "/api/cacerias") => {
+            let p: NuevaCaza = json(cuerpo)?;
+            if p.consulta.len() > crate::autorizacion::MAX_CONSULTA_BYTES {
+                return Err("consulta desmesurada".to_string());
+            }
+            let c = aegis_parser::sintaxis::analizar(&p.consulta)
+                .map_err(|e| e.dibujar(&p.consulta))?;
+            let _ = aegis_parser::plan::planificar(c).coste_maximo;
+            Ok(())
+        }
+        ("POST", "/api/cuarentena") | ("POST", "/api/agentes/{cn}/cuarentena") => {
+            let p: NuevaCuarentena = json(cuerpo)?;
+            p.direccion
+                .trim()
+                .parse::<std::net::IpAddr>()
+                .map_err(|e| e.to_string())?;
+            let _ = (p.motivo, p.horas);
+            Ok(())
+        }
+        ("POST", "/api/agentes/{cn}/itdr/telemetria") => {
+            let lote: crate::remediacion::dto::LoteIdentidad = json(cuerpo)?;
+            lote.validar().map_err(|e| e.to_string())?;
+            let _ = crate::itdr::TelemetriaIdentidad::from(&lote);
+            Ok(())
+        }
+        ("POST", "/api/heuristicas") => {
+            let p: crate::heuristicas::NuevaHeuristica = json(cuerpo)?;
+            p.validar().map(|_| ()).map_err(|e| e.to_string())
+        }
+        ("POST", "/api/heuristicas/{id}/activa") => json::<Activa>(cuerpo).map(|a| {
+            let _ = a.activa;
+        }),
+        ("POST", "/api/correlaciones/{id}/cerrar") => json::<Veredicto>(cuerpo).map(|v| {
+            let _ = v.veredicto;
+        }),
+        ("POST", "/api/reputacion") => json::<AltaReputacion>(cuerpo).map(|a| {
+            let _ = (a.hash, a.veredicto);
+        }),
+        _ => Err(SIN_ESQUEMA.to_string()),
+    }
+}
+
+/// Lo que la API hace con la CONSULTA (`?...`) de una ruta de lectura: los
+/// mismos extractores que sus manejadores. Superficie de `api_cuerpos`.
+///
+/// # Errors
+///
+/// El rechazo del extractor.
+pub fn validar_consulta(patron: &str, consulta: &str) -> Result<(), String> {
+    fn q<T: serde::de::DeserializeOwned>(u: &axum::http::Uri) -> Result<(), String> {
+        Query::<T>::try_from_uri(u)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    let Ok(uri) = format!("/x?{consulta}").parse::<axum::http::Uri>() else {
+        return Err("consulta que no es una URI".to_string());
+    };
+    match patron {
+        "/api/agentes"
+        | "/api/alertas"
+        | "/api/agentes/{cn}/alertas"
+        | "/api/stix/objetos"
+        | "/api/grafos"
+        | "/api/cacerias"
+        | "/api/cacerias/{id}"
+        | "/api/remediaciones" => q::<Limite>(&uri),
+        "/api/casos" => q::<FiltroCasos>(&uri),
+        "/api/correlaciones" => q::<std::collections::HashMap<String, String>>(&uri),
+        "/api/cuarentena" => q::<serde_json::Value>(&uri),
+        _ => Ok(()),
     }
 }

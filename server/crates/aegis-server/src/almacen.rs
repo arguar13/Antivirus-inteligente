@@ -280,6 +280,26 @@ impl Almacen {
         })
     }
 
+    /// Reemplaza el estado de motores y del enlace que declara el agente.
+    ///
+    /// Si el CN no esta en el inventario no hace nada: el estado de un agente
+    /// que no se enrolo no tiene donde ir, y crear la fila aqui saltaria el
+    /// enrolamiento.
+    pub async fn registrar_estado_agente(
+        &self,
+        cn: &str,
+        estado: &serde_json::Value,
+    ) -> Resultado<()> {
+        sqlx::query(
+            "UPDATE agentes SET estado_agente = $2, estado_agente_en = now() WHERE cn = $1",
+        )
+        .bind(cn)
+        .bind(estado)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Guarda una alerta y devuelve su identificador de incidente.
     pub async fn registrar_alerta(&self, cn: &str, a: &NuevaAlerta<'_>) -> Resultado<Uuid> {
         let NuevaAlerta {
@@ -1326,6 +1346,10 @@ impl Almacen {
                  FROM cacerias c
                 WHERE c.cerrada_en IS NULL
                   AND c.lanzada_en > now() - make_interval(hours => $2::int)
+                  -- FASE 6.2: la caza de un inquilino solo va a SUS agentes.
+                  -- Sin inquilino: caza de plataforma (o anterior a la fase).
+                  AND (c.inquilino IS NULL
+                       OR c.inquilino = (SELECT a.id_flota FROM agentes a WHERE a.cn = $1))
                   AND NOT EXISTS (
                       SELECT 1 FROM caza_respuestas r
                        WHERE r.caza_id = c.id AND r.cn_agente = $1)

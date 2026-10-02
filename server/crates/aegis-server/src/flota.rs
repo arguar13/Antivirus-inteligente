@@ -371,6 +371,26 @@ impl ManejadorFlota for ManejadorPersistente {
         }
     }
 
+    fn estado(
+        &self,
+        cn: &str,
+        req: &aegis_fleet::proto::EstadoAgente,
+    ) -> aegis_fleet::proto::AckEstado {
+        let servicio = self.servicio.clone();
+        let cn_owned = cn.to_string();
+        let json = req.estado_json.clone();
+        let resultado = self
+            .handle
+            .block_on(async move { servicio.estado_agente(&cn_owned, &json).await });
+        if let Err(e) = &resultado {
+            // Con el CN acotado: lo controla el par.
+            tracing::warn!(cn = %cn_seguro(cn), error = %e, "estado del agente no guardado");
+        }
+        aegis_fleet::proto::AckEstado {
+            recibido: resultado.is_ok(),
+        }
+    }
+
     fn stix(&self, cn: &str, req: &ReporteStix) -> AckStix {
         let servicio = self.servicio.clone();
         let cn_owned = cn.to_string();
@@ -687,14 +707,20 @@ impl ManejadorFlota for ManejadorPersistente {
             Ok(id) => AckEvento {
                 recibido: true,
                 id_incidente: id.to_string(),
+                reintentar: false,
             },
             Err(e) => {
-                // Un evento que no se persiste es una alerta perdida: se deja
-                // constancia en el log del servidor con nivel de error.
-                tracing::error!(error = %e, "EVENTO DE SEGURIDAD NO PERSISTIDO");
+                // Un evento que no se persiste es una alerta perdida si nadie
+                // lo reintenta. Si la causa es TRANSITORIA (PostgreSQL caido o
+                // saturado) se le pide al agente que lo conserve y lo reenvie:
+                // contrapresion y no descarte (FASE 6.4, invariante 7
+                // extendida). El nivel de error se mantiene: hay que verlo.
+                let reintentar = e.es_transitorio();
+                tracing::error!(error = %e, reintentar, "EVENTO DE SEGURIDAD NO PERSISTIDO");
                 AckEvento {
                     recibido: false,
                     id_incidente: String::new(),
+                    reintentar,
                 }
             }
         }

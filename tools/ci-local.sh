@@ -331,8 +331,17 @@ if [ "$SOLO" = "--reanudar" ]; then
         # distribucion en una microVM, y las de aarch64 van en emulacion completa
         # (cada una tiene su propio plazo de 40 minutos en tools/config/kernels.toml).
         # Con el plazo general se la daria por colgada estando sana.
+        #
+        # Los dos grupos que compilan el producto entero con LTO y musl son la
+        # otra excepcion, tambien medida: con la cache fria (un cambio de
+        # opciones de compilacion la invalida) `hermetico` paso de 45 minutos en
+        # esta maquina, y `reproducible` compila dos veces, una desde cero. No
+        # estan colgados: compilan.
         plazo="$PLAZO_POR_GRUPO"
         [ "$g" = "kernels" ] && plazo="${PLAZO_KERNELS:-150m}"
+        case "$g" in
+            hermetico | reproducible) plazo="${PLAZO_COMPILACION:-120m}" ;;
+        esac
         timeout "$plazo" "$0" "$g"
         SALIDA=$?
         if [ "$SALIDA" -eq 0 ]; then
@@ -1518,6 +1527,58 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fleet" ]; then
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
         sed 's/^/    | /' $LOGS/aegis-fleet.log | tail -20
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
+# Flota viva (H-23, E6.5 del MP-16): el agente PUBLICADO se enrola y reporta al
+# plano de control REAL —el binario aegis-server contra PostgreSQL y Redis— por
+# el transporte nativo mTLS. Se comprueba en la base de datos que el veredicto
+# queda con el CN del certificado, que el estado de los motores llega al
+# inventario y que, tras un SIGKILL al servidor, la cola se reconcilia sin
+# perdida. Los servicios se exigen (AEGIS_EXIGIR=servicios): sin ellos, FALLA.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "flota-viva" ]; then
+    printf '%s==>%s Flota viva · el agente reporta al plano de control real (mTLS, PostgreSQL)\n' "$GRIS" "$FIN"
+    if ./tools/verificar-flota-viva.sh > $LOGS/aegis-flota-viva-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-flota-viva-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-flota-viva-ci.log | tail -30
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
+# Caos del plano de control (FASE 6.4 del MP-16, invariante 7 extendida): seis
+# escenarios con PROCESOS REALES contra el binario aegis-server —PostgreSQL y
+# Redis propios que se tumban, certificados que caducan, un agente con el reloj
+# desviado por libfaketime y un colector SIEM al que se le hace kill -9 y
+# SIGSTOP—. Cuenta exacta: ofrecidos = persistidos + pendientes + perdidos
+# declarados, y lo persistido = lo recibido por el SIEM + pendientes + perdidos.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "caos-plano" ]; then
+    printf '%s==>%s Caos del plano de control · caidas reales sin perdida silenciosa\n' "$GRIS" "$FIN"
+    if ./tools/verificar-caos.sh > $LOGS/aegis-caos-plano-ci.log 2>&1; then
+        grep -E 'AEGIS-MEDIDA|^test caos_' $LOGS/aegis-caos-plano-ci.log | sed 's/^/    | /'
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-caos-plano-ci.log | tail -60
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
+# Fuzzing de AegisQL (FASE 6.2 del MP-16): el analizador del endpoint, el del
+# historico y el coste del plan, unos segundos cada uno con el nightly fijado.
+# Los objetivos de la API del servidor (servidor_*) van en el nocturno.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "fuzz-aegisql" ]; then
+    printf '%s==>%s Fuzzing · AegisQL del endpoint, del historico y su coste\n' "$GRIS" "$FIN"
+    if AEGIS_EXIGIR_FUZZ=1 FUZZ_OBJETIVOS="aegisql aegisql_historico aegisql_coste" \
+        ./tools/fuzz.sh 20 > $LOGS/aegis-fuzz-aegisql-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-fuzz-aegisql-ci.log | tail -8
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-fuzz-aegisql-ci.log | tail -30
         FALLOS=$((FALLOS + 1))
     fi
 fi
