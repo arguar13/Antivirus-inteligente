@@ -99,18 +99,49 @@ que un aviso importante se pierda.
 
 ### La postura real de esta máquina de integración
 
-| Capacidad | Estado |
-|---|---|
-| seccomp | **aplica** |
-| Landlock | **aplica** |
-| BPF LSM | **no está**: este kernel ni siquiera publica `/sys/kernel/security/lsm` |
-| XDP | se mide por interfaz al programarlo |
-| minifiltro, ObCallbacks, Endpoint Security | otra plataforma |
+> **Corrección (H-28).** La primera versión de esta sección daba seccomp y
+> Landlock por impuestos solo porque el kernel los admitía: confundía «el kernel
+> lo ofrece» con «el producto lo impone», que es justo la mentira que este crate
+> existe para impedir. Desde H-28 son dos estados distintos, `Estado::Aplica`
+> solo sale de evidencia medida sobre un proceso concreto, y esta tabla ya no se
+> escribe a mano: la imprime `cargo run -p aegis-enforce --example postura` en
+> cada `make ci`, y `tools/verificar-mac.sh` falla si algún texto del repo da por
+> impuesta una capa que la postura medida no da por aplicada.
 
-Que BPF LSM falte no es el resultado interesante. Lo interesante es que **la
-postura lo dice, con su motivo y distinguiendo «no trae el framework» de
-«lo trae y no está habilitado»**, porque llevan a dos sitios distintos a quien lo
-lea. Es exactamente el caso que el crate existe para no dejar pasar.
+| Estado | Qué hace falta para decirlo |
+|---|---|
+| **aplica** | una evidencia medida sobre un proceso del producto (un *testigo*): un filtro seccomp propio en `/proc/<pid>/status` (`Seccomp: 2`, descontados los filtros heredados del padre), un dominio Landlock que el proceso declara tras `landlock_restrict_self` y que se corrobora desde fuera (vivo, `NoNewPrivs: 1`, ABI existente), o un enlace BPF LSM que el proceso sostiene y se ve en `/proc/<pid>/fdinfo` |
+| **disponible** | el kernel lo ofrece y nada medido demuestra que el producto lo use |
+| **solo observa** | se ve la operación y no se puede negar (kprobes sin BPF LSM) |
+| **ausente** | el kernel no lo ofrece, con su motivo |
+| **otra plataforma** | no es de este sistema operativo, y no cuenta como carencia |
+
+Sin testigos —que es como mide la puerta: en el CI no corre ningún agente que
+haya confinado nada— seccomp y Landlock salen **disponibles**, y el agente se
+describe como «SOLO OBSERVANDO». Es la respuesta correcta: el kernel los ofrece,
+y en esa máquina el producto no los está usando sobre ningún proceso.
+
+Que BPF LSM falte o esté apagado se sigue diciendo **con su motivo y
+distinguiendo «no trae el framework» de «lo trae y no está habilitado»**, porque
+llevan a dos sitios distintos a quien lo lea. Y que esté habilitado ya no basta:
+sin un enlace LSM medido, es solo disponible.
+
+**El agente, con su trabajador como testigo.** El proceso del agente que de
+verdad está confinado es su trabajador de análisis: se pone un dominio Landlock
+sin reglas y un filtro seccomp en lista blanca antes de leer un byte. El agente
+mide su postura con `aegis-enforce` pasándolo como testigo —su pid y la ABI de
+Landlock que declara en su saludo (`landlock=si (N)`)— y la publica al arrancar,
+en cada informe periódico y en `aegisctl status`: una línea por capa
+(`aplicacion <capa>: ETIQUETA (evidencia o motivo)`), con la etiqueta y el
+texto que da `aegis-enforce`. La mide el hilo que es dueño del trabajador, entre
+dos peticiones: mientras no lo recoja, su pid no puede pasar a otro proceso, y
+un trabajador muerto y aún sin recoger (zombi) no cuenta, aunque conserve en
+`/proc` su filtro y su `NoNewPrivs`. Sin trabajador —no arrancó, murió y no se
+ha relanzado, o se enfría tras morir en bucle— no hay testigo y ninguna capa
+lleva la etiqueta de aplicado. BPF LSM no puede llevarla por esta vía: el
+trabajador no sostiene enlaces BPF; cuando el agente cargue programas LSM, el
+testigo de esa capa tendrá que ser el propio agente. Medir no cambia ninguna
+decisión del agente: es solo-auditoría.
 
 ---
 
@@ -131,9 +162,11 @@ Lo que **no** hay aquí se declara en vez de disimularse:
   rodajas son Mach-O reales; el sobre que las envuelve está construido.**
 
 Las pruebas de `aegis-enforce` no usan una postura inventada: sondean **esta**
-máquina y exigen que seccomp y Landlock salgan aplicando —porque están— y que BPF
-LSM salga con su motivo —porque no está—. Si el kernel cambia, la prueba falla y
-alguien lo mira, que es lo que tiene que pasar.
+máquina. Sin testigos exigen que seccomp y Landlock salgan **disponibles** y no
+aplicados; con un hijo real que se confina en su hilo (Landlock sin reglas y un
+filtro seccomp) exigen que salgan con su evidencia, leída de `/proc/<tid>/status`;
+y con el propio proceso de la prueba, que no se confinó, exigen que no la haya.
+(Corrección H-28: antes exigían lo contrario solo porque el kernel los ofrecía.)
 
 Treinta y siete pruebas, y la puerta número 32 de `make ci`.
 
@@ -143,6 +176,6 @@ Treinta y siete pruebas, y la puerta número 32 de `make ci`.
   `LC_CODE_SIGNATURE` y se dice qué bytes ocupa; validar el `SuperBlob`, su
   `CodeDirectory`, los hashes de página y la cadena hasta Apple es otro trabajo.
   Por eso el método se llama `declara_firma()` y no `firmado()`.
-- **El camino de negación real de BPF LSM.** Este kernel no lo trae. La postura
-  lo detecta y lo declara, que es lo que se le pedía; lo que no se puede es
-  ejercer aquí el bloqueo.
+- **El camino de negación real de BPF LSM.** Ningún programa BPF LSM de este
+  repositorio se carga todavía, así que la postura no puede darlo por aplicado
+  en ninguna máquina; lo que no se puede es ejercer aquí el bloqueo.

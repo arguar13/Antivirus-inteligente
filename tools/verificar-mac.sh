@@ -25,7 +25,7 @@
 # panel sigue diciendo «protegido». Un agente que no puede bloquear no esta
 # protegiendo: esta mirando, y son dos productos distintos al mismo precio.
 #
-# Esta puerta comprueba cinco cosas:
+# Esta puerta comprueba seis cosas:
 #
 #   1. LOS MACH-O SON REALES. clang compila a Mach-O de 64 bits para arm64 y para
 #      x86_64 sin necesitar un Mac. Lo que NO hay aqui es enlazador de Mach-O ni
@@ -42,10 +42,16 @@
 #   4. LA POSTURA SE MIDE, NO SE CONFIGURA. Lo que diga un fichero sobre lo que
 #      el producto «tiene activado» no dice nada de lo que este kernel acepta.
 #   5. OBSERVAR NO CUENTA COMO APLICAR, Y LO QUE EXIGE APLICAR FALLA CERRADO.
+#   6. DISPONIBLE NO CUENTA COMO APLICADO. El estado de cada capa lo imprime el
+#      binario, y ningun texto del repo puede dar por impuesta una capa que la
+#      postura medida no da por aplicada.
 #
-# EL MURO, declarado en vez de disimulado: este kernel NO trae BPF LSM, y la
-# postura lo dice con su motivo en vez de callarlo. Es justamente el caso que el
-# crate existe para no dejar pasar.
+# DISPONIBLE NO ES APLICADO (H-28). Que el kernel admita seccomp, Landlock o BPF
+# LSM no dice que el producto los este usando. La postura solo da una capa por
+# aplicada con evidencia medida sobre un proceso concreto; sin ella, la da por
+# disponible. Esta puerta no escribe a mano el estado de ninguna capa: lo imprime
+# el ejemplo `postura` de aegis-enforce, y ademas falla si algun texto del repo
+# da por impuesta una capa cuyo estado medido no es APLICA.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -102,36 +108,98 @@ fi
 echo "==> AegisEnforce: la postura de esta maquina, medida"
 if cargo test -q -p aegis-enforce > /tmp/aegis-enforce.log 2>&1; then
     echo "    ${VERDE}OK${FIN} ($(grep -h '^test result' /tmp/aegis-enforce.log | head -1))"
-    echo "    ${GRIS}Las pruebas no usan una postura inventada: sondean ESTA maquina y${FIN}"
-    echo "    ${GRIS}exigen que seccomp y Landlock salgan aplicando —porque estan— y que${FIN}"
-    echo "    ${GRIS}BPF LSM salga con su motivo —porque no esta—. Si el kernel cambia, la${FIN}"
-    echo "    ${GRIS}prueba falla y alguien lo mira, que es lo que tiene que pasar.${FIN}"
+    echo "    ${GRIS}Las pruebas separan lo que el kernel OFRECE de lo que el producto${FIN}"
+    echo "    ${GRIS}IMPONE. Sin un proceso medido, la postura de ESTA maquina no puede dar${FIN}"
+    echo "    ${GRIS}ninguna capa por aplicada; con un hijo real confinado (filtro seccomp y${FIN}"
+    echo "    ${GRIS}dominio Landlock puestos en su hilo) la da por aplicada y dice con que${FIN}"
+    echo "    ${GRIS}evidencia: /proc/<tid>/status, no la configuracion.${FIN}"
 else
     echo "    ${ROJO}FALLO${FIN} (ver /tmp/aegis-enforce.log)"
     tail -30 /tmp/aegis-enforce.log | sed 's/^/    | /'
     FALLOS=$((FALLOS + 1))
 fi
 
-echo "==> AegisEnforce: la postura real de esta maquina de integracion"
-if cargo test -q -p aegis-enforce la_postura_de_esta_maquina > /dev/null 2>&1; then
-    echo "    ${VERDE}OK${FIN}"
-    echo "    ${GRIS}seccomp: APLICA. Landlock: APLICA. BPF LSM: NO, y este kernel ni${FIN}"
-    echo "    ${GRIS}siquiera publica /sys/kernel/security/lsm, asi que no es que este${FIN}"
-    echo "    ${GRIS}apagado: es que no trae el framework. La postura lo dice con esa${FIN}"
-    echo "    ${GRIS}frase en vez de con un booleano, porque «no disponible» y «disponible${FIN}"
-    echo "    ${GRIS}y sin habilitar» llevan a dos sitios distintos a quien lo lea.${FIN}"
+echo "==> AegisEnforce: la postura real de esta maquina, leida del binario"
+POSTURA=/tmp/aegis-enforce-postura.txt
+if cargo run -q -p aegis-enforce --example postura > "$POSTURA" 2> /tmp/aegis-enforce-postura.err; then
+    SIN_EVIDENCIA=""
+    while IFS='|' read -r capa etiqueta detalle; do
+        case "$capa" in ''|'#'*) continue ;; esac
+        echo "    ${GRIS}${capa}: ${etiqueta}. ${detalle}${FIN}"
+        if [ "$etiqueta" = "APLICA" ]; then
+            SIN_EVIDENCIA="$SIN_EVIDENCIA [$capa]"
+        fi
+    done < "$POSTURA"
+    if [ -n "$SIN_EVIDENCIA" ]; then
+        echo "    ${ROJO}FALLO${FIN}: medida sin ningun testigo, y aun asi con evidencia:$SIN_EVIDENCIA"
+        FALLOS=$((FALLOS + 1))
+    else
+        echo "    ${VERDE}OK${FIN}"
+        echo "    ${GRIS}Estas lineas no estan escritas en este script: las imprime el ejemplo${FIN}"
+        echo "    ${GRIS}postura de aegis-enforce. Sin testigos no hay proceso del producto${FIN}"
+        echo "    ${GRIS}sobre el que medir, asi que lo que el kernel ofrece sale DISPONIBLE y${FIN}"
+        echo "    ${GRIS}nada sale APLICA. El agente se describe asi:${FIN}"
+        echo "    ${GRIS}$(sed -n 's/^# //p' "$POSTURA")${FIN}"
+    fi
 else
+    : > "$POSTURA"
     echo "    ${ROJO}FALLO${FIN}: la postura de esta maquina no se pudo medir"
+    tail -30 /tmp/aegis-enforce-postura.err | sed 's/^/    | /'
     FALLOS=$((FALLOS + 1))
 fi
 
-echo "==> AegisEnforce: observar no cuenta como aplicar, y se falla cerrado"
+echo "==> AegisEnforce: ningun texto afirma que se impone lo que solo esta disponible"
+AFIRMACIONES=/tmp/aegis-enforce-afirmaciones.txt
+: > "$AFIRMACIONES"
+if [ -s "$POSTURA" ]; then
+    while IFS='|' read -r capa etiqueta _; do
+        case "$capa" in ''|'#'*) continue ;; esac
+        case "$etiqueta" in APLICA|OTRA-PLATAFORMA) continue ;; esac
+        case "$capa" in
+            seccomp) re='seccomp' ;;
+            Landlock) re='landlock' ;;
+            'BPF LSM') re='bpf[-_ ]?lsm' ;;
+            XDP) re='xdp' ;;
+            *) continue ;;
+        esac
+        # La capa seguida de dos puntos, barra de tabla o igual (con o sin
+        # negrita) y del verbo: el estado escrito a mano como si fuera un hecho.
+        como_estado="(${re})[[:space:]]*([*][*])?[[:space:]]*[:|=][[:space:]]*([*][*])?[[:space:]]*(aplica|aplicando|impone|imponiendo)([^[:alnum:]_]|$)"
+        # La capa, quiza junto a otra, y el verbo en gerundio: una frase, o el
+        # nombre de una prueba, que lo afirma.
+        como_frase="(${re})([ _]y[ _][[:alnum:]]+)?[ _](esta|estan|está|están|sale|salen|salga|salgan)[ _](aplicando|imponiendo)"
+        grep -rniE --include='*.rs' --include='*.md' --include='*.sh' --include='*.toml' --exclude-dir=target --exclude-dir=.git --exclude-dir=node_modules -e "$como_estado" -e "$como_frase" . 2>/dev/null | sed "s|^|[$capa: $etiqueta] |" >> "$AFIRMACIONES" || true
+    done < "$POSTURA"
+fi
+if [ ! -s "$POSTURA" ]; then
+    echo "    ${ROJO}FALLO${FIN}: sin postura medida no se puede contrastar ningun texto"
+    FALLOS=$((FALLOS + 1))
+elif [ -s "$AFIRMACIONES" ]; then
+    echo "    ${ROJO}FALLO${FIN}: estos textos dan por impuesta una capa que la postura medida no da por aplicada:"
+    head -40 "$AFIRMACIONES" | sed 's/^/    | /'
+    FALLOS=$((FALLOS + 1))
+else
+    echo "    ${VERDE}OK${FIN}"
+    echo "    ${GRIS}Ningun texto del repo (codigo, docs, scripts, configuracion) escribe${FIN}"
+    echo "    ${GRIS}como hecho que se impone una capa que la postura medida da por${FIN}"
+    echo "    ${GRIS}disponible, observada o ausente. Lo que se diga de una capa sale de${FIN}"
+    echo "    ${GRIS}medirla, no de escribirlo.${FIN}"
+fi
+
+echo "==> AegisEnforce: observar no cuenta como aplicar, disponible tampoco, y se falla cerrado"
 FALTAN=""
 for prueba in \
     observar_no_cuenta_como_aplicar \
     una_politica_que_exige_aplicar_se_rechaza_donde_no_se_puede_aplicar \
     un_agente_que_no_puede_bloquear_no_se_describe_como_protegiendo \
-    lo_de_otras_plataformas_no_sale_como_carencia ; do
+    lo_de_otras_plataformas_no_sale_como_carencia \
+    disponible_no_es_aplicado_en_esta_maquina \
+    aplica_solo_sale_de_evidencia \
+    lo_disponible_no_cumple_una_politica_de_bloqueo \
+    sin_evidencia_esta_maquina_se_describe_como_solo_observando \
+    un_filtro_heredado_no_es_evidencia \
+    aplica_solo_con_un_testigo_medido_y_disponible_sin_el \
+    un_testigo_muerto_no_es_evidencia ; do
     grep -rq "fn $prueba" crates/aegis-enforce/ || FALTAN="$FALTAN $prueba"
 done
 if [ -z "$FALTAN" ]; then
@@ -164,9 +232,12 @@ echo "    ${GRIS}asi que se compilan OBJETOS reales. Traen encabezado, comandos 
 echo "    ${GRIS}segmentos —lo que este lector recorre— y no traen LC_MAIN ni${FIN}"
 echo "    ${GRIS}LC_LOAD_DYLIB, que solo aparecen al enlazar. Esos caminos estan probados${FIN}"
 echo "    ${GRIS}con vistas construidas, y se dice cual es cual.${FIN}"
-echo "    ${GRIS}AUSENTE${FIN}: BPF LSM ejercido contra el kernel. Este no lo trae. La"
-echo "    ${GRIS}postura lo detecta y lo declara, que es exactamente lo que se pedia de${FIN}"
-echo "    ${GRIS}ella; lo que no se puede es probar aqui el camino de negacion real.${FIN}"
+LSM_EN_REPO=$(grep -rl 'SEC("lsm' drivers/linux/aegis-bpf/src 2>/dev/null | wc -l)
+ESTADO_BPF=$(awk -F'|' '$1 == "BPF LSM" { print $2 }' "$POSTURA" 2>/dev/null)
+echo "    ${GRIS}AUSENTE${FIN}: BPF LSM ejercido contra el kernel. Programas BPF LSM en"
+echo "    ${GRIS}drivers/linux/aegis-bpf: ${LSM_EN_REPO}. La postura de esta maquina lo da${FIN}"
+echo "    ${GRIS}por ${ESTADO_BPF:-SIN MEDIR}: sin un enlace LSM medido no puede darlo por${FIN}"
+echo "    ${GRIS}aplicado, y lo que no se puede es probar aqui el camino de negacion real.${FIN}"
 
 if [ "$FALLOS" -eq 0 ]; then
     echo "${VERDE}==> AegisMac + AegisEnforce verificado${FIN}"

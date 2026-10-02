@@ -140,3 +140,46 @@ fn un_ejecutable_real_se_analiza_confinado() {
     }
     assert_eq!(t.estado().muertes, 0);
 }
+
+#[test]
+fn el_pid_es_el_del_trabajador_vivo_y_sigue_a_cada_relanzamiento() {
+    let Some(c) = config() else { return };
+    let mut t = Trabajador::arrancar(c).unwrap();
+    let pid = t.pid().expect("vivo: tiene pid");
+    // Es el trabajador confinado: su uid propio, NoNewPrivs y su filtro
+    // seccomp, leidos de SU status y no de lo que declara.
+    let status =
+        std::fs::read_to_string(format!("/proc/{pid}/status")).expect("status del trabajador");
+    let campo = |n: &str| {
+        status
+            .lines()
+            .find_map(|l| l.strip_prefix(n))
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert_eq!(campo("Seccomp:"), "2", "{status}");
+    assert_eq!(campo("NoNewPrivs:"), "1", "{status}");
+    assert!(
+        campo("Uid:").split_whitespace().all(|u| u != "0"),
+        "{status}"
+    );
+    // La ABI de Landlock es la que dice su saludo.
+    assert_eq!(
+        t.landlock_declarado(),
+        aegis_trabajador::confinamiento::landlock_del_saludo(&t.estado().confinamiento)
+    );
+    // Muerto y sin relanzar: ni pid ni ABI declarada.
+    let r = t.analizar(Analizador::PruebaPanico, b"PANICO", Duration::from_secs(5));
+    assert!(matches!(r, Err(FalloAnalisis::Murio(_))), "{r:?}");
+    assert_eq!(t.pid(), None);
+    assert_eq!(t.landlock_declarado(), None);
+    // Relanzado: el pid es el del proceso nuevo, y ese tambien esta confinado.
+    t.analizar(Analizador::Pe, b"MZ no es un PE", Duration::from_secs(5))
+        .expect("el siguiente analisis relanza");
+    let nuevo = t.pid().expect("relanzado: tiene pid");
+    assert_ne!(nuevo, pid);
+    let status = std::fs::read_to_string(format!("/proc/{nuevo}/status"))
+        .expect("status del trabajador relanzado");
+    assert!(status.contains("Seccomp:\t2"), "{status}");
+}

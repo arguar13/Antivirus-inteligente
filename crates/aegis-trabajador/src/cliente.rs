@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use aegis_motor::Histograma;
 
 use crate::analizadores::Analizador;
-use crate::confinamiento::UID_POR_DEFECTO;
+use crate::confinamiento::{landlock_del_saludo, UID_POR_DEFECTO};
 use crate::protocolo::{
     decodificar_fallo, escribir, leer, ErrorProtocolo, Hola, Informe, Peticion, Tipo, Trama,
 };
@@ -339,6 +339,33 @@ impl Trabajador {
     /// Contadores.
     pub fn estado(&self) -> &EstadoTrabajador {
         &self.estado
+    }
+
+    /// El pid del proceso trabajador, mientras el cliente lo tiene en marcha.
+    ///
+    /// `None` si no hay proceso: no arranco, murio y aun no se ha relanzado (se
+    /// relanza en la siguiente peticion) o esta enfriando tras morir en bucle.
+    ///
+    /// Mientras dure el prestamo de `&self`, este pid no puede pasar a otro
+    /// proceso: el cliente solo recoge al hijo (`wait`) desde metodos que piden
+    /// `&mut self`, y un hijo sin recoger conserva su pid. Lo que si puede
+    /// pasar es que el trabajador haya muerto sin que el cliente lo sepa
+    /// todavia: es un zombi, y quien lo mida tiene que comprobar que vive
+    /// (`aegis-enforce` lo hace con el `State:` de su status).
+    pub fn pid(&self) -> Option<u32> {
+        self.vivo.as_ref().map(|v| v.hijo.id())
+    }
+
+    /// La ABI de Landlock que el trabajador en marcha declaro en su saludo
+    /// (`landlock=si (N)`), si se puso un dominio.
+    ///
+    /// Es una declaracion del propio trabajador, hecha antes de leer un byte
+    /// hostil: el kernel no publica el dominio fuera del proceso. Se toma del
+    /// saludo del proceso que esta en marcha ahora, nunca del de uno anterior:
+    /// sin proceso, `None`.
+    pub fn landlock_declarado(&self) -> Option<u32> {
+        self.vivo.as_ref()?;
+        landlock_del_saludo(&self.hola.as_ref()?.confinamiento)
     }
 
     fn lanzar(&mut self) -> Result<(), String> {

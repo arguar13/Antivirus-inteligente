@@ -19,7 +19,7 @@
 //! puede bloquear no esta protegiendo: esta mirando**, y son dos productos
 //! distintos al mismo precio.
 //!
-//! # Las tres reglas
+//! # Las cuatro reglas
 //!
 //! **1. La postura se mide, no se configura.** Lo que declare el fichero de
 //! configuracion no dice nada de lo que el kernel de esta maquina acepta. Cada
@@ -30,14 +30,23 @@
 //! es telemetria, y contarlo como aplicacion es lo que produce el informe
 //! tranquilizador de una maquina desprotegida.
 //!
-//! **3. Lo que exige aplicacion falla cerrado.** Ver [`Postura::puede_cumplir`].
+//! **3. Disponible no cuenta como aplicado.** Que el kernel ofrezca un
+//! mecanismo no dice que el producto lo use. [`Estado::Aplica`] solo sale de una
+//! [`Evidencia`] medida sobre un proceso concreto (un [`Testigo`]): un filtro
+//! seccomp propio en `/proc/<pid>/status`, un dominio Landlock declarado y
+//! corroborado, un enlace BPF LSM en `/proc/<pid>/fdinfo`. Sin ella la capacidad
+//! es [`Estado::Disponible`]. La primera version confundia las dos cosas
+//! (hallazgo H-28).
+//!
+//! **4. Lo que exige aplicacion falla cerrado.** Ver [`Postura::puede_cumplir`].
 //! Una politica que dice «esto no se ejecuta» y se despliega sobre una maquina
 //! que no puede impedirlo tiene que rechazarse en el despliegue, no descubrirse
 //! en el incidente.
 //!
 //! # Lo que este crate NO hace
 //!
-//! No aplica nada: dice **quien puede**. El seccomp y el Landlock los aplica
+//! No aplica nada: mide **que se esta imponiendo**, y con que evidencia. El
+//! seccomp y el Landlock los aplica
 //! `aegis-sandbox`, el filtro de red `aegis-ips`, y los mecanismos de Windows y
 //! macOS sus respectivos backends. Mezclar el que mide con el que aplica es como
 //! se acaba teniendo un medidor que informa de lo que deberia pasar.
@@ -51,4 +60,4 @@
 
 pub mod postura;
 
-pub use postura::{Capacidad, Estado, Exigencia, Postura};
+pub use postura::{Capacidad, Estado, Evidencia, Exigencia, Postura, Testigo};

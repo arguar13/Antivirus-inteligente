@@ -28,8 +28,9 @@ use std::collections::HashMap;
 use std::os::unix::fs::MetadataExt;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use aegis_enforce::Testigo;
 use aegis_entidad::{Eid, Motor as Firma, Senal};
 use aegis_motor::{Camino, Causa, Dictamen, Ficha, Motor, Plazo, Presupuesto, Requisito};
 use aegis_trabajador::protocolo::MAX_DATOS;
@@ -48,6 +49,12 @@ const REPETIR_NS: u64 = 60_000_000_000;
 const CACHE: usize = 8192;
 /// Plazo de cada analisis en el trabajador.
 const PLAZO_ANALISIS: Duration = Duration::from_secs(3);
+/// Cada cuanto vuelve a medir el hilo analista la postura de aplicacion con el
+/// trabajador como testigo (H-28), lleguen encargos o no: el trabajador puede
+/// morir o relanzarse, y la medida publicada tiene que seguirle. Del orden del
+/// intervalo del informe periodico; cada linea publicada dice ademas hace
+/// cuanto se midio.
+const MEDIR_APLICACION_CADA: Duration = Duration::from_secs(10);
 
 /// Nombre del motor estatico, con el que se entregan sus resultados.
 pub const NOMBRE_ESTATICO: &str = "estatico";
@@ -90,6 +97,10 @@ pub struct EstadoAnalista {
     pub ultimo_ilegible: Option<String>,
     /// El estado del trabajador confinado.
     pub trabajador: aegis_trabajador::EstadoTrabajador,
+    /// La ultima postura de aplicacion medida con el trabajador como testigo
+    /// (H-28). La mide el hilo analista, que es el dueño del trabajador: solo
+    /// el puede garantizar que el pid medido sigue siendo el del trabajador.
+    pub aplicacion: Option<crate::aplicacion::Medida>,
 }
 
 /// Clave de la cache: el contenido que habia en disco.
@@ -176,6 +187,39 @@ fn se_puede_recordar(d: &Dictamenes) -> bool {
     !transitorio(&d.0) && !transitorio(&d.1)
 }
 
+/// El trabajador como testigo de la postura de aplicacion (H-28): su pid y la
+/// ABI de Landlock que declaro en su saludo (`landlock=si (N)`).
+///
+/// `None` si no hay trabajador en marcha: no arranco, murio y aun no se ha
+/// relanzado, o esta enfriando. Sin testigo ninguna capa puede salir aplicada.
+pub fn testigo_del_trabajador(t: &Trabajador) -> Option<Testigo> {
+    let testigo = Testigo::proceso(t.pid()?);
+    Some(match t.landlock_declarado() {
+        Some(abi) => testigo.con_landlock(abi),
+        None => testigo,
+    })
+}
+
+/// Mide la postura de aplicacion con el trabajador como testigo.
+///
+/// Toma el trabajador prestado durante TODA la medida, y eso es lo que la hace
+/// fiable: el cliente solo recoge al hijo desde metodos que piden `&mut`, asi
+/// que mientras dura el prestamo el pid medido no puede pasar a otro proceso.
+/// Por eso mide el hilo analista, que es el dueño, y no el hilo del informe.
+/// Solo lee `/proc`: no decide ni impide nada (solo-auditoria).
+pub fn medir_aplicacion(t: &Trabajador) -> crate::aplicacion::Medida {
+    crate::aplicacion::medir(testigo_del_trabajador(t))
+}
+
+/// Mide y deja la medida donde la lee el informe. Se mide FUERA del cerrojo:
+/// leer `/proc` no debe hacer esperar a quien publica el informe.
+fn publicar_aplicacion(t: &Trabajador, estado: &Mutex<EstadoAnalista>) {
+    let m = medir_aplicacion(t);
+    if let Ok(mut s) = estado.lock() {
+        s.aplicacion = Some(m);
+    }
+}
+
 fn analista(
     mut t: Trabajador,
     encargos: Receiver<Encargo>,
@@ -183,7 +227,19 @@ fn analista(
     estado: Arc<Mutex<EstadoAnalista>>,
 ) {
     let mut cache: HashMap<Clave, (Dictamen, Dictamen)> = HashMap::new();
-    while let Ok(e) = encargos.recv() {
+    let mut ultima_medida = Instant::now();
+    loop {
+        // Sin encargos tambien se vuelve a medir la postura de aplicacion: el
+        // trabajador puede morir o relanzarse y la medida publicada le sigue.
+        let e = match encargos.recv_timeout(MEDIR_APLICACION_CADA) {
+            Ok(e) => e,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                publicar_aplicacion(&t, &estado);
+                ultima_medida = Instant::now();
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         let (estatico, modelo) = match std::fs::metadata(&*e.ruta) {
             Err(err) => {
                 let motivo = format!("{}: no se pudo leer ({err})", e.ruta);
@@ -235,6 +291,10 @@ fn analista(
             s.encargos += 1;
             s.trabajador = t.estado().clone();
         }
+        if ultima_medida.elapsed() >= MEDIR_APLICACION_CADA {
+            publicar_aplicacion(&t, &estado);
+            ultima_medida = Instant::now();
+        }
         for (motor, dictamen) in [(NOMBRE_ESTATICO, estatico), (NOMBRE_MODELO, modelo)] {
             if dictamen == Dictamen::NoAplica {
                 continue;
@@ -285,7 +345,12 @@ impl MotorEstatico {
     pub fn arrancar(t: Trabajador) -> std::io::Result<Analista> {
         let (tx, rx) = mpsc::sync_channel(COLA);
         let (tx_res, rx_res) = mpsc::channel();
-        let estado = Arc::new(Mutex::new(EstadoAnalista::default()));
+        // La primera medida de la postura de aplicacion, antes de entregar el
+        // trabajador al hilo: el primer informe ya la lleva.
+        let estado = Arc::new(Mutex::new(EstadoAnalista {
+            aplicacion: Some(medir_aplicacion(&t)),
+            ..EstadoAnalista::default()
+        }));
         let e = Arc::clone(&estado);
         let hilo = std::thread::Builder::new()
             .name("analista".into())

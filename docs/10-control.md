@@ -42,7 +42,7 @@ de lectura.
 
 | Comando | Qué hace |
 |---|---|
-| `aegisctl status` | Estado de recursos (memoria residente, tiempo en marcha) y del pipeline (eventos recibidos y escalados). |
+| `aegisctl status` | Estado de recursos (memoria residente, tiempo en marcha) y del pipeline (eventos recibidos y escalados). Con el agente en marcha, también las líneas de su último informe periódico, entre ellas la postura de aplicación medida (`aplicacion <capa>: ...`: `APLICA` con su evidencia, o `DISPONIBLE`, `SOLO-OBSERVA` o `AUSENTE` con su motivo; ver [79](79-macos-y-aplicacion.md)). |
 | `aegisctl scan <ruta>` | Escaneo YARA bajo demanda de una ruta **absoluta**. Devuelve el veredicto y las reglas que dispararon. |
 | `aegisctl isolate [containment\|total]` | Aislamiento de red de emergencia vía `nftables`. `containment` deja abierta la ruta de administración; `total` corta todo salvo loopback. |
 | `aegisctl quarantine list` | Lista los identificadores de la cuarentena. |

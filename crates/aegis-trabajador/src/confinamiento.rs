@@ -84,6 +84,28 @@ impl fmt::Display for Aplicado {
     }
 }
 
+/// La ABI de Landlock que declara el texto de un saludo, tal como lo escribe
+/// el `Display` de [`Aplicado`]: `... landlock=si (N) seccomp=...`.
+///
+/// Es la unica forma que tiene el agente de saber que dominio Landlock se puso
+/// el trabajador: el kernel no publica el dominio fuera del proceso. Por eso
+/// el lector vive aqui, junto al formato que lee, y una prueba los ata.
+///
+/// Falla cerrado: `None` si la capa dice `NO`, si la ABI es 0 o no es un
+/// numero, o si ` landlock=` aparece mas de una vez (el motivo de otra capa
+/// lo repetiria, y entonces no se sabe cual es el de verdad).
+#[must_use]
+pub fn landlock_del_saludo(confinamiento: &str) -> Option<u32> {
+    let mut trozos = confinamiento.split(" landlock=");
+    trozos.next()?;
+    let capa = trozos.next()?;
+    if trozos.next().is_some() {
+        return None;
+    }
+    let (abi, _) = capa.strip_prefix("si (")?.split_once(") seccomp=")?;
+    abi.parse::<u32>().ok().filter(|a| *a > 0)
+}
+
 fn error_os(que: &str) -> String {
     format!("{que}: {}", std::io::Error::last_os_error())
 }
@@ -254,6 +276,33 @@ mod pruebas {
         ] {
             assert!(!p.contains(&(prohibida as u32)), "{prohibida} permitida");
         }
+    }
+
+    #[test]
+    fn la_abi_de_landlock_se_lee_del_saludo_que_escribe_este_modulo() {
+        let mut a = Aplicado {
+            limites: Ok(()),
+            red: Ok(()),
+            identidad: Ok(UID_POR_DEFECTO),
+            landlock: Ok(5),
+            seccomp: Ok(22),
+        };
+        // El formato y su lector, atados: si cambia uno, esto falla.
+        assert_eq!(landlock_del_saludo(&a.to_string()), Some(5));
+        a.landlock = Err("el kernel no tiene Landlock".into());
+        assert_eq!(landlock_del_saludo(&a.to_string()), None);
+        a.landlock = Ok(0);
+        assert_eq!(
+            landlock_del_saludo(&a.to_string()),
+            None,
+            "ABI 0 no es un dominio"
+        );
+        // Si el motivo de otra capa repite el patron, no se sabe cual es el
+        // de verdad: no se cree ninguno.
+        a.landlock = Ok(5);
+        a.red = Err("x landlock=si (9) seccomp=si (1)".into());
+        assert_eq!(landlock_del_saludo(&a.to_string()), None);
+        assert_eq!(landlock_del_saludo(""), None);
     }
 
     #[test]
