@@ -36,9 +36,6 @@ use aegis_server::error::ErrorServidor;
 use aegis_server::notificador::Notificador;
 use aegis_server::{api, ca, flota, grpc, particiones};
 
-/// Validez del certificado del propio plano de control.
-const VALIDEZ_CERT_SERVIDOR_SEG: u64 = 24 * 3600;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     iniciar_trazas();
@@ -46,6 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Orden de administracion: alta de un operador de la consola (H-02).
     if std::env::args().nth(1).as_deref() == Some("alta-operador") {
         return alta_operador(std::env::args().nth(2)).await;
+    }
+    // Rol e inquilino de un operador (FASE 6.2).
+    if std::env::args().nth(1).as_deref() == Some("asignar-rol") {
+        return asignar_rol(std::env::args().skip(2).collect()).await;
     }
 
     let cfg = Config::desde_entorno()?;
@@ -86,6 +87,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cfg.intervalo_latido.as_secs(),
     ));
 
+    // --- Salida de auditoria hacia el SIEM del cliente (FASE 46) -----------
+    //
+    // El diario se abre ANTES de que nada empiece a producir evidencia, y por
+    // eso va aqui, antes que cualquier transporte: el de la flota y el gRPC se
+    // construyen con ESTE `servicio`, y montarlo despues (como estuvo) dejaba a
+    // las alertas de los agentes en una instancia sin firehose: no llegaban
+    // nunca al SIEM. Si el directorio no se puede usar, se arranca SIN firehose
+    // y se deja constancia con nivel de error: un plano de control que no
+    // arranca porque el SIEM del cliente no esta configurado amplifica la
+    // averia en vez de contenerla, pero uno que exporta cero registros en
+    // silencio es peor todavia, porque nadie lo descubre hasta que busca la
+    // evidencia y no esta.
+    let servicio = match montar_firehose(&cfg, servicio.clone()) {
+        Some(s) => s,
+        None => servicio,
+    };
+
     // Puente de avisos entre instancias: sin el, una regla publicada contra otra
     // instancia no despertaria a los agentes suscritos a esta.
     let (version_actual, _) = almacen
@@ -119,13 +137,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let ca = Arc::new(ca_flota.autoridad);
-    let id_servidor = ca.emitir("control-plane", VALIDEZ_CERT_SERVIDOR_SEG)?;
+    // H-39: el certificado del plano de control se RENUEVA a mitad de su
+    // vida, sin reiniciar. Su `notBefore` va atrasado (`emitir_servidor`) para
+    // que un agente con el reloj algo por detras no lo vea «aun no valido».
+    let validez_cert = cfg.validez_cert_servidor.as_secs();
+    let id_servidor = ca.emitir_servidor("control-plane", validez_cert)?;
+    let cert_rotativo = aegis_fleet::tls::CertificadoRotativo::nuevo(&id_servidor)?;
     let manejador = Arc::new(
         flota::ManejadorPersistente::nuevo(servicio.clone(), tokio::runtime::Handle::current())
             .con_avisos(&notificador),
     );
     let difusion_cuarentena = manejador.difusion();
-    let servidor_flota = ServidorFlota::nuevo(&id_servidor, &ca.cert_der(), manejador)?;
+    let servidor_flota = ServidorFlota::con_config(
+        aegis_fleet::tls::config_servidor_rotativo(cert_rotativo.clone(), &ca.cert_der())?,
+        manejador,
+    );
+    let tarea_cert = renovar_cert_servidor(ca.clone(), cert_rotativo, validez_cert);
     let flota_en_ejecucion = servidor_flota.escuchar(&cfg.flota_addr)?;
     tracing::info!(direccion = %flota_en_ejecucion.direccion(), "transporte nativo de flota escuchando (mTLS)");
 
@@ -161,19 +188,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             None
         }
-    };
-
-    // --- Salida de auditoria hacia el SIEM del cliente (FASE 46) -----------
-    //
-    // El diario se abre ANTES de que nada empiece a producir evidencia. Si el
-    // directorio no se puede usar, se arranca SIN firehose y se deja constancia
-    // con nivel de error: un plano de control que no arranca porque el SIEM del
-    // cliente no esta configurado amplifica la averia en vez de contenerla,
-    // pero uno que exporta cero registros en silencio es peor todavia, porque
-    // nadie lo descubre hasta que busca la evidencia y no esta.
-    let servicio = match montar_firehose(&cfg, servicio.clone()) {
-        Some(s) => s,
-        None => servicio,
     };
 
     // --- Correlacion de APT distribuida (FASE 45) --------------------------
@@ -251,6 +265,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     esperar_senal().await;
     tracing::info!("senal de parada recibida; cerrando");
     tarea_correlador.abort();
+    tarea_cert.abort();
     tarea_particiones.abort();
     if let Some(t) = &tarea_grpc {
         t.abort();
@@ -289,6 +304,57 @@ async fn alta_operador(usuario: Option<String>) -> Result<(), Box<dyn std::error
     credenciales::alta_operador(almacen.pool(), &usuario, &hash).await?;
     tracing::info!(usuario = %usuario, "operador dado de alta");
     Ok(())
+}
+
+/// `aegis-server asignar-rol <usuario> <rol> <inquilino>` (FASE 6.2).
+///
+/// El rol es uno de `analista`, `responsable`, `administrador` o `auditor`; el
+/// inquilino, el de los agentes que vera (`flota-<dominio>`), o `plataforma`
+/// para gestionar el contenido global.
+async fn asignar_rol(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    use aegis_server::autorizacion;
+
+    let [usuario, rol, inquilino] = args.as_slice() else {
+        return Err("uso: aegis-server asignar-rol <usuario> \
+                    <analista|responsable|administrador|auditor> <inquilino>"
+            .into());
+    };
+    let rol = autorizacion::rol_de_nombre(rol)
+        .ok_or("rol desconocido: analista, responsable, administrador o auditor")?;
+    let cfg = Config::desde_entorno()?;
+    let almacen = Almacen::conectar(&cfg.pg_url, 2).await?;
+    almacen.migrar().await?;
+    if !autorizacion::asignar_rol(almacen.pool(), usuario, rol, inquilino).await? {
+        return Err(
+            format!("no existe el operador {usuario}: dalo de alta con alta-operador").into(),
+        );
+    }
+    tracing::info!(usuario = %usuario, rol = rol.nombre(), inquilino = %inquilino, "rol asignado");
+    Ok(())
+}
+
+/// Renueva el certificado del plano de control a mitad de su vida (H-39).
+fn renovar_cert_servidor(
+    ca: Arc<aegis_fleet::AutoridadCertificadora>,
+    cert: Arc<aegis_fleet::tls::CertificadoRotativo>,
+    validez_seg: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let cada = std::time::Duration::from_secs((validez_seg / 2).max(1));
+        loop {
+            tokio::time::sleep(cada).await;
+            match ca
+                .emitir_servidor("control-plane", validez_seg)
+                .and_then(|id| cert.renovar(&id))
+            {
+                Ok(()) => tracing::info!(validez_seg, "certificado del plano de control renovado"),
+                Err(e) => tracing::error!(
+                    error = %e,
+                    "no se pudo renovar el certificado del plano de control; se reintentara"
+                ),
+            }
+        }
+    })
 }
 
 /// Configura el registro estructurado.
@@ -364,7 +430,7 @@ fn montar_firehose(cfg: &Config, servicio: Arc<ServicioFlota>) -> Option<Arc<Ser
     config_diario.presupuesto_bytes = cfg.firehose_presupuesto_bytes;
 
     let firehose = match aegis_server::firehose::Firehose::abrir(config_diario, &hostname) {
-        Ok(f) => Arc::new(f),
+        Ok(f) => Arc::new(f.con_retencion(cfg.firehose_retencion)),
         Err(e) => {
             tracing::error!(error = %e, directorio = %dir.display(),
                 "no se pudo abrir el diario de auditoria; AUDITORIA NO EXPORTADA");
