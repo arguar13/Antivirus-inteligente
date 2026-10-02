@@ -87,6 +87,34 @@ impl SesionFlota {
         AckCaza::decodificar(&cuerpo)
     }
 
+    /// Declara el estado de motores y del enlace del agente (H-23).
+    ///
+    /// Un plano de control anterior a este metodo contesta «metodo
+    /// desconocido»: la sesion sigue sana y el estado, sencillamente, no se
+    /// guarda. Se devuelve como `recibido: false` y no como error, para que un
+    /// servidor viejo no tire la sesion por la que llegan los veredictos.
+    pub fn reportar_estado(
+        &mut self,
+        req: &crate::proto::EstadoAgente,
+    ) -> Resultado<crate::proto::AckEstado> {
+        escribir_marco(
+            &mut self.tls,
+            Metodo::ReportarEstado.codigo(),
+            &req.codificar(),
+        )?;
+        let (estado, cuerpo) = leer_marco(&mut self.tls)?;
+        match estado {
+            ESTADO_OK => crate::proto::AckEstado::decodificar(&cuerpo),
+            crate::rpc::ESTADO_METODO_DESCONOCIDO => {
+                Ok(crate::proto::AckEstado { recibido: false })
+            }
+            otro => Err(FleetError::Tls {
+                op: "reportar el estado",
+                detail: format!("el plano de control respondio estado {otro}"),
+            }),
+        }
+    }
+
     /// Convierte esta sesion en un canal de politica y devuelve el canal.
     ///
     /// A partir de aqui la sesion deja de servir para llamadas unarias: la
@@ -189,6 +217,34 @@ impl ClienteFlota {
             op: "connect",
             source: e,
         })?;
+        Self::sesion_sobre(sock, cfg)
+    }
+
+    /// Como [`ClienteFlota::abrir_sesion`], con plazo: la conexion y cada
+    /// lectura o escritura posterior fallan si tardan mas de `plazo`.
+    ///
+    /// Es la que usa el enlace del agente ([`crate::enlace`]): un plano de
+    /// control que deja de contestar no puede colgar para siempre al hilo que
+    /// le reporta.
+    pub fn abrir_sesion_con_plazo(&self, plazo: std::time::Duration) -> Resultado<SesionFlota> {
+        let identidad = self.rotador.asegurar_vigencia()?;
+        let cfg = config_cliente(&identidad, &self.ca_der)?;
+        let sock =
+            TcpStream::connect_timeout(&self.servidor, plazo).map_err(|e| FleetError::Red {
+                op: "connect",
+                source: e,
+            })?;
+        sock.set_read_timeout(Some(plazo))
+            .and_then(|()| sock.set_write_timeout(Some(plazo)))
+            .map_err(|e| FleetError::Red {
+                op: "fijar el plazo del socket",
+                source: e,
+            })?;
+        Self::sesion_sobre(sock, cfg)
+    }
+
+    /// Envuelve un socket ya conectado en la sesion mTLS de la flota.
+    fn sesion_sobre(sock: TcpStream, cfg: Arc<rustls::ClientConfig>) -> Resultado<SesionFlota> {
         // Igual que en el servidor: el protocolo es peticion/respuesta con
         // mensajes de cientos de bytes. Con Nagle activo, cada llamada paga la
         // espera del ACK retardado del otro extremo.

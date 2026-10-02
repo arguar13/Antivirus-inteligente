@@ -105,6 +105,59 @@ impl Identidad {
     pub fn vigente(&self, ahora: u64) -> bool {
         ahora >= self.no_antes_unix && ahora < self.no_despues_unix
     }
+
+    /// Reconstruye una identidad provisionada en ficheros: el certificado y su
+    /// clave PKCS#8, los dos en PEM (H-23).
+    ///
+    /// Es el camino de [`crate::emisor::EmisorFichero`]. Se comprueba que la
+    /// clave es la del certificado —comparando la clave publica, sin firmar
+    /// nada—: con una clave ajena el handshake fallaria igual, pero con un
+    /// mensaje que no diria por que.
+    pub fn desde_pem(cert_pem: &str, clave_pem: &str) -> Resultado<Identidad> {
+        let cert_der = certificado_desde_pem(cert_pem)?;
+        let par = rcgen::KeyPair::from_pem(clave_pem)
+            .map_err(|e| FleetError::Cripto(format!("clave privada ilegible: {e}")))?;
+        let spki = crate::x509::spki(cert_der.as_ref()).ok_or_else(|| {
+            FleetError::Cripto("el certificado no tiene una clave publica legible".into())
+        })?;
+        if spki != par.public_key_der().as_slice() {
+            return Err(FleetError::Cripto(
+                "la clave privada no corresponde al certificado".into(),
+            ));
+        }
+        let cn = crate::x509::subject_cn(cert_der.as_ref())
+            .ok_or_else(|| FleetError::Cripto("el certificado no tiene CN".into()))?;
+        // `from_ca_cert_der` solo se usa para leer la validez: analiza cualquier
+        // X.509, aunque su nombre diga CA.
+        let params = rcgen::CertificateParams::from_ca_cert_der(&cert_der)
+            .map_err(|e| FleetError::Cripto(format!("validez del certificado ilegible: {e}")))?;
+        Ok(Identidad {
+            clave: ClavePrivada::nueva(par.serialize_der()),
+            cn,
+            no_antes_unix: marca_unix(params.not_before),
+            no_despues_unix: marca_unix(params.not_after),
+            cert_der,
+        })
+    }
+
+    /// El certificado en PEM, para provisionarlo en un fichero.
+    pub fn cert_pem(&self) -> String {
+        pem::encode(&pem::Pem::new(
+            "CERTIFICATE",
+            self.cert_der.as_ref().to_vec(),
+        ))
+    }
+
+    /// La clave en PEM (PKCS#8).
+    ///
+    /// Material secreto: sale en un contenedor que se borra al soltarse, y solo
+    /// debe escribirse en un fichero `0600` del endpoint al que pertenece.
+    pub fn clave_pem(&self) -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(pem::encode(&pem::Pem::new(
+            "PRIVATE KEY",
+            self.clave.der.clone(),
+        )))
+    }
 }
 
 /// Autoridad certificadora del plano de control de la flota.
@@ -228,7 +281,64 @@ impl AutoridadCertificadora {
             no_despues_unix: ahora + validez_seg,
         })
     }
+
+    /// Emite la identidad del PLANO DE CONTROL con el `notBefore` atrasado
+    /// [`TOLERANCIA_RELOJ_SEG`] (FASE 6.4 del MP-16).
+    ///
+    /// Un agente con el reloj atrasado respecto al servidor veria un
+    /// certificado recien emitido (al arrancar o al renovarse) como «aun no
+    /// valido» y no conectaria. Solo hace falta en el del servidor: los de los
+    /// agentes los valida el servidor con su propio reloj.
+    pub fn emitir_servidor(&self, cn: &str, validez_seg: u64) -> Resultado<Identidad> {
+        let ahora = ahora_unix();
+        let desde = ahora.saturating_sub(TOLERANCIA_RELOJ_SEG);
+        let mut params = rcgen::CertificateParams::new(vec!["localhost".to_string()])
+            .map_err(|e| FleetError::Cripto(format!("parametros de hoja: {e}")))?;
+        params
+            .distinguished_name
+            .push(rcgen::DnType::CommonName, cn);
+        params.not_before = marca_temporal(desde)?;
+        params.not_after = marca_temporal(ahora + validez_seg)?;
+        let clave = rcgen::KeyPair::generate()
+            .map_err(|e| FleetError::Cripto(format!("clave de hoja: {e}")))?;
+        let cert = params
+            .signed_by(&clave, &self.cert, &self.clave)
+            .map_err(|e| FleetError::Cripto(format!("firma de hoja: {e}")))?;
+        Ok(Identidad {
+            cert_der: CertificateDer::from(cert.der().to_vec()),
+            clave: ClavePrivada::nueva(clave.serialize_der()),
+            cn: cn.to_string(),
+            no_antes_unix: desde,
+            no_despues_unix: ahora + validez_seg,
+        })
+    }
 }
+
+/// Lee un certificado X.509 en PEM y devuelve su DER.
+///
+/// Solo admite la etiqueta `CERTIFICATE`: una clave o una peticion de firma
+/// pegadas por error donde iba un certificado se rechazan aqui, con su nombre.
+pub fn certificado_desde_pem(texto: &str) -> Resultado<CertificateDer<'static>> {
+    let p = pem::parse(texto)
+        .map_err(|e| FleetError::Cripto(format!("PEM de certificado invalido: {e}")))?;
+    if p.tag() != "CERTIFICATE" {
+        return Err(FleetError::Cripto(format!(
+            "se esperaba un CERTIFICATE y el PEM trae un {}",
+            p.tag()
+        )));
+    }
+    Ok(CertificateDer::from(p.contents().to_vec()))
+}
+
+/// Un instante de `time` en segundos Unix; lo anterior a 1970, cero.
+fn marca_unix(t: time::OffsetDateTime) -> u64 {
+    u64::try_from(t.unix_timestamp()).unwrap_or(0)
+}
+
+/// Cuanto se atrasa el `notBefore` del certificado del plano de control: un
+/// agente con el reloj hasta una hora por detras lo acepta igual. El caos de la
+/// FASE 6.4 lo ejerce con +-10 minutos.
+pub const TOLERANCIA_RELOJ_SEG: u64 = 3600;
 
 /// Convierte un instante Unix en la marca temporal que `rcgen` espera.
 fn marca_temporal(unix: u64) -> Resultado<time::OffsetDateTime> {

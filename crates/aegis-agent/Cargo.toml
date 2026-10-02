@@ -56,6 +56,13 @@ aegis-entidad = { path = "../aegis-entidad" }
 # (FASE 1 del MP-16), y el latido que vigila aegis-watchdog.
 aegis-trabajador = { path = "../aegis-trabajador" }
 aegis-watchdog = { path = "../aegis-watchdog" }
+# Enlace con el plano de control (H-23, E6.5 del MP-16): el cliente mTLS
+# SINCRONO de la flota —sin tokio, la misma doctrina de dependencias del agente—
+# y el presupuesto de memoria, del que sale el techo de su cola. Ninguno trae un
+# crate nuevo: rustls, rcgen y pem ya estan justificados en
+# tools/lineabase-agente.txt, y aegis-presupuesto no tiene dependencias.
+aegis-fleet = { path = "../aegis-fleet" }
+aegis-presupuesto = { path = "../aegis-presupuesto" }
 # Ola A de la FASE 2 del MP-16: integridad de ficheros de configuracion por
 # significado, forense de memoria en vivo, verificacion cruzada de tareas del
 # kernel y balizas de C2 por el ritmo de las conexiones. Todos entran como
@@ -74,7 +81,11 @@ libbpf-rs = { version = "0.24", optional = true }
 libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
+# Omisiones de las pruebas que dependen del entorno, contadas y exigibles.
+aegis-prueba = { path = "../aegis-prueba" }
 anyhow = "1"
+# Para comprobar que lo que el agente manda al plano de control es JSON valido.
+serde_json = "1"
 aegis-scal = { path = "../aegis-scal" }
 
 [[bin]]

@@ -35,6 +35,7 @@ dependencies = [
  "aegis-ctl",
  "aegis-edgeml",
  "aegis-entidad",
+ "aegis-fleet",
  "aegis-harden",
  "aegis-integridad",
  "aegis-ipc",
@@ -43,6 +44,8 @@ dependencies = [
  "aegis-l7hunter",
  "aegis-memhunter",
  "aegis-motor",
+ "aegis-presupuesto",
+ "aegis-prueba",
  "aegis-ransom",
  "aegis-scal",
  "aegis-trabajador",
@@ -52,6 +55,7 @@ dependencies = [
  "dashmap",
  "libbpf-rs",
  "libc",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 

@@ -386,6 +386,11 @@ pub struct AckEvento {
     pub recibido: bool,
     /// Identificador de incidente asignado.
     pub id_incidente: String,
+    /// No se registro por una causa TRANSITORIA del plano de control (su base
+    /// de datos no esta) y pide al agente que lo conserve y lo reenvie:
+    /// contrapresion, no rechazo (FASE 6.4 del MP-16). Un agente anterior lo
+    /// ignora y lo trata como un rechazo.
+    pub reintentar: bool,
 }
 
 impl AckEvento {
@@ -394,6 +399,7 @@ impl AckEvento {
         let mut b = Vec::new();
         escribir_bool(&mut b, 1, self.recibido);
         escribir_str(&mut b, 2, &self.id_incidente);
+        escribir_bool(&mut b, 3, self.reintentar);
         b
     }
 
@@ -405,6 +411,7 @@ impl AckEvento {
             match campo {
                 Campo::Entero(1, v) => m.recibido = v != 0,
                 Campo::Bytes(2, v) => m.id_incidente = como_str(v)?,
+                Campo::Entero(3, v) => m.reintentar = v != 0,
                 _ => {}
             }
         }
@@ -990,6 +997,81 @@ impl AckCaza {
                 Campo::Entero(1, v) => m.recibido = v != 0,
                 Campo::Bytes(2, v) => m.motivo = como_str(v)?,
                 _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// H-23: el estado que declara el agente
+// ---------------------------------------------------------------------------
+
+/// `AgentState`: el estado de motores y del enlace que declara el agente.
+///
+/// Va en un mensaje propio y no como campo del latido a proposito: el latido lo
+/// construyen tambien el simulador de flota y las pruebas, y un campo nuevo
+/// obligaria a tocarlos todos. Un metodo nuevo solo lo usa quien lo tiene, y un
+/// plano de control que no lo conoce contesta «metodo desconocido» sin romper
+/// la sesion.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EstadoAgente {
+    /// Identidad del agente (un dato: la identidad autenticada es el CN).
+    pub id_agente: String,
+    /// Instante Unix de la medida.
+    pub momento_unix: u64,
+    /// El estado, como objeto JSON.
+    pub estado_json: String,
+}
+
+impl EstadoAgente {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_str(&mut b, 1, &self.id_agente);
+        escribir_u64(&mut b, 2, self.momento_unix);
+        escribir_str(&mut b, 3, &self.estado_json);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            match campo {
+                Campo::Bytes(1, v) => m.id_agente = como_str(v)?,
+                Campo::Entero(2, v) => m.momento_unix = v,
+                Campo::Bytes(3, v) => m.estado_json = como_str(v)?,
+                _ => {}
+            }
+        }
+        Ok(m)
+    }
+}
+
+/// `AgentStateAck`: acuse del estado.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AckEstado {
+    /// Si el plano de control lo guardo.
+    pub recibido: bool,
+}
+
+impl AckEstado {
+    /// Serializa al formato de cable.
+    pub fn codificar(&self) -> Vec<u8> {
+        let mut b = Vec::new();
+        escribir_bool(&mut b, 1, self.recibido);
+        b
+    }
+
+    /// Deserializa desde el formato de cable.
+    pub fn decodificar(datos: &[u8]) -> Resultado<Self> {
+        let mut m = Self::default();
+        let mut lector = Lector::nuevo(datos);
+        while let Some(campo) = lector.siguiente()? {
+            if let Campo::Entero(1, v) = campo {
+                m.recibido = v != 0;
             }
         }
         Ok(m)

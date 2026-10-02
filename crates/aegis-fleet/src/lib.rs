@@ -25,6 +25,7 @@
 //! | Servicio gRPC | enrolar, latir, reportar eventos, como llamadas unarias protobuf | [`proto`], [`rpc`] |
 //! | Plano de control | autentica por el CN del certificado y despacha el servicio | [`servidor`] |
 //! | Agente | se conecta, se enrola y late, rotando su certificado | [`cliente`] |
+//! | Enlace | cola acotada, reintento y reconciliacion del agente con el plano de control | [`enlace`] |
 //!
 //! # Sobre el transporte
 //!
@@ -52,6 +53,7 @@
 pub mod cliente;
 pub mod csr;
 pub mod emisor;
+pub mod enlace;
 pub mod error;
 pub mod pki;
 pub mod pqc;
@@ -64,9 +66,9 @@ pub mod x509;
 
 pub use cliente::{CanalPolitica, ClienteFlota, SesionFlota};
 pub use csr::PeticionFirmaLocal;
-pub use emisor::EmisorLocal;
+pub use emisor::{EmisorFichero, EmisorLocal};
 pub use error::{FleetError, Resultado};
-pub use pki::{ahora_unix, AutoridadCertificadora, ClavePrivada, Identidad};
+pub use pki::{ahora_unix, certificado_desde_pem, AutoridadCertificadora, ClavePrivada, Identidad};
 pub use pqc::{IdentidadPqcAgente, PlanoControlPqc};
 pub use rotacion::{EmisorIdentidad, PoliticaRotacion, RotadorCertificados};
 pub use servidor::{ManejadorFlota, PlanoDeControl, ServidorEnEjecucion, ServidorFlota};

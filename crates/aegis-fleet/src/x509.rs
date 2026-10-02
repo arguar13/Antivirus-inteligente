@@ -102,6 +102,41 @@ pub fn subject_cn(cert_der: &[u8]) -> Option<String> {
     None
 }
 
+/// Extrae el `subjectPublicKeyInfo` de un certificado en DER, entero: etiqueta,
+/// longitud y contenido.
+///
+/// Sirve para comprobar que una clave privada es la de un certificado sin tener
+/// que firmar nada con ella (ver [`crate::pki::Identidad::desde_pem`]).
+pub fn spki(cert_der: &[u8]) -> Option<&[u8]> {
+    let cert = leer_elemento(cert_der, 0)?;
+    if cert.etiqueta != 0x30 {
+        return None;
+    }
+    let tbs = leer_elemento(cert_der, cert.inicio)?;
+    if tbs.etiqueta != 0x30 {
+        return None;
+    }
+    // Tras la version opcional y el numero de serie: signature, issuer,
+    // validity, subject y, la quinta SEQUENCE, subjectPublicKeyInfo.
+    let mut pos = tbs.inicio;
+    let mut idx_secuencias = 0;
+    while pos < tbs.fin {
+        let el = leer_elemento(cert_der, pos)?;
+        if el.etiqueta == 0xa0 {
+            pos = el.siguiente;
+            continue;
+        }
+        if el.etiqueta == 0x30 {
+            idx_secuencias += 1;
+            if idx_secuencias == 5 {
+                return cert_der.get(pos..el.siguiente);
+            }
+        }
+        pos = el.siguiente;
+    }
+    None
+}
+
 /// Busca el CN dentro de un `Name` (RDNSequence), delimitado por `[inicio,fin)`.
 fn cn_en_nombre(datos: &[u8], inicio: usize, fin: usize) -> Option<String> {
     let mut pos = inicio;

@@ -195,6 +195,15 @@ pub trait ManejadorFlota: Send + Sync {
             motivo: "este plano de control no agrega cacerias".to_string(),
         }
     }
+
+    /// Guarda el estado de motores y del enlace que declara el agente (H-23).
+    ///
+    /// El defecto NO lo guarda y lo dice (`recibido: false`), igual que `stix`:
+    /// un manejador que acusara recibo sin guardar haria creer al operador que
+    /// ve el estado de la flota.
+    fn estado(&self, _cn: &str, _req: &crate::proto::EstadoAgente) -> crate::proto::AckEstado {
+        crate::proto::AckEstado { recibido: false }
+    }
 }
 
 /// Registro de un agente enrolado.
@@ -348,6 +357,7 @@ impl ManejadorFlota for PlanoDeControl {
         let id = self.incidentes.fetch_add(1, Ordering::SeqCst) + 1;
         AckEvento {
             recibido,
+            reintentar: false,
             id_incidente: if recibido {
                 format!("INC-{id:06}")
             } else {
@@ -467,6 +477,16 @@ impl ServidorFlota {
     ) -> Resultado<ServidorFlota> {
         let cfg = config_servidor(id, ca_der)?;
         Ok(ServidorFlota { cfg, manejador })
+    }
+
+    /// Construye el servidor con una configuracion TLS ya hecha; p. ej. la de
+    /// [`crate::tls::config_servidor_rotativo`], cuyo certificado se renueva
+    /// sin reiniciar (H-39).
+    pub fn con_config(
+        cfg: Arc<rustls::ServerConfig>,
+        manejador: Arc<dyn ManejadorFlota>,
+    ) -> ServidorFlota {
+        ServidorFlota { cfg, manejador }
     }
 
     /// Empieza a escuchar en `addr` y devuelve el servidor en ejecucion.
@@ -743,6 +763,10 @@ fn despachar(
         Metodo::ReportarCaza => match ReporteCaza::decodificar(cuerpo) {
             Ok(req) => (ESTADO_OK, manejador.caza(cn, &req).codificar()),
             Err(_) => (ESTADO_INTERNO, b"informe de caza invalido".to_vec()),
+        },
+        Metodo::ReportarEstado => match crate::proto::EstadoAgente::decodificar(cuerpo) {
+            Ok(req) => (ESTADO_OK, manejador.estado(cn, &req).codificar()),
+            Err(_) => (ESTADO_INTERNO, b"estado de agente invalido".to_vec()),
         },
     }
 }

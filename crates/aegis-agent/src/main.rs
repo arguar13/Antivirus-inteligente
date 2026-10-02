@@ -26,6 +26,8 @@ use aegis_agent::motores::secuestro::MotorSecuestro;
 use aegis_agent::motores::triaje::MotorTriaje;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::{EventoAgente, HostAgente, Identidad};
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+use aegis_agent::plano::PlanoControl;
 use aegis_agent::{GraphConfig, Pipeline, TriageConfig};
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_motor::{Arbitro, ConfigArbitro};
@@ -61,6 +63,7 @@ struct Opciones {
     harden: bool,
     control_socket: Option<String>,
     latido: std::path::PathBuf,
+    plano_control: Option<std::path::PathBuf>,
 }
 
 /// Ruta del latido que lee el watchdog (`aegis-watchdog --heartbeat`).
@@ -75,7 +78,7 @@ const MANTENER_CADA: Duration = Duration::from_secs(1);
 const AYUDA: &str = "aegis-agent - agente de deteccion de AegisCore
      
      USO: aegis-agent [--stats-interval SEGUNDOS] [--harden]
-          [--control-socket RUTA] [--latido RUTA]
+          [--control-socket RUTA] [--latido RUTA] [--plano-control RUTA]
           aegis-agent --capacidades [--maquina]
      
      --capacidades  informa de lo que ofrece este kernel (BTF, tracefs,
@@ -84,6 +87,9 @@ const AYUDA: &str = "aegis-agent - agente de deteccion de AegisCore
                     telemetria de kernel. Con --maquina, lineas AEGIS-CAP/DEG.
      --latido RUTA  donde escribe el latido que vigila aegis-watchdog
                     (por defecto /run/aegiscore/agent.heartbeat).
+     --plano-control RUTA  enlace con el plano de control, en solo
+                    auditoria (por defecto /etc/aegiscore/plano-control.toml;
+                    sin ese fichero el agente protege en local y no reporta).
      
      Requiere CAP_BPF y CAP_PERFMON (o root) para cargar las sondas,
      y un kernel con CONFIG_DEBUG_INFO_BTF=y. Para confinar a su
@@ -101,6 +107,7 @@ fn opciones(args: &[String]) -> Result<Opciones, String> {
         harden: false,
         control_socket: None,
         latido: LATIDO_POR_DEFECTO.into(),
+        plano_control: None,
     };
     let mut i = 1;
     while i < args.len() {
@@ -124,6 +131,10 @@ fn opciones(args: &[String]) -> Result<Opciones, String> {
             }
             "--latido" => {
                 o.latido = valor(i)?.into();
+                i += 2;
+            }
+            "--plano-control" => {
+                o.plano_control = Some(valor(i)?.into());
                 i += 2;
             }
             "--harden" => {
@@ -304,8 +315,13 @@ struct Bucle {
 }
 
 #[cfg(all(target_os = "linux", feature = "bpf"))]
-fn veredicto(v: &aegis_entidad::Veredicto) {
+fn veredicto(v: &aegis_entidad::Veredicto, plano: Option<&PlanoControl>) {
     println!("[VEREDICTO] {} {}", v.entidad, v.resumen());
+    // Al plano de control, si lo hay: un clon a una cola acotada. Ni red ni
+    // serializacion en este hilo; eso lo paga el hilo del enlace.
+    if let Some(p) = plano {
+        p.ofrecer(v);
+    }
     for s in &v.senales {
         println!(
             "[SEÑAL] {} {} {} {}: {}",
@@ -320,14 +336,18 @@ fn veredicto(v: &aegis_entidad::Veredicto) {
 
 /// Entrega al arbitro lo que el camino frio termino de analizar.
 #[cfg(all(target_os = "linux", feature = "bpf"))]
-fn drenar(rx: Option<&std::sync::mpsc::Receiver<Resultado>>, b: &mut Bucle) {
+fn drenar(
+    rx: Option<&std::sync::mpsc::Receiver<Resultado>>,
+    b: &mut Bucle,
+    plano: Option<&PlanoControl>,
+) {
     let Some(rx) = rx else { return };
     while let Ok(r) = rx.try_recv() {
         if let Some(v) = b
             .arbitro
             .aportar(r.motor, &r.entidad, r.dictamen, r.cuando_ns)
         {
-            veredicto(&v);
+            veredicto(&v, plano);
         }
     }
 }
@@ -470,6 +490,11 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
         }
     }
 
+    // El enlace con el plano de control (H-23): su propio hilo y su cola
+    // acotada, en solo-auditoria. Sin configuracion no hay conexion; el agente
+    // lo dice y sigue protegiendo en local.
+    let plano = arrancar_plano(o.plano_control.as_deref());
+
     eprintln!(
         "aegis-agent: enganchando sondas (pid propio {}, excluido de la telemetria)",
         config.agent_pid
@@ -492,26 +517,38 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
             if let Some(evento) = p.decodificar(registro) {
                 let evento = EventoAgente::nuevo(evento, &identidad);
                 if let Some(v) = bucle.borrow_mut().arbitro.procesar(&evento) {
-                    veredicto(&v);
+                    veredicto(&v, plano.as_ref());
                 }
             }
         },
         |contadores| {
             let mut b = bucle.borrow_mut();
-            drenar(resultados.as_ref(), &mut b);
+            drenar(resultados.as_ref(), &mut b, plano.as_ref());
             latir(&latido, &mut b);
             // Mantenimiento y estadisticas en el pulso, nunca por evento. El
             // camino frio de los motores entrega aqui lo que termino.
             if b.ultimo_mantenimiento.elapsed() >= MANTENER_CADA {
                 b.ultimo_mantenimiento = Instant::now();
                 for v in b.arbitro.mantener(bpf::ahora_boot_ns()) {
-                    veredicto(&v);
+                    veredicto(&v, plano.as_ref());
                 }
             }
             if b.ultimo_informe.elapsed() >= o.intervalo {
                 b.ultimo_informe = Instant::now();
                 let mut lineas = informar(&p, &b.arbitro, analista.as_deref());
                 lineas.push(informar_kernel(contadores));
+                // El estado de los motores viaja con el siguiente latido al plano
+                // de control; aqui solo se deja, sin red.
+                if let Some(pc) = plano.as_ref() {
+                    pc.publicar_estado(aegis_agent::plano::estado_motores_json(
+                        &b.arbitro.estado(),
+                        b.arbitro.omitidos(),
+                        b.arbitro.veredictos(),
+                        b.arbitro.expedientes(),
+                        b.arbitro.expulsados(),
+                    ));
+                    lineas.push(pc.informe());
+                }
                 for l in &lineas {
                     eprintln!("aegis-agent: {l}");
                 }
@@ -526,6 +563,20 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
     control_stop.store(true, Ordering::Relaxed);
     if let Some(h) = control_hilo {
         let _ = h.join();
+    }
+
+    // El enlace se para despues del bucle. Lo que quede en su cola no se pierde
+    // en silencio: se cuenta y se dice.
+    if let Some(pc) = plano {
+        let fin = pc.parar();
+        eprintln!("aegis-agent: {}", aegis_agent::plano::resumen(&fin));
+        if fin.en_cola > 0 {
+            eprintln!(
+                "aegis-agent: AVISO - {} veredicto(s) quedaron sin entregar al plano de \
+                 control al parar",
+                fin.en_cola
+            );
+        }
     }
 
     let b = bucle.into_inner();
@@ -555,6 +606,55 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
             eprintln!("aegis-agent: error fatal: {e}");
             cerrar_analista(b, hilo_analista);
             std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+/// Arranca el enlace con el plano de control, o dice por que no.
+///
+/// Nunca impide arrancar al agente: sin plano de control protege igual en
+/// local. Lo que no puede es callarse que no reporta.
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+fn arrancar_plano(explicita: Option<&std::path::Path>) -> Option<PlanoControl> {
+    use aegis_agent::plano;
+    let ruta = explicita.unwrap_or(std::path::Path::new(plano::CONFIG_POR_DEFECTO));
+    let cfg = match plano::cargar(ruta, explicita.is_some()) {
+        Ok(Some(cfg)) => cfg,
+        Ok(None) => {
+            eprintln!(
+                "aegis-agent: sin plano de control: no existe {}; el agente protege en local \
+                 y no reporta",
+                ruta.display()
+            );
+            return None;
+        }
+        Err(m) => {
+            eprintln!(
+                "aegis-agent: DEGRADADO plano de control: {m}; el agente protege en local y no \
+                 reporta"
+            );
+            return None;
+        }
+    };
+    match PlanoControl::arrancar(&cfg, env!("CARGO_PKG_VERSION")) {
+        Ok((pc, avisos)) => {
+            for a in avisos {
+                eprintln!("aegis-agent: AVISO plano de control: {a}");
+            }
+            eprintln!(
+                "aegis-agent: plano de control {} como {} (solo auditoria; cola de {} en memoria)",
+                cfg.servidor,
+                pc.cn(),
+                aegis_presupuesto::humano(pc.capacidad_bytes() as u64)
+            );
+            Some(pc)
+        }
+        Err(m) => {
+            eprintln!(
+                "aegis-agent: DEGRADADO plano de control: {m}; el agente protege en local y no \
+                 reporta"
+            );
+            None
         }
     }
 }
@@ -672,7 +772,7 @@ fn informar(
 #[cfg(not(all(target_os = "linux", feature = "bpf")))]
 fn ejecutar(o: Opciones) -> std::process::ExitCode {
     let _ = (&PARAR, Arc::new(0u8), Instant::now());
-    let _ = (o.intervalo, o.control_socket, o.latido);
+    let _ = (o.intervalo, o.control_socket, o.latido, o.plano_control);
     let _ = Pipeline::new(GraphConfig::default(), TriageConfig::default());
     eprintln!(
         "aegis-agent se compilo sin la caracteristica 'bpf' o para un sistema que no es Linux.\n\

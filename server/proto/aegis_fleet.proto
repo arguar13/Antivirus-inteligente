@@ -59,6 +59,9 @@ message ReporteEvento {
 message AckEvento {
   bool   recibido     = 1;
   string id_incidente = 2;
+  // No se registro por una causa transitoria: el agente lo conserva y lo
+  // reenvia (contrapresion, FASE 6.4 del MP-16).
+  bool   reintentar   = 3;
 }
 
 // Servicio de flota. Las tres llamadas son unarias, igual que en el transporte

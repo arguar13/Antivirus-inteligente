@@ -70,6 +70,11 @@ pub enum Metodo {
     /// Separarlos es lo que permite que un endpoint tarde lo que necesite en
     /// responder sin bloquear el canal por el que le llegan las politicas.
     ReportarCaza,
+    /// Declarar el estado de motores y del enlace del agente (H-23).
+    ///
+    /// Un plano de control anterior no lo conoce y contesta «metodo
+    /// desconocido» sin cerrar la sesion; el agente lo toma como «no guardado».
+    ReportarEstado,
 }
 
 impl Metodo {
@@ -83,6 +88,7 @@ impl Metodo {
             Metodo::ReportarGrafo => 5,
             Metodo::SuscribirPolitica => 6,
             Metodo::ReportarCaza => 7,
+            Metodo::ReportarEstado => 8,
         }
     }
 
@@ -96,6 +102,7 @@ impl Metodo {
             5 => Some(Metodo::ReportarGrafo),
             6 => Some(Metodo::SuscribirPolitica),
             7 => Some(Metodo::ReportarCaza),
+            8 => Some(Metodo::ReportarEstado),
             _ => None,
         }
     }

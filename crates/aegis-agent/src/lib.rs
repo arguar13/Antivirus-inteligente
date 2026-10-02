@@ -20,6 +20,7 @@ pub mod edge_ml;
 pub mod error;
 pub mod graph;
 pub mod motores;
+pub mod plano;
 pub mod scal;
 pub mod triage;
 

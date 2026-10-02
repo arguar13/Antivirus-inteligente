@@ -57,6 +57,79 @@ pub fn config_servidor(
     Ok(Arc::new(cfg))
 }
 
+/// Certificado del plano de control que se RENUEVA sin reiniciar (H-39).
+///
+/// Antes el servidor emitia su certificado UNA vez al arrancar, con 24 h de
+/// vida y sin rotacion: pasado ese tiempo todo agente que reconectara rechazaba
+/// el handshake. Este resolvedor entrega en cada handshake el certificado
+/// vigente; [`CertificadoRotativo::renovar`] lo cambia en caliente. Las
+/// sesiones ya abiertas no se tocan.
+#[derive(Debug)]
+pub struct CertificadoRotativo {
+    actual: std::sync::RwLock<Arc<rustls::sign::CertifiedKey>>,
+}
+
+impl CertificadoRotativo {
+    /// Empieza con la identidad `id`.
+    pub fn nuevo(id: &Identidad) -> Resultado<Arc<CertificadoRotativo>> {
+        Ok(Arc::new(CertificadoRotativo {
+            actual: std::sync::RwLock::new(certificado_firmante(id)?),
+        }))
+    }
+
+    /// Sustituye el certificado vigente.
+    pub fn renovar(&self, id: &Identidad) -> Resultado<()> {
+        let nuevo = certificado_firmante(id)?;
+        match self.actual.write() {
+            Ok(mut g) => *g = nuevo,
+            Err(e) => *e.into_inner() = nuevo,
+        }
+        Ok(())
+    }
+}
+
+fn certificado_firmante(id: &Identidad) -> Resultado<Arc<rustls::sign::CertifiedKey>> {
+    let clave = proveedor()
+        .key_provider
+        .load_private_key(id.clave.como_rustls()?)
+        .map_err(|e| FleetError::ConfigTls(format!("clave de servidor: {e}")))?;
+    Ok(Arc::new(rustls::sign::CertifiedKey::new(
+        vec![id.cert_der.clone()],
+        clave,
+    )))
+}
+
+impl rustls::server::ResolvesServerCert for CertificadoRotativo {
+    fn resolve(
+        &self,
+        _hola: rustls::server::ClientHello<'_>,
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        Some(match self.actual.read() {
+            Ok(g) => g.clone(),
+            Err(e) => e.into_inner().clone(),
+        })
+    }
+}
+
+/// Como [`config_servidor`], pero con un certificado que se renueva en
+/// caliente ([`CertificadoRotativo`]).
+pub fn config_servidor_rotativo(
+    cert: Arc<CertificadoRotativo>,
+    ca_der: &CertificateDer<'static>,
+) -> Resultado<Arc<ServerConfig>> {
+    let roots = Arc::new(raiz(ca_der)?);
+    let verificador =
+        rustls::server::WebPkiClientVerifier::builder_with_provider(roots, proveedor())
+            .build()
+            .map_err(|e| FleetError::ConfigTls(format!("verificador de cliente: {e}")))?;
+    let cfg = ServerConfig::builder_with_provider(proveedor())
+        .with_safe_default_protocol_versions()
+        .map_err(|e| FleetError::ConfigTls(format!("versiones TLS: {e}")))?
+        .with_client_cert_verifier(verificador)
+        .with_cert_resolver(cert);
+    Ok(Arc::new(cfg))
+}
+
 /// Configuracion del cliente-agente: presenta su certificado de flota.
 pub fn config_cliente(
     id: &Identidad,

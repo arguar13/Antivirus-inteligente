@@ -94,6 +94,7 @@ fn ack_evento_ida_y_vuelta() {
     let m = AckEvento {
         recibido: true,
         id_incidente: "INC-000042".into(),
+        reintentar: true,
     };
     assert_eq!(AckEvento::decodificar(&m.codificar()).unwrap(), m);
 }
