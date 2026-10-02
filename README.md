@@ -35,10 +35,10 @@ máquina.
 | Magnitud | Agente | Plano de control | Enjambre |
 |---|---:|---:|---:|
 | Crates | 74 | 20 | 1 |
-| Funciones de prueba | 3.402 | 1.237 | 6 |
-| Líneas de Rust | 239.819 | 94.618 | 561 |
+| Funciones de prueba | 3.432 | 1.260 | 6 |
+| Líneas de Rust | 243.849 | 99.010 | 561 |
 
-Además: **3.962** líneas de C propio (sondas eBPF y driver de Windows, sin contar el `vmlinux.h` generado), **58** verificadores `tools/verificar-*.sh`, **39** dependencias directas del agente con su justificación en [`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y **5** ejecutables instalables.
+Además: **3.962** líneas de C propio (sondas eBPF y driver de Windows, sin contar el `vmlinux.h` generado), **60** verificadores `tools/verificar-*.sh`, **39** dependencias directas del agente con su justificación en [`tools/lineabase-agente.txt`](tools/lineabase-agente.txt), y **5** ejecutables instalables.
 
 ## Por qué otro antivirus
 
@@ -108,13 +108,13 @@ proceso que puede estar comprometido o simplemente tener un fallo:
 ```mermaid
 flowchart LR
     subgraph endpoint["Endpoint Linux"]
-        aegis_agent["<b>aegis-agent</b><br/>El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje.<br/><i>invoca 25 crates</i>"]
+        aegis_agent["<b>aegis-agent</b><br/>El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje.<br/><i>invoca 28 crates</i>"]
         aegisctl["<b>aegisctl</b><br/>CLI de administración local sobre el socket de control del agente.<br/><i>invoca 1 crate</i>"]
         aegis_watchdog["<b>aegis-watchdog</b><br/>Supervisor: reinicia el agente ante caída, cuelgue o exceso de memoria.<br/><i>invoca 2 crates</i>"]
         aegis_fleet["<b>aegis-fleet</b><br/>Demostración autocontenida del canal de flota (gRPC sobre mTLS): hoy no se conecta al servidor real.<br/><i>invoca 2 crates</i>"]
     end
     subgraph plano_de_control["Plano de control"]
-        aegis_server["<b>aegis-server</b><br/>Plano de control: ingesta de la flota, API de administración y consola SOC.<br/><i>invoca 8 crates</i>"]
+        aegis_server["<b>aegis-server</b><br/>Plano de control: ingesta de la flota, API de administración y consola SOC.<br/><i>invoca 9 crates</i>"]
     end
     kernel(["<b>Kernel Linux</b><br/>Sondas eBPF CO-RE (tracepoints) y filtro XDP"]):::externo
     navegador(["<b>Analista SOC</b><br/>Navegador con la consola web"]):::externo
@@ -124,6 +124,7 @@ flowchart LR
     aegisctl -->|"órdenes por socket Unix 0600"| aegis_agent
     aegis_watchdog -->|"lanza y reinicia el proceso"| aegis_agent
     navegador -->|"HTTP y WebSocket, sin TLS propio (AM-3.4)"| aegis_server
+    aegis_agent -->|"veredictos y estado de motores por mTLS nativo (solo auditoría)"| aegis_server
     aegis_server -->|"SQL (sqlx)"| postgres
     aegis_server -->|"publicación de eventos"| redis
     classDef externo fill:#eef2f7,stroke:#7b8794,color:#1f2933
@@ -150,11 +151,11 @@ scripts de construcción, la matriz y este documento.
 
 | Ejecutable | Lado | Qué es | Crates que enlaza | Crates que invoca |
 |---|---|---|---:|---:|
-| `aegis-agent` | endpoint | El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje. | 29 | 25 |
+| `aegis-agent` | endpoint | El agente EDR: sondas eBPF de kernel, grafo de linaje y triaje. | 30 | 28 |
 | `aegisctl` | endpoint | CLI de administración local sobre el socket de control del agente. | 5 | 1 |
 | `aegis-watchdog` | endpoint | Supervisor: reinicia el agente ante caída, cuelgue o exceso de memoria. | 2 | 2 |
 | `aegis-fleet` | endpoint | Demostración autocontenida del canal de flota (gRPC sobre mTLS): hoy no se conecta al servidor real. | 2 | 2 |
-| `aegis-server` | plano-de-control | Plano de control: ingesta de la flota, API de administración y consola SOC. | 14 | 8 |
+| `aegis-server` | plano-de-control | Plano de control: ingesta de la flota, API de administración y consola SOC. | 15 | 9 |
 
 ### Capas
 
@@ -218,7 +219,7 @@ Corre en cada endpoint, con privilegios.
 
 | Crate | Qué hace | Capa | Estado | Pruebas | `forbid(unsafe)` |
 |---|---|---|---|---:|:---:|
-| [`aegis-agent`](crates/aegis-agent) | Agente de deteccion de AegisCore: consumidor de telemetria, grafo de linaje y triaje | E/S | Producto | 90 | — |
+| [`aegis-agent`](crates/aegis-agent) | Agente de deteccion de AegisCore: consumidor de telemetria, grafo de linaje y triaje | E/S | Producto | 99 | — |
 | [`aegis-attest`](crates/aegis-attest) | Atestacion remota con raiz de confianza en el TPM 2.0 (FASE 49) | motores | Biblioteca | 27 | sí |
 | [`aegis-audit`](crates/aegis-audit) | Registro local de auditoria cifrado con rotacion automatica | plataforma | Biblioteca | 9 | sí |
 | [`aegis-behavior`](crates/aegis-behavior) | Motor conductual de AegisCore: grafo dirigido de procesos, tecnicas MITRE ATT&CK y puntuacion de riesgo | motores | Producto | 22 | sí |
@@ -239,9 +240,9 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-entidad`](crates/aegis-entidad) | Modelo de entidad unico y arbitro de veredictos para todos los subsistemas de deteccion | núcleo | Biblioteca | 61 | sí |
 | [`aegis-estado`](crates/aegis-estado) | AegisState: proveedor tipado del estado del endpoint, con coste declarado por tabla y motivo escrito cuando no se puede leer | motores | Biblioteca | 174 | sí |
 | [`aegis-evasion`](crates/aegis-evasion) | Deteccion de vaciado de procesos, inyeccion reflectiva y manipulacion de hooks | motores | Biblioteca | 22 | sí |
-| [`aegis-firehose`](crates/aegis-firehose) | Entrega sin perdida de auditoria hacia SIEM y SOAR: WAL en disco, Kafka y Syslog sobre TLS | E/S | Biblioteca | 32 | sí |
+| [`aegis-firehose`](crates/aegis-firehose) | Entrega sin perdida de auditoria hacia SIEM y SOAR: WAL en disco, Kafka y Syslog sobre TLS | E/S | Biblioteca | 35 | sí |
 | [`aegis-firmware`](crates/aegis-firmware) | Escaner de integridad de firmware: TPM 2.0 PCRs, event log TCG, Secure Boot y revocacion UEFI (DBX) | plataforma | Biblioteca | 24 | sí |
-| [`aegis-fleet`](crates/aegis-fleet) | Agente de gestion de flota sobre gRPC/mTLS con certificados de rotacion automatica y claves que nunca tocan el disco | E/S | Biblioteca | 52 | sí |
+| [`aegis-fleet`](crates/aegis-fleet) | Agente de gestion de flota sobre gRPC/mTLS con certificados de rotacion automatica y claves que nunca tocan el disco | E/S | Biblioteca | 67 | sí |
 | [`aegis-forensics`](crates/aegis-forensics) | Introspeccion de memoria en vivo y deteccion de exploits de corrupcion | motores | Biblioteca | 31 | — |
 | [`aegis-fwaudit`](crates/aegis-fwaudit) | AegisFirmwareAudit: auditoria estrictamente de solo lectura del firmware — tablas ACPI (WPBT) y ROM SPI (descriptor Intel, volumenes UEFI y ficheros FFS) contra implantes de plataforma | motores | Biblioteca | 156 | sí |
 | [`aegis-harden`](crates/aegis-harden) | Blindaje del agente: cifrado de cadenas y anti-depuracion | plataforma | Biblioteca | 12 | — |
@@ -264,7 +265,7 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-ml`](crates/aegis-ml) | Extraccion de atributos estaticos PE/ELF e inferencia local ONNX para AegisCore | motores | Biblioteca | 22 | sí |
 | [`aegis-motor`](crates/aegis-motor) | Contrato unico de motor de deteccion y arbitro del agente: presupuesto por motor, SinDatos con causa y un solo punto de entrada | motores | Producto | 17 | sí |
 | [`aegis-net`](crates/aegis-net) | IDS de red y filtro XDP de AegisCore | motores | Biblioteca | 54 | — |
-| [`aegis-parser`](crates/aegis-parser) | AegisQL: lexer, parser y validador del lenguaje de consulta de telemetria de AegisCore | núcleo | Biblioteca | 82 | sí |
+| [`aegis-parser`](crates/aegis-parser) | AegisQL: lexer, parser y validador del lenguaje de consulta de telemetria de AegisCore | núcleo | Biblioteca | 85 | sí |
 | [`aegis-patron`](crates/aegis-patron) | Motor de patrones propio (FASE 101): compatible con la sintaxis YARA, de coste acotado por tipo, tri-estado, determinista y sin retroceso. Sustituye a yara-x en el arbol del agente | núcleo | Biblioteca | 35 | sí |
 | [`aegis-pe`](crates/aegis-pe) | Lector de ejecutables de Windows (PE/COFF) y del huella Authenticode, endurecido contra entrada hostil | núcleo | Biblioteca | 42 | sí |
 | [`aegis-pqc`](crates/aegis-pqc) | Criptografia post-cuantica hibrida (ML-KEM-768 + ML-DSA-65) para el canal C2 y el firmado de actualizaciones | núcleo | Biblioteca | 39 | sí |
@@ -313,7 +314,7 @@ Corre en cada endpoint, con privilegios.
 | [`aegis-rango`](server/crates/aegis-rango) | AegisRange (FASE 99): emulacion de adversario benigna y reversible, solo en un rango declarado, con medida automatica y reproducible de la cobertura de deteccion del arbitro y huecos declarados por tecnica | motores | Biblioteca | 11 | sí |
 | [`aegis-ruleforge`](server/crates/aegis-ruleforge) | La fabrica de contenido: compila el corpus mundial de deteccion en artefactos firmados | motores | Biblioteca | 181 | sí |
 | [`aegis-scale`](server/crates/aegis-scale) | Plano de control para 100.000 agentes: particionado de flota, conexiones, base de datos y actualizacion progresiva | E/S | Biblioteca | 62 | sí |
-| [`aegis-server`](server/crates/aegis-server) | Plano de control de AegisCore: ingesta de flota gRPC/mTLS y API de administracion | E/S | Biblioteca | 146 | sí |
+| [`aegis-server`](server/crates/aegis-server) | Plano de control de AegisCore: ingesta de flota gRPC/mTLS y API de administracion | E/S | Biblioteca | 169 | sí |
 | [`aegis-share`](server/crates/aegis-share) | Plataforma STIX/TAXII de inteligencia con difusion controlada, federacion y procedencia reversible | núcleo | Biblioteca | 124 | sí |
 | [`aegis-tejido`](server/crates/aegis-tejido) | El tejido de AegisFabric: inventario de veredictos, traduccion a la escala unica y el circuito completo de extremo a extremo | E/S | Biblioteca | 38 | sí |
 | [`fleet-simulator`](server/crates/fleet-simulator) | Generador de carga: simula una flota de miles de agentes contra el plano de control | herramienta | Herramienta | 11 | sí |
