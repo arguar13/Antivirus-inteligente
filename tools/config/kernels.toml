@@ -140,10 +140,16 @@ objeto = "aegis_xdp"
 
 [[bpf]]
 objeto = "aegis_kintegrity"
-# Iteradores abiertos de tareas (kernel 6.4+ con BTF). Donde no existen el
+# Iteradores abiertos de tareas (kernel 6.7+ con BTF). Donde no existen el
 # resultado es «no aplica» con el motivo, no un fallo: dice que ESE kernel no
 # tiene la capacidad, no que el bytecode esté mal.
+#
+# Desde 6.7 no hay excusa: los programas son iteradores `iter.s/task` (tipo
+# tracing), y para ese tipo el kernel permite estas kfunc desde que existen.
+# Un «no aplica» en 6.7+ —por ejemplo, porque alguien vuelva a programas
+# `syscall`, que 6.8 rechaza y 6.10 admite— es un FALLO de la matriz.
 requiere_kfunc = ["bpf_iter_task_new", "bpf_task_from_pid"]
+obligatorio_desde = "6.7"
 
 [[bpf]]
 objeto = "aegis_sslsniff"

@@ -97,7 +97,7 @@ fi
 #
 # No basta con que HAYA BTF: tiene que traer los tipos que usan los programas.
 # `aegis_kintegrity.bpf.c` recorre la lista de tareas con los iteradores abiertos
-# (`bpf_iter_task_*`, kernel 6.4+), y hay kernels con BTF que NO los exponen
+# (`bpf_iter_task_*`, kernel 6.7+), y hay kernels con BTF que NO los exponen
 # porque se compilaron sin esa parte. El de WSL2 es uno: tiene BTF de 6 MB y seis
 # mil tipos, pero ni `struct bpf_iter_task` ni las kfunc.
 #

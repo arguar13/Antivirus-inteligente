@@ -25,6 +25,9 @@
 //! Las dos vistas de kernel se toman en **una sola invocacion** del programa
 //! eBPF, separadas por microsegundos: tomarlas en dos llamadas distintas deja
 //! una ventana de milisegundos que produce discrepancias falsas en cada barrido.
+//! Cada invocacion abarca un tramo de 65536 PID, y el espacio entero —hasta
+//! 4194304 con el `pid_max` de Ubuntu y Fedora— se cubre por tramos, con
+//! presupuesto y rotacion: ver [`tramos`].
 //!
 //! # Las tres trampas que hacen inutil a un detector asi
 //!
@@ -54,6 +57,7 @@
 pub mod abi;
 pub mod engine;
 pub mod error;
+pub mod tramos;
 pub mod verdict;
 pub mod views;
 

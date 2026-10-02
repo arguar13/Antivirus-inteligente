@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use crate::error::KiError;
+use crate::tramos::{self, Plan, Rotacion, Tramo};
 use crate::verdict::{self, Anomaly, AnomalyKind, Confirmation, VerdictConfig};
 use crate::views::{self, ViewSet, Vista};
 
@@ -14,10 +15,33 @@ use crate::views::{self, ViewSet, Vista};
 /// las manipulaciones que se quieren detectar. Montar un rootkit DKOM de verdad
 /// en la maquina de integracion no es una opcion.
 pub trait KernelViews {
-    /// Toma las dos vistas de kernel en una sola invocacion.
+    /// Toma las dos vistas de kernel sobre `[primero, ultimo]` entero.
     ///
-    /// Devuelve `(lista de tareas, espacio de PID, desbordes)`.
+    /// Devuelve `(lista de tareas, espacio de PID, desbordes)`. Un origen real
+    /// lo parte en tramos ([`crate::tramos::partir`]) y toma las dos vistas de
+    /// cada tramo en una sola invocacion.
     fn barrer(&mut self, primero: i32, ultimo: i32) -> Result<(Vista, Vista, u32), KiError>;
+
+    /// Toma las dos vistas de kernel de esos tramos, y solo de esos.
+    ///
+    /// Cada tramo es UNA invocacion del programa, que toma B y C juntas sobre
+    /// el tramo. El motor descarta lo que llegue de fuera de los tramos, asi
+    /// que un origen que no sepa filtrar —el de las pruebas— puede devolver de
+    /// mas sin falsear nada.
+    ///
+    /// Por defecto, un [`KernelViews::barrer`] por tramo, unidos.
+    fn barrer_tramos(&mut self, tramos: &[Tramo]) -> Result<(Vista, Vista, u32), KiError> {
+        let mut lista = Vista::new();
+        let mut pidmap = Vista::new();
+        let mut desbordes = 0u32;
+        for t in tramos {
+            let (l, p, d) = self.barrer(t.primero, t.ultimo)?;
+            lista.extend(l);
+            pidmap.extend(p);
+            desbordes = desbordes.saturating_add(d);
+        }
+        Ok((lista, pidmap, desbordes))
+    }
 
     /// Vuelve a mirar UN solo TID por los dos caminos.
     ///
@@ -32,10 +56,19 @@ pub struct KiConfig {
     pub primero: i32,
     /// Ultimo PID del barrido, inclusive.
     ///
-    /// Por defecto se lee de `/proc/sys/kernel/pid_max`: barrer por encima
-    /// gasta iteraciones en un rango que el kernel no puede asignar, y barrer
-    /// por debajo deja un hueco donde esconderse.
+    /// Por defecto `pid_max - 1`, con `pid_max` leido de
+    /// `/proc/sys/kernel/pid_max`, que es el limite superior EXCLUSIVO del
+    /// asignador: barrer por encima gasta iteraciones en un rango que el kernel
+    /// no puede asignar, y barrer por debajo deja un hueco donde esconderse.
     pub ultimo: i32,
+    /// Tramos de [`crate::abi::MAX_BARRIDO`] PID que sondea, como mucho, un
+    /// barrido; ver [`crate::tramos`].
+    ///
+    /// Con `pid_max` = 4194304 el rango son 64 tramos: el presupuesto por
+    /// defecto ([`tramos::PRESUPUESTO_TRAMOS`]) sondea 16 por barrido y da la
+    /// vuelta entera cada 6. Lo que un barrido no sondea se cuenta en
+    /// [`ScanReport::pid_sin_sondear`].
+    pub presupuesto_tramos: usize,
     /// Reglas de comparacion.
     pub verdict: VerdictConfig,
 }
@@ -44,7 +77,8 @@ impl Default for KiConfig {
     fn default() -> Self {
         Self {
             primero: 1,
-            ultimo: pid_max(),
+            ultimo: pid_max() - 1,
+            presupuesto_tramos: tramos::PRESUPUESTO_TRAMOS,
             verdict: VerdictConfig::default(),
         }
     }
@@ -112,6 +146,19 @@ pub struct ScanReport {
     pub espacios_de_pid_comparables: bool,
     /// Entradas que no cupieron en los mapas del kernel.
     pub desbordes: u32,
+    /// PID que este barrido sondeo en la vista C.
+    pub pid_sondeados: u64,
+    /// PID del rango configurado que este barrido NO sondeo.
+    ///
+    /// La vista C se toma por tramos y con presupuesto ([`crate::tramos`]):
+    /// con `pid_max` = 4194304 un barrido no los sondea todos, y lo que queda
+    /// fuera se cuenta aqui en vez de pasar por mirado. Fuera de lo sondeado
+    /// no se compara ninguna de las tres vistas; se mira en los barridos
+    /// siguientes, como mucho dentro de [`ScanReport::barridos_por_vuelta`].
+    pub pid_sin_sondear: u64,
+    /// Barridos que tarda, como mucho, en sondearse el rango entero: 1 si cada
+    /// barrido lo cubre todo, 0 si el informe no dice nada de eso.
+    pub barridos_por_vuelta: u32,
 }
 
 impl ScanReport {
@@ -131,11 +178,17 @@ impl ScanReport {
     /// autoriza si ademas la comparacion era posible —los tres censos numeran
     /// igual— y estaba completa —nada se quedo fuera de los mapas del kernel—.
     /// Lo que no se pudo mirar se cuenta como no mirado, nunca como limpio.
+    ///
+    /// Tampoco la autoriza un barrido que dejo PID sin sondear: con un
+    /// `pid_max` mayor que el presupuesto, ningun barrido suelto lo hace, y
+    /// la cobertura del rango entero llega por rotacion en
+    /// [`ScanReport::barridos_por_vuelta`] barridos.
     pub fn concluye_limpio(&self) -> bool {
         self.anomalies.is_empty()
             && self.pendientes.is_empty()
             && self.espacios_de_pid_comparables
             && self.desbordes == 0
+            && self.pid_sin_sondear == 0
     }
 }
 
@@ -152,6 +205,11 @@ pub struct KernelIntegrity<K: KernelViews> {
     /// arrastrar el contador entre clases distintas convertiria dos sospechas
     /// debiles en una fuerte.
     rachas: HashMap<(u32, AnomalyKind), u32>,
+    /// Que tramos del espacio de PID se sondearon, y cuando.
+    rotacion: Rotacion,
+    /// `ns_last_pid` en el barrido anterior: de ahi al de ahora van los PID
+    /// nacidos entre barridos.
+    cursor: Option<i32>,
 }
 
 impl<K: KernelViews + std::fmt::Debug> std::fmt::Debug for KernelIntegrity<K> {
@@ -172,6 +230,8 @@ impl<K: KernelViews> KernelIntegrity<K> {
             config,
             procfs_confirm: Box::new(views::leer_procfs),
             rachas: HashMap::new(),
+            rotacion: Rotacion::default(),
+            cursor: None,
         }
     }
 
@@ -186,6 +246,8 @@ impl<K: KernelViews> KernelIntegrity<K> {
             config,
             procfs_confirm: Box::new(procfs_confirm),
             rachas: HashMap::new(),
+            rotacion: Rotacion::default(),
+            cursor: None,
         }
     }
 
@@ -211,22 +273,65 @@ impl<K: KernelViews> KernelIntegrity<K> {
 
     /// Toma las tres vistas y emite el veredicto.
     pub fn scan(&mut self) -> Result<ScanReport, KiError> {
-        // El orden importa: primero las dos vistas de kernel, que van juntas en
-        // una invocacion, y `/proc` inmediatamente despues. Al reves, la vista
-        // de usuario seria la mas vieja de las tres y toda tarea nacida en el
-        // intervalo pareceria oculta en userland.
-        let (task_list, pid_space, desbordes) = self
-            .kernel
-            .barrer(self.config.primero, self.config.ultimo)?;
-        let procfs = views::leer_procfs();
+        self.scan_con(views::leer_procfs)
+    }
 
+    /// [`KernelIntegrity::scan`] con la lectura de `/proc` a medida.
+    ///
+    /// Existe para las pruebas: con un kernel de mentira la vista A tiene que
+    /// ser de mentira tambien, o cada tarea real de la maquina seria una
+    /// entrada «solo en /proc». Se recibe como funcion, y no como vista ya
+    /// tomada, para que se lea donde se lee la de verdad: justo despues de las
+    /// vistas de kernel.
+    pub fn scan_con(&mut self, leer: impl FnOnce() -> Vista) -> Result<ScanReport, KiError> {
+        let plan = self.planificar();
+        // El orden importa: primero las dos vistas de kernel, que van juntas
+        // en una invocacion por tramo, y `/proc` inmediatamente despues. Al
+        // reves, la vista de usuario seria la mas vieja de las tres y toda
+        // tarea nacida en el intervalo pareceria oculta en userland.
+        let (task_list, pid_space, desbordes) = self.kernel.barrer_tramos(&plan.tramos)?;
+        let procfs = leer();
+
+        // Solo se compara lo sondeado. Una tarea de `/proc` cuyo tramo no se
+        // sondeo no esta en C porque nadie la busco, no porque falte; y lo que
+        // un origen devuelva de mas, fuera de los tramos, tampoco entra.
         let vistas = ViewSet {
-            procfs,
-            task_list,
-            pid_space,
+            procfs: recortar(procfs, &plan),
+            task_list: recortar(task_list, &plan),
+            pid_space: recortar(pid_space, &plan),
             desbordes,
         };
-        self.evaluar(&vistas)
+        self.evaluar_plan(&vistas, &plan)
+    }
+
+    /// Los tramos de este barrido: primero los relevantes, luego la rotacion.
+    fn planificar(&mut self) -> Plan {
+        let mut relevantes: Vec<u32> = Vec::new();
+        // La sonda primero: sin su tramo no se puede comprobar la precondicion.
+        if let Ok(yo) = u32::try_from(tid_propio()) {
+            relevantes.push(yo);
+        }
+        // Las sospechas abiertas: confirmarlas exige barridos CONSECUTIVOS.
+        let mut abiertas: Vec<u32> = self.rachas.keys().map(|(tid, _)| *tid).collect();
+        abiertas.sort_unstable();
+        relevantes.extend(abiertas);
+        // Lo nacido desde el barrido anterior: un proceso recien escondido.
+        let cursor = ultimo_pid_asignado();
+        if let Some(ahora) = cursor {
+            relevantes.extend(tramos::nacidos(
+                self.cursor,
+                ahora,
+                self.config.primero,
+                self.config.ultimo,
+            ));
+            self.cursor = cursor;
+        }
+        self.rotacion.planificar(
+            self.config.primero,
+            self.config.ultimo,
+            self.config.presupuesto_tramos,
+            &relevantes,
+        )
     }
 
     /// Relee `/proc` por el canal de listado, para la confirmacion.
@@ -254,9 +359,8 @@ impl<K: KernelViews> KernelIntegrity<K> {
     ///
     /// No se puede concluir nada en ninguno de los dos casos, que es justo lo
     /// que el informe pasa a decir.
-    fn vistas_comparables(&self, vistas: &ViewSet) -> bool {
-        // SAFETY: `gettid` no recibe argumentos ni toca memoria del proceso.
-        let yo = unsafe { libc::gettid() };
+    fn vistas_comparables(&self, vistas: &ViewSet, plan: &Plan) -> bool {
+        let yo = tid_propio();
         // Fuera del rango barrido su ausencia no prueba nada: no se le pidio al
         // kernel que lo trajera. Sin sonda no hay comprobacion, y sin
         // comprobacion la precondicion no se da por buena.
@@ -264,6 +368,11 @@ impl<K: KernelViews> KernelIntegrity<K> {
             return false;
         }
         let yo = yo as u32;
+        // Lo mismo si su tramo no se sondeo. La planificacion lo pone siempre
+        // primero, asi que aqui solo se llega con vistas tomadas a mano.
+        if !plan.cubre(yo) {
+            return false;
+        }
         let Some(suyo) = vistas
             .task_list
             .get(&yo)
@@ -291,13 +400,25 @@ impl<K: KernelViews> KernelIntegrity<K> {
     ///
     /// Publico para poder ejercitar el motor con vistas construidas a mano que
     /// reproducen manipulaciones concretas.
+    ///
+    /// Las vistas se toman por completas: el rango configurado entero,
+    /// sondeado.
     pub fn evaluar(&mut self, vistas: &ViewSet) -> Result<ScanReport, KiError> {
+        let plan = Plan::completo(self.config.primero, self.config.ultimo);
+        self.evaluar_plan(vistas, &plan)
+    }
+
+    /// Evalua unas vistas tomadas segun `plan`.
+    fn evaluar_plan(&mut self, vistas: &ViewSet, plan: &Plan) -> Result<ScanReport, KiError> {
         let mut informe = ScanReport {
             en_lista: vistas.task_list.len(),
             en_pidmap: vistas.pid_space.len(),
             en_procfs: vistas.procfs.len(),
             desbordes: vistas.desbordes,
-            espacios_de_pid_comparables: self.vistas_comparables(vistas),
+            espacios_de_pid_comparables: self.vistas_comparables(vistas, plan),
+            pid_sondeados: plan.sondeados,
+            pid_sin_sondear: plan.sin_sondear,
+            barridos_por_vuelta: plan.barridos_por_vuelta,
             ..Default::default()
         };
 
@@ -362,13 +483,40 @@ impl<K: KernelViews> KernelIntegrity<K> {
         // Las rachas de lo que ya no aparece se olvidan: exigir N
         // confirmaciones CONSECUTIVAS es lo que impide que una carrera
         // repetida a lo largo de horas acabe sumando el umbral.
-        self.rachas.retain(|k, _| vivas.contains(k));
+        // Pero solo se olvida lo que se MIRO: una sospecha cuyo tramo este
+        // barrido no sondeo no ha desaparecido, no se ha mirado.
+        self.rachas
+            .retain(|k, _| vivas.contains(k) || !plan.cubre(k.0));
 
         informe
             .anomalies
             .sort_by(|a, b| b.severity.cmp(&a.severity).then(a.tid.cmp(&b.tid)));
         Ok(informe)
     }
+}
+
+/// Lo de una vista que cae en los tramos de un plan.
+fn recortar(v: Vista, plan: &Plan) -> Vista {
+    v.into_iter().filter(|(tid, _)| plan.cubre(*tid)).collect()
+}
+
+/// El TID del hilo que llama: la sonda de la precondicion.
+fn tid_propio() -> i32 {
+    // SAFETY: `gettid` no recibe argumentos ni toca memoria del proceso.
+    unsafe { libc::gettid() }
+}
+
+/// El ultimo PID que asigno el kernel en este espacio de nombres
+/// (`/proc/sys/kernel/ns_last_pid`), si se puede leer.
+///
+/// Solo ordena que tramos se sondean antes ([`crate::tramos::nacidos`]): la
+/// cota de la rotacion no depende de el, asi que un valor falso retrasa una
+/// deteccion pero no la evita.
+fn ultimo_pid_asignado() -> Option<i32> {
+    std::fs::read_to_string("/proc/sys/kernel/ns_last_pid")
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .filter(|v| *v >= 0)
 }
 
 /// Indica si `/proc/<tid>` es accesible por ACCESO DIRECTO.

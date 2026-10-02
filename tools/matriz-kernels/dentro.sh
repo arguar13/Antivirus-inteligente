@@ -360,16 +360,18 @@ nucleo_en_vivo() {
     falsos="$(log | grep -c '^\[SEÑAL\] .* nucleo ')"
     linea "AEGIS-MEDIDA|aegis-kintegrity|falsos_en_reposo|${falsos}|veredictos"
 
-    # Un kernel puede declarar los kfuncs y aun asi no dejarlos usar desde un
-    # programa de tipo `syscall` (Linux 6.8): el agente lo descubre al cargar y
-    # lo publica como motivo de «sin datos». Eso es una degradacion declarada
-    # en ejecucion, y se dice como tal.
+    # Si la sonda dio el motor por disponible (kfuncs declarados y privilegios
+    # de un programa tracing) y aun asi el kernel rechaza el verificador, la
+    # sonda prometio de mas: es un FALLO, no una degradacion. Asi se vio en
+    # Ubuntu 24.04 (6.8) cuando los programas eran de tipo `syscall`; ahora son
+    # iteradores `iter.s/task` (tipo tracing), para los que el kernel permite
+    # estas kfunc desde que existen, y esta rama no deberia volver a verse.
     rechazo="$(log | grep 'motor nucleo:' | grep -o 'ultimo_sin_datos=«no se cargo el verificador[^»]*' | tail -n 1)"
     if [ -n "$rechazo" ]; then
         systemctl stop aegis-nucleo
         systemctl reset-failed aegis-nucleo > /dev/null 2>&1
         rm -rf /run/aegiscore
-        linea "AEGIS-MATRIZ|prueba|$id|pasa|no aplica, declarado en ejecucion: $(printf '%s' "${rechazo#ultimo_sin_datos=«}" | cut -c1-200)"
+        linea "AEGIS-MATRIZ|prueba|$id|falla|la sonda prometio el motor y el kernel rechazo el verificador: $(printf '%s' "${rechazo#ultimo_sin_datos=«}" | cut -c1-200)"
         return
     fi
 

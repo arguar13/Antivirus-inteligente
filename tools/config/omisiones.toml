@@ -137,3 +137,24 @@ fichero = "crates/aegis-kintegrity/tests/crossview.rs"
 prueba = "el_kernel_de_verdad_confirma_una_ocultacion_de_userland_inyectada"
 motivo = "el kernel del runner (WSL 6.6) no tiene los kfuncs de tareas; la matriz lo ejerce en nucleo-en-vivo"
 fase = "FASE 2 del MP-16: verificador con iteradores (6.7+) y runner con kernel que los traiga"
+
+[[omision]]
+requisito = "kfuncs-tareas"
+fichero = "crates/aegis-kintegrity/tests/crossview.rs"
+prueba = "una_sola_lectura_toma_las_dos_vistas_y_la_confirmacion_ve_este_hilo"
+motivo = "el kernel del runner (WSL 6.6) no tiene los kfuncs de tareas; la matriz lo ejerce en nucleo-en-vivo"
+fase = "FASE 2 del MP-16: verificador con iteradores (6.7+) y runner con kernel que los traiga"
+
+[[omision]]
+requisito = "kfuncs-tareas"
+fichero = "crates/aegis-kintegrity/tests/crossview.rs"
+prueba = "un_hilo_con_pid_por_encima_de_65536_entra_en_la_vista_c"
+motivo = "el kernel del runner (WSL 6.6) no tiene los kfuncs de tareas; la matriz lo ejerce en nucleo-en-vivo"
+fase = "FASE 2 del MP-16: verificador con iteradores (6.7+) y runner con kernel que los traiga"
+
+[[omision]]
+requisito = "entorno"
+fichero = "crates/aegis-kintegrity/tests/crossview.rs"
+prueba = "un_hilo_con_pid_por_encima_de_65536_entra_en_la_vista_c"
+motivo = "con pid_max <= 75536 no hay PID alto que probar, y si otro proceso se lleva el hueco el asignador da la vuelta y el hilo nace bajo"
+fase = "FASE 2 del MP-16: con un runner de kernel 6.7+, fijar pid_max = 4194304 en su preparacion (deploy/ci/instalar-runner.sh) y reintentar el nacimiento alto en vez de omitir"

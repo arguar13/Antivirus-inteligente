@@ -53,6 +53,12 @@ pub struct Omitido {
 /// Longitud maxima del ultimo motivo de «sin datos» que se guarda por motor.
 pub const MAX_MOTIVO: usize = 240;
 
+/// Longitud maxima de lo que un motor dice de si mismo ([`Motor::detalle`]).
+///
+/// Va entero en su linea del informe periodico y de `aegisctl status`; el tope
+/// solo existe para que un motor no pueda inflar esas lineas sin limite.
+pub const MAX_DETALLE: usize = 512;
+
 /// Lo que se publica de cada motor.
 #[derive(Debug, Clone)]
 pub struct EstadoMotor {
@@ -73,6 +79,10 @@ pub struct EstadoMotor {
     /// que tiene los kfuncs no dice si fallo la carga, el barrido o la
     /// numeracion (FASE 2 del MP-16). Acotado a [`MAX_MOTIVO`] bytes.
     pub ultimo_sin_datos: Option<String>,
+    /// Lo que el motor dice de si mismo ([`Motor::detalle`]) en el ultimo
+    /// mantenimiento: por ejemplo, cuanto del espacio que vigila llego a
+    /// mirar. Acotado a [`MAX_DETALLE`] bytes.
+    pub detalle: Option<String>,
     /// Evaluaciones que se pasaron de su tiempo.
     pub excesos: u64,
     /// Veces que se le suspendio.
@@ -105,15 +115,7 @@ impl<E> Registrado<E> {
 
     fn contar_sin_datos(&mut self, causa: &Causa) {
         *self.estado.sin_datos.entry(causa.clave()).or_insert(0) += 1;
-        let mut m = causa.to_string();
-        if m.len() > MAX_MOTIVO {
-            let mut corte = MAX_MOTIVO;
-            while !m.is_char_boundary(corte) {
-                corte -= 1;
-            }
-            m.truncate(corte);
-        }
-        self.estado.ultimo_sin_datos = Some(m);
+        self.estado.ultimo_sin_datos = Some(acotar(causa.to_string(), MAX_MOTIVO));
     }
 
     fn mudo(&self, entidad: &Eid, causa: &Causa, cuando_ns: u64) -> Senal {
@@ -127,6 +129,18 @@ impl<E> Registrado<E> {
             cuando_ns,
         )
     }
+}
+
+/// `texto` cortado a `max` bytes como mucho, sin partir un caracter.
+fn acotar(mut texto: String, max: usize) -> String {
+    if texto.len() > max {
+        let mut corte = max;
+        while !texto.is_char_boundary(corte) {
+            corte -= 1;
+        }
+        texto.truncate(corte);
+    }
+    texto
 }
 
 struct Expediente {
@@ -195,6 +209,7 @@ impl<E: Evento> Arbitro<E> {
             senales: 0,
             sin_datos: BTreeMap::new(),
             ultimo_sin_datos: None,
+            detalle: None,
             excesos: 0,
             suspensiones: 0,
             suspendido: false,
@@ -409,6 +424,9 @@ impl<E: Evento> Arbitro<E> {
                 entregas.push((r.ficha.nombre, e, d));
             }
             r.estado.memoria = r.motor.memoria();
+            // Despues de su mantenimiento: lo que diga ya cuenta lo que acaba
+            // de entregar.
+            r.estado.detalle = r.motor.detalle().map(|d| acotar(d, MAX_DETALLE));
         }
         let mut veredictos = Vec::new();
         for (motor, e, d) in entregas {
@@ -769,6 +787,47 @@ mod pruebas {
         a.procesar(&ev("m", Some(Juicio::Limpio)));
         a.mantener(100);
         assert_eq!(a.expedientes(), 0);
+    }
+
+    #[test]
+    fn lo_que_un_motor_dice_de_si_mismo_se_publica_acotado() {
+        struct Habla(String);
+        impl Motor<Ev> for Habla {
+            fn ficha(&self) -> Ficha {
+                eco("habla", Firma::Conductual).ficha()
+            }
+            fn evaluar(&mut self, _: &Ev, _: &Plazo) -> Dictamen {
+                Dictamen::NoAplica
+            }
+            fn detalle(&self) -> Option<String> {
+                Some(self.0.clone())
+            }
+        }
+        let mut a = arbitro();
+        a.registrar(Box::new(eco("callado", Firma::MemHunter)), &TodoVale)
+            .unwrap();
+        // Una «ñ» (dos bytes) tras un byte suelto: el tope cae, segun su
+        // paridad, en medio de una, y el corte no puede partirla.
+        let largo = format!("x{}", "ñ".repeat(MAX_DETALLE));
+        a.registrar(Box::new(Habla(largo.clone())), &TodoVale)
+            .unwrap();
+        assert!(
+            a.estado().iter().all(|e| e.detalle.is_none()),
+            "antes del primer mantenimiento no hay nada que publicar"
+        );
+        a.mantener(1);
+        let e = a.estado();
+        assert_eq!(
+            e[0].detalle, None,
+            "un motor que no dice nada no publica nada"
+        );
+        let d = e[1].detalle.as_deref().expect("el motor que habla");
+        let corte = (0..=MAX_DETALLE)
+            .rev()
+            .find(|&i| largo.is_char_boundary(i))
+            .unwrap_or(0);
+        assert_eq!(d, &largo[..corte]);
+        assert!(d.len() <= MAX_DETALLE);
     }
 
     #[test]

@@ -323,6 +323,12 @@ pub struct ObjetoBpf {
     /// kfuncs que exige; si el kernel no las tiene es `no-aplica`, no fallo.
     #[serde(default)]
     pub requiere_kfunc: Vec<String>,
+    /// Version de kernel (`6.7`) desde la que `no-aplica` deja de valer y el
+    /// objeto TIENE que pasar. Sin ella, un cambio que pierde kernels que si
+    /// tienen las kfunc —otro tipo de programa, por ejemplo— se leeria como
+    /// una capacidad ausente y no como el defecto que es.
+    #[serde(default)]
+    pub obligatorio_desde: Option<String>,
 }
 
 /// Una prueba de extremo a extremo.

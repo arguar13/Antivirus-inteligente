@@ -658,7 +658,12 @@ fn el_kernel_de_verdad_no_produce_falsos_positivos() {
         }
         Err(e) => panic!("no se pudo cargar el verificador: {e}"),
     };
-    let mut m = KernelIntegrity::new(vistas, KiConfig::default());
+    // El rango entero en cada vuelta: 64 tramos con pid_max = 4194304.
+    let todo = KiConfig {
+        presupuesto_tramos: usize::MAX,
+        ..KiConfig::default()
+    };
+    let mut m = KernelIntegrity::new(vistas, todo);
 
     // Tres vueltas: si hubiera un falso positivo por carrera, se necesitarian
     // dos vueltas para "confirmarlo"; tres da margen de sobra para que aflore.
@@ -786,6 +791,348 @@ fn el_kernel_de_verdad_confirma_una_ocultacion_de_userland_inyectada() {
          detectarse como ocultacion de userland: {:?}",
         r.anomalies
     );
+}
+
+#[cfg(feature = "bpf")]
+#[test]
+fn una_sola_lectura_toma_las_dos_vistas_y_la_confirmacion_ve_este_hilo() {
+    // El transporte por iterador, contra el kernel real. Los programas son
+    // iteradores anclados a este proceso: cada barrido es UNA lectura que
+    // ejecuta el programa UNA vez y trae las dos vistas. Corre desde el hilo de
+    // la prueba, que no es el lider del proceso: el ancla es el proceso, no el
+    // hilo que carga.
+    if !aegis_kintegrity::soportado() {
+        aegis_prueba::omitir(
+            "sin BTF no hay verificacion cruzada",
+            aegis_prueba::Requisito::Btf,
+        );
+        return;
+    }
+    let mut v = match aegis_kintegrity::BpfViews::cargar() {
+        Ok(v) => v,
+        Err(e) if e.is_unsupported() => {
+            aegis_prueba::omitir(
+                &format!("el kernel no admite el verificador cruzado: {e}"),
+                aegis_prueba::Requisito::KfuncsTareas,
+            );
+            return;
+        }
+        Err(e) => panic!("no se pudo cargar el verificador: {e}"),
+    };
+    let yo = mi_tid();
+
+    // Dos barridos seguidos: el segundo trae su generacion y no hereda nada
+    // del primero.
+    for vuelta in 0..2 {
+        let (lista, pidmap, desbordes) = v.barrer(1, pid_max()).expect("barrido real");
+        assert_eq!(desbordes, 0, "vuelta {vuelta}");
+        let b = lista.get(&yo).cloned();
+        assert!(
+            b.is_some(),
+            "vuelta {vuelta}: el hilo {yo} no esta en la lista de tareas"
+        );
+        // El sondeo de PID cubre `pid_max` entero, por tramos: este hilo esta
+        // en C tenga el PID que tenga.
+        let c = pidmap.get(&yo).cloned();
+        assert!(
+            c.is_some(),
+            "vuelta {vuelta}: el hilo {yo} no esta en el espacio de PID"
+        );
+        assert_eq!(
+            b.as_ref().map(|r| r.start_boottime),
+            c.map(|r| r.start_boottime)
+        );
+    }
+
+    let (en_lista, en_pidmap, arranque) = v.confirmar(yo).expect("confirmacion real");
+    assert!(
+        en_lista && en_pidmap,
+        "el hilo {yo}, vivo, tiene que verse por los dos caminos"
+    );
+    assert!(arranque.is_some());
+    // Por encima de PID_MAX_LIMIT (2^22) no puede existir nadie.
+    let nadie = v.confirmar(0x3FFF_FFFF).expect("tid imposible");
+    assert_eq!(nadie, (false, false, None));
+}
+
+#[cfg(feature = "bpf")]
+#[test]
+fn un_hilo_con_pid_por_encima_de_65536_entra_en_la_vista_c() {
+    // Ubuntu y Fedora fijan pid_max = 4194304. Se sube el cursor del
+    // asignador (`ns_last_pid`) para que el siguiente hilo nazca cerca del
+    // techo, en el ultimo tramo, y se exige verlo en la vista C. Con el
+    // barrido antiguo, de una sola invocacion de 65536 PID, esta prueba cae.
+    use aegis_kintegrity::abi::{ERR_ARGS, MAX_BARRIDO};
+    use aegis_kintegrity::tramos::{partir, Tramo};
+
+    if !aegis_kintegrity::soportado() {
+        aegis_prueba::omitir(
+            "sin BTF no hay verificacion cruzada",
+            aegis_prueba::Requisito::Btf,
+        );
+        return;
+    }
+    // Primero la carga: en un kernel sin los kfuncs (el runner, WSL 6.6) la
+    // omision es la de siempre, y no una del entorno.
+    let mut v = match aegis_kintegrity::BpfViews::cargar() {
+        Ok(v) => v,
+        Err(e) if e.is_unsupported() => {
+            aegis_prueba::omitir(
+                &format!("el kernel no admite el verificador cruzado: {e}"),
+                aegis_prueba::Requisito::KfuncsTareas,
+            );
+            return;
+        }
+        Err(e) => panic!("no se pudo cargar el verificador: {e}"),
+    };
+    let max = pid_max();
+    let objetivo = max - 10_000;
+    if objetivo <= MAX_BARRIDO as i32 + 10_000 {
+        aegis_prueba::omitir(
+            &format!("pid_max = {max}: no hay PID por encima de 65536 que probar"),
+            aegis_prueba::Requisito::Entorno,
+        );
+        return;
+    }
+    // El siguiente PID que se asigne sera `objetivo`, o el primero libre
+    // despues. Mover el cursor exige CAP_SYS_ADMIN o CAP_CHECKPOINT_RESTORE,
+    // y no se restaura: el asignador es ciclico y habria llegado ahi solo.
+    let cursor = (objetivo - 1).to_string();
+    if let Err(e) = std::fs::write("/proc/sys/kernel/ns_last_pid", cursor) {
+        aegis_prueba::omitir(
+            &format!("no se pudo mover el cursor de PID (ns_last_pid): {e}"),
+            aegis_prueba::Requisito::Root,
+        );
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (parar, paro) = std::sync::mpsc::channel::<()>();
+    let hilo = std::thread::spawn(move || {
+        let _ = tx.send(mi_tid());
+        let _ = paro.recv();
+    });
+    let alto = rx.recv().expect("el hilo dice su TID");
+    if alto <= MAX_BARRIDO {
+        // Otro proceso se llevo el hueco y el asignador dio la vuelta.
+        drop(parar);
+        let _ = hilo.join();
+        aegis_prueba::omitir(
+            &format!("el asignador dio la vuelta: el hilo nacio con el PID {alto}"),
+            aegis_prueba::Requisito::Entorno,
+        );
+        return;
+    }
+
+    let (lista, pidmap, desbordes) = v.barrer(1, max - 1).expect("barrido real");
+    assert_eq!(desbordes, 0);
+    let b = lista.get(&alto).cloned();
+    let c = pidmap.get(&alto).cloned();
+    assert!(b.is_some(), "el hilo {alto} no esta en B");
+    assert!(
+        c.is_some(),
+        "el hilo {alto}, por encima de {MAX_BARRIDO}, no entro en la vista C: \
+         el sondeo del espacio de PID no cubre pid_max ({max})"
+    );
+    assert_eq!(b.map(|r| r.start_boottime), c.map(|r| r.start_boottime));
+
+    // Un tramo suelto trae B y C de ese tramo, juntas, y nada de fuera.
+    let suyo = partir(1, max - 1)
+        .into_iter()
+        .find(|t| t.contiene(alto))
+        .expect("el PID esta en algun tramo");
+    let (l1, p1, _) = v.barrer_tramos(&[suyo]).expect("un tramo");
+    assert!(l1.contains_key(&alto) && p1.contains_key(&alto));
+    assert!(
+        l1.keys().chain(p1.keys()).all(|t| suyo.contiene(*t)),
+        "un tramo no trae tareas de fuera de el"
+    );
+    // Un tramo mayor que MAX_BARRIDO se rechaza: nunca se recorta en silencio.
+    let ancho = Tramo {
+        primero: 1,
+        ultimo: MAX_BARRIDO as i32 + 1,
+    };
+    let e = v.barrer_tramos(&[ancho]).expect_err("ancho");
+    assert!(matches!(e, KiError::Programa(ERR_ARGS)), "{e}");
+
+    drop(parar);
+    let _ = hilo.join();
+}
+
+// ---------------------------------------------------------------------------
+// La vista C cubre `pid_max` entero: tramos, presupuesto y rotacion
+// ---------------------------------------------------------------------------
+//
+// Ubuntu y Fedora fijan `pid_max` = 4194304. Antes la vista C sondeaba solo
+// los primeros 65536 PID —una invocacion— y lo de arriba quedaba fuera sin
+// que el informe lo dijera: un DKOM con un PID alto no estaba en ninguna de
+// las tres vistas y el barrido salia limpio.
+
+/// El ultimo PID asignable en Ubuntu y Fedora (`pid_max` es exclusivo).
+const ULTIMO_64: i32 = 4_194_303;
+
+/// Kernel de mentira que responde como el programa eBPF por tramos: cada
+/// `barrer` trae solo lo que cae en `[primero, ultimo]` y rechaza un tramo de
+/// mas de `MAX_BARRIDO` PID con `ERR_ARGS`, igual que el programa. Apunta los
+/// tramos que se le piden.
+#[derive(Default)]
+struct KernelPorTramos {
+    lista: Vista,
+    pidmap: Vista,
+    pedidos: Vec<(i32, i32)>,
+}
+
+impl KernelViews for KernelPorTramos {
+    fn barrer(&mut self, primero: i32, ultimo: i32) -> Result<(Vista, Vista, u32), KiError> {
+        let ancho = i64::from(ultimo) - i64::from(primero) + 1;
+        let max = i64::from(aegis_kintegrity::abi::MAX_BARRIDO);
+        if primero < 0 || !(1..=max).contains(&ancho) {
+            return Err(KiError::Programa(aegis_kintegrity::abi::ERR_ARGS));
+        }
+        self.pedidos.push((primero, ultimo));
+        let rango = primero as u32..=ultimo as u32;
+        let dentro = |v: &Vista| -> Vista {
+            v.range(rango.clone())
+                .map(|(k, r)| (*k, r.clone()))
+                .collect()
+        };
+        Ok((dentro(&self.lista), dentro(&self.pidmap), 0))
+    }
+    fn confirmar(&mut self, tid: u32) -> Result<(bool, bool, Option<u64>), KiError> {
+        let en_lista = self.lista.contains_key(&tid);
+        let en_pid = self.pidmap.contains_key(&tid);
+        let start = self
+            .pidmap
+            .get(&tid)
+            .or_else(|| self.lista.get(&tid))
+            .and_then(|t| t.start_boottime);
+        Ok((en_lista, en_pid, start))
+    }
+}
+
+/// Un sistema coherente con la sonda (este hilo) y una tarea visible por
+/// encima de 65536, las dos en las tres vistas.
+fn sistema_con_pid_alto(visible: u32) -> (Vista, Vista, Vista) {
+    let (mut procfs, mut lista, mut pidmap) = sistema_limpio();
+    let yo = mi_tid();
+    lista.insert(yo, rec_yo());
+    pidmap.insert(yo, rec_yo());
+    procfs.insert(yo, rec_proc(yo, yo));
+    lista.insert(visible, rec(visible, visible, 500));
+    pidmap.insert(visible, rec(visible, visible, 500));
+    procfs.insert(visible, rec_proc(visible, visible));
+    (procfs, lista, pidmap)
+}
+
+#[test]
+fn un_dkom_por_encima_de_65536_entra_en_la_vista_c_y_se_acusa() {
+    // Sin kernel: el kernel de mentira se comporta como el programa por
+    // tramos, y el motor tiene que acabar sondeando el tramo del PID alto y
+    // confirmarlo en barridos consecutivos. Con el barrido de una sola
+    // invocacion, el PID 3000000 no entraria nunca en la vista C (y pedir el
+    // rango entero de una vez lo rechazaria el kernel con ERR_ARGS).
+    const VISIBLE: u32 = 70_000;
+    const ALTO: u32 = 3_000_000;
+    let (procfs, lista, mut pidmap) = sistema_con_pid_alto(VISIBLE);
+    // Desenlazado de la lista de tareas y fuera de /proc: solo C lo ve.
+    pidmap.insert(ALTO, rec(ALTO, ALTO, 600));
+    let k = KernelPorTramos {
+        lista,
+        pidmap,
+        ..Default::default()
+    };
+    let cfg = KiConfig {
+        primero: 1,
+        ultimo: ULTIMO_64,
+        ..KiConfig::default()
+    };
+    let mut m = KernelIntegrity::con_relectura(k, cfg, Vista::new);
+
+    let mut vuelta = 0u32;
+    loop {
+        vuelta += 1;
+        let p = procfs.clone();
+        let r = m.scan_con(move || p).expect("barrido por tramos");
+        assert!(
+            r.espacios_de_pid_comparables,
+            "la sonda va siempre en el plan"
+        );
+        assert_eq!(r.pid_sondeados + r.pid_sin_sondear, 4_194_303);
+        assert!(
+            r.barridos_por_vuelta > 1,
+            "64 tramos no caben en el presupuesto por defecto"
+        );
+        assert!(
+            !r.concluye_limpio(),
+            "un barrido parcial no se declara limpio"
+        );
+        let otros: Vec<_> = r
+            .anomalies
+            .iter()
+            .chain(r.pendientes.iter())
+            .filter(|a| a.tid != ALTO)
+            .collect();
+        assert!(
+            otros.is_empty(),
+            "solo el PID {ALTO} esta escondido: {otros:?}"
+        );
+        let acusado = r
+            .anomalies
+            .iter()
+            .any(|a| a.tid == ALTO && a.kind == AnomalyKind::DkomUnlinked);
+        if acusado {
+            break;
+        }
+        // Como mucho una vuelta hasta sondear su tramo, y un barrido mas para
+        // la segunda confirmacion consecutiva.
+        assert!(
+            vuelta <= r.barridos_por_vuelta,
+            "tras {vuelta} barridos el DKOM del PID {ALTO} sigue sin acusarse: \
+             la vista C no llega por encima de 65536"
+        );
+    }
+    // Ningun tramo pedido pasa de MAX_BARRIDO (el kernel de mentira lo habria
+    // rechazado) y el del PID alto se pidio.
+    let alto = ALTO as i32;
+    let pedidos = &m.kernel_mut().pedidos;
+    let pedido = pedidos.iter().any(|&(a, b)| (a..=b).contains(&alto));
+    assert!(pedido, "el tramo del PID {ALTO} se pidio al kernel");
+}
+
+#[test]
+fn lo_que_un_barrido_no_sondea_se_cuenta_y_no_se_declara_limpio() {
+    let (procfs, lista, pidmap) = sistema_con_pid_alto(70_000);
+    let k = || KernelPorTramos {
+        lista: lista.clone(),
+        pidmap: pidmap.clone(),
+        ..Default::default()
+    };
+
+    // Con el presupuesto por defecto, 64 tramos no caben en un barrido: lo no
+    // sondeado se cuenta y el barrido no autoriza «no hay nada oculto».
+    let cfg = KiConfig {
+        primero: 1,
+        ultimo: ULTIMO_64,
+        ..KiConfig::default()
+    };
+    let mut m = KernelIntegrity::con_relectura(k(), cfg.clone(), Vista::new);
+    let p = procfs.clone();
+    let r = m.scan_con(move || p).expect("barrido");
+    assert!(r.anomalies.is_empty() && r.pendientes.is_empty());
+    assert!(r.espacios_de_pid_comparables);
+    assert!(r.pid_sin_sondear > 0, "{r:?}");
+    assert!(!r.concluye_limpio());
+
+    // Con presupuesto para todo, cada barrido lo sondea entero y si concluye.
+    let todo = KiConfig {
+        presupuesto_tramos: 64,
+        ..cfg
+    };
+    let mut m = KernelIntegrity::con_relectura(k(), todo, Vista::new);
+    let r = m.scan_con(move || procfs).expect("barrido");
+    assert_eq!((r.pid_sin_sondear, r.barridos_por_vuelta), (0, 1));
+    assert_eq!(r.pid_sondeados, 4_194_303);
+    assert!(r.concluye_limpio(), "{r:?}");
+    assert_eq!(m.kernel_mut().pedidos.len(), 64);
 }
 
 // ---------------------------------------------------------------------------

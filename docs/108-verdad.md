@@ -83,6 +83,29 @@ con su causa raíz y su puerta.
 | La imagen ARM rozaba el plazo de 40 minutos | Sin fuente de entropía, el kernel emulado tardaba más de 3 minutos en iniciar su generador aleatorio y systemd y cloud-init esperaban detrás | `virtio-rng` y 4 vCPU emuladas (QEMU traduce cada una en su hilo): de más de 2400 s a entre 680 y 1070 s | matriz aarch64 |
 | Las pruebas e2e con sondas escondían el error de carga | El hilo de telemetría descartaba el resultado de `bpf::run`: un fallo al cargar se leía como «ningún evento en 20 s» | El error de carga es el diagnóstico; el plazo cubre el verificador bajo emulación | `red_en_vivo.rs`, `malware_blocked.rs` |
 
+> **Corrección (MP-16, kintegrity con iteradores).** La fila «`kintegrity`
+> «fallaba» en Ubuntu 24.04 (6.8)» y el *no aplica* «con la kfunc que falta o que
+> no se permite» del apartado de la matriz describen un arreglo que ya no está en
+> vigor. El diagnóstico era correcto —el kernel registra `bpf_task_from_pid` y
+> `bpf_task_release` por tipo de programa, y para `syscall` no los admite hasta
+> 6.10—, pero declarar *no aplica* en 6.8 tapaba un defecto del objeto, no una
+> carencia del kernel. Los programas son ahora iteradores `iter.s/task` (tipo
+> tracing), que admiten esas kfunc desde que existen; la matriz las exige desde
+> Linux 6.7 (`obligatorio_desde` en `tools/config/kernels.toml`) y por encima un
+> *no aplica* es un fallo. La vía «no permitida en este tipo» de
+> `aegis_bpf_verify.c` sigue, pero desde 6.7 ya no tapa nada.
+>
+> En el mismo cambio, la vista C (el espacio de PID) dejó de recortarse en
+> silencio a `MAX_BARRIDO` PID por invocación: cubre `pid_max` entero por tramos,
+> con presupuesto (`PRESUPUESTO_TRAMOS`) y rotación
+> (`crates/aegis-kintegrity/src/tramos.rs`), así que un barrido puede ser
+> parcial. Un barrido parcial no es «sin datos» —en Ubuntu y Fedora lo sería cada
+> barrido— ni autoriza «limpio»: el motor `nucleo` publica en su línea del
+> informe periódico y de `aegisctl status` cuánto sondeó el último barrido y
+> cuántas vueltas completas lleva, y cómo acabaron (`cobertura: …`), y solo
+> afirma «limpio» de una vuelta completa sin hallazgos. Las cifras de cada
+> máquina salen de esa línea; no se copian aquí.
+
 **Lo que destapó el primer runner independiente.** Todo lo de arriba pasaba en la
 máquina de desarrollo. La primera ejecución en un clon limpio falló en quince grupos,
 y ninguno era un defecto del producto: eran dependencias ocultas del entorno de quien

@@ -193,7 +193,7 @@ verify: $(BPF_OBJ) $(XDP_OBJ) $(KI_OBJ) $(SSL_OBJ) $(IPS_OBJ) $(VERIFIER)
 	@./$(VERIFIER) $(BPF_OBJ)
 	@./$(VERIFIER) $(XDP_OBJ)
 	@# aegis_kintegrity recorre la lista de tareas con los iteradores abiertos
-	@# (`bpf_iter_task_*`, kernel 6.4+). En un kernel que no expone esas kfunc, el
+	@# (`bpf_iter_task_*`, kernel 6.7+). En un kernel que no expone esas kfunc, el
 	@# verificador rechaza el objeto al cargarlo:
 	@#
 	@#     kfunc 'bpf_iter_task_new' is referenced but wasn't resolved

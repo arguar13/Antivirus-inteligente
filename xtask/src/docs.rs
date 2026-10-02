@@ -686,7 +686,15 @@ fn render_matriz(repo: &Repo, m: &Matriz) -> String {
             if b.requiere_kfunc.is_empty() {
                 "—".to_string()
             } else {
-                b.requiere_kfunc.join(", ") + " (sin ellas: *no aplica*, no fallo)"
+                let desde = b
+                    .obligatorio_desde
+                    .as_deref()
+                    .map(|v| format!("; desde Linux {v}, obligatorio"))
+                    .unwrap_or_default();
+                format!(
+                    "{} (sin ellas: *no aplica*, no fallo{desde})",
+                    b.requiere_kfunc.join(", ")
+                )
             }
         );
     }

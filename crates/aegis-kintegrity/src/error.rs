@@ -10,7 +10,7 @@ pub enum KiError {
     /// El kernel no ofrece lo que la verificacion cruzada necesita.
     ///
     /// La causa mas comun es un kernel sin `CONFIG_DEBUG_INFO_BTF` o sin los
-    /// kfuncs `bpf_task_from_pid` / `bpf_iter_task_*`, que llegaron en 6.1 y
+    /// kfuncs `bpf_task_from_pid` / `bpf_iter_task_*`, que llegaron en 6.2 y
     /// 6.7 respectivamente.
     #[error("este kernel no admite la verificacion cruzada: {0}")]
     Unsupported(String),

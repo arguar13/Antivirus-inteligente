@@ -277,4 +277,19 @@ pub trait Motor<E>: Send {
     fn mantener(&mut self, _ahora_ns: u64) -> Vec<(Eid, Dictamen)> {
         Vec::new()
     }
+
+    /// Lo que el motor tiene que decir de si mismo en su linea del informe
+    /// periodico y de `aegisctl status`, o nada.
+    ///
+    /// Es para lo que solo el motor sabe y cambia lo que significan sus
+    /// contadores: por ejemplo, cuanto del espacio que vigila llego a mirar.
+    /// Pares `clave=valor` en una linea. El arbitro lo consulta tras cada
+    /// [`Motor::mantener`], nunca por evento, y lo guarda acotado a
+    /// [`crate::arbitro::MAX_DETALLE`] bytes en
+    /// [`crate::EstadoMotor::detalle`]. No es un canal de veredictos: lo que
+    /// acusa va en un [`Dictamen`], y lo que no pudo mirar, en
+    /// [`Dictamen::SinDatos`]. Por defecto, nada.
+    fn detalle(&self) -> Option<String> {
+        None
+    }
 }

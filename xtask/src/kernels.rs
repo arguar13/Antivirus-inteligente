@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::{self, Imagen, Kernels};
@@ -57,6 +57,74 @@ fn cache() -> PathBuf {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| "/root".into()))
                 .join(".cache/aegis-matriz")
         })
+}
+
+/// Las vCPU que pide la microVM de `im`: una sola cuenta para el arranque y
+/// para el reparto de nucleos.
+fn vcpus(k: &Kernels, im: &Imagen) -> u32 {
+    if im.arquitectura == "x86_64" {
+        k.vm.cpus
+    } else {
+        k.vm.cpus_emulado
+    }
+}
+
+/// Los nucleos del anfitrion repartidos entre las microVM en marcha.
+///
+/// Con emulacion completa no hay spinlocks paravirtualizados: si el anfitrion
+/// desaloja la vCPU que tiene un cerrojo del kernel invitado, las demas giran
+/// esperandolo. Con mas vCPU que nucleos, la imagen ARM de Ubuntu tardaba el
+/// triple en arrancar y llego a quedarse muda una hora gastando CPU. Por eso
+/// ninguna microVM arranca sin tener reservados tantos nucleos como vCPU, y la
+/// suma nunca pasa del total.
+struct Nucleos {
+    total: u32,
+    libres: Mutex<u32>,
+    devuelto: Condvar,
+}
+
+/// Nucleos reservados; se devuelven al soltarse.
+struct Reserva<'a> {
+    nucleos: &'a Nucleos,
+    n: u32,
+}
+
+impl Nucleos {
+    fn nuevo(total: u32) -> Self {
+        let total = total.max(1);
+        Nucleos {
+            total,
+            libres: Mutex::new(total),
+            devuelto: Condvar::new(),
+        }
+    }
+
+    /// Espera a que haya `pedidos` nucleos libres y los reserva. Lo que pide mas
+    /// que el total se recorta al total: si no, esperaria para siempre.
+    fn reservar(&self, pedidos: u32) -> Reserva<'_> {
+        let n = pedidos.clamp(1, self.total);
+        let mut libres = self.libres.lock().unwrap_or_else(|e| e.into_inner());
+        while *libres < n {
+            libres = self
+                .devuelto
+                .wait(libres)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+        *libres -= n;
+        Reserva { nucleos: self, n }
+    }
+}
+
+impl Drop for Reserva<'_> {
+    fn drop(&mut self) {
+        let mut libres = self
+            .nucleos
+            .libres
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *libres += self.n;
+        self.nucleos.devuelto.notify_all();
+    }
 }
 
 fn trabajo(repo: &Repo) -> PathBuf {
@@ -578,7 +646,7 @@ fn arrancar(
                     "host".into(),
                 ],
                 k.vm.plazo_kvm_s,
-                k.vm.cpus,
+                vcpus(k, im),
             ),
             "aarch64" => (
                 "qemu-system-aarch64",
@@ -594,7 +662,7 @@ fn arrancar(
                     "cortex-a72".into(),
                 ],
                 k.vm.plazo_emulado_s,
-                k.vm.cpus_emulado,
+                vcpus(k, im),
             ),
             otra => return Err(format!("{}: arquitectura desconocida {otra}", im.id).into()),
         };
@@ -867,7 +935,11 @@ fn juzgar(k: &Kernels, im: &Imagen, r: &mut Resultado1) {
     for b in &k.bpf {
         match bpf.get(&b.objeto).map(String::as_str) {
             Some("pasa") => {}
-            Some("no-aplica") if !b.requiere_kfunc.is_empty() => {}
+            Some("no-aplica") => {
+                if let Err(p) = no_aplica_admitido(b, &r.kernel) {
+                    r.problemas.push(p);
+                }
+            }
             Some(otro) => r.problemas.push(format!("{}.bpf.o: {otro}", b.objeto)),
             None => r
                 .problemas
@@ -893,6 +965,43 @@ fn familia_coincide(declarada: &str, real: &str) -> bool {
     let prefijo_ok =
         real.starts_with(&format!("{version}.")) || real.starts_with(&format!("{version}-"));
     prefijo_ok && (marca.is_empty() || real.contains(marca))
+}
+
+/// Si un `no-aplica` de ese objeto se admite en ese kernel.
+///
+/// Solo lo admite un objeto que declara las kfunc que exige, y solo por debajo
+/// de su `obligatorio_desde`: por encima, el kernel tiene la capacidad y no
+/// pasar es un defecto.
+fn no_aplica_admitido(b: &config::ObjetoBpf, kernel: &str) -> Result<(), String> {
+    if b.requiere_kfunc.is_empty() {
+        return Err(format!("{}.bpf.o: no-aplica", b.objeto));
+    }
+    let Some(v) = b.obligatorio_desde.as_deref() else {
+        return Ok(());
+    };
+    if version_al_menos(kernel, v) {
+        Err(format!(
+            "{}.bpf.o: no-aplica en {kernel}, y desde Linux {v} tiene que pasar",
+            b.objeto
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// `6.8.0-45-generic` es al menos `6.7`: se comparan mayor y menor. Un kernel
+/// cuya version no se deja leer no se da por reciente: no se le exige nada.
+fn version_al_menos(real: &str, minima: &str) -> bool {
+    fn mayor_menor(s: &str) -> Option<(u32, u32)> {
+        let mut partes = s.split(|c: char| !c.is_ascii_digit());
+        let mayor = partes.next()?.parse().ok()?;
+        let menor = partes.next()?.parse().ok()?;
+        Some((mayor, menor))
+    }
+    match (mayor_menor(real), mayor_menor(minima)) {
+        (Some(r), Some(m)) => r >= m,
+        _ => false,
+    }
 }
 
 /// Arranca la matriz y devuelve el resumen, o falla si alguna imagen falla.
@@ -946,6 +1055,11 @@ pub fn ejecutar(repo: &Repo, filtro: &Filtro) -> Resultado<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(3)
         .max(1);
+    let nucleos = Arc::new(Nucleos::nuevo(
+        std::thread::available_parallelism()
+            .map(|n| u32::try_from(n.get()).unwrap_or(u32::MAX))
+            .unwrap_or(1),
+    ));
     let cola = Arc::new(Mutex::new(imagenes.clone()));
     let resultados: Arc<Mutex<BTreeMap<String, Resultado1>>> = Arc::default();
     let k = Arc::new(k);
@@ -956,11 +1070,13 @@ pub fn ejecutar(repo: &Repo, filtro: &Filtro) -> Resultado<()> {
             let resultados = Arc::clone(&resultados);
             let k = Arc::clone(&k);
             let cargas = Arc::clone(&cargas);
+            let nucleos = Arc::clone(&nucleos);
             let dir = dir.clone();
             s.spawn(move || loop {
                 let Some(im) = cola.lock().ok().and_then(|mut c| c.pop()) else {
                     break;
                 };
+                let _reserva = nucleos.reservar(vcpus(&k, &im));
                 eprintln!("xtask: arrancando {} ({})", im.id, im.arquitectura);
                 let base = cache().join("imagenes").join(format!("{}.qcow2", im.id));
                 let r = arrancar(
@@ -1079,6 +1195,77 @@ fn resumen(imagenes: &[Imagen], res: &BTreeMap<String, Resultado1>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn las_microvm_en_marcha_nunca_piden_mas_vcpu_que_nucleos() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let nucleos = Nucleos::nuevo(8);
+        let en_uso = AtomicU32::new(0);
+        let maximo = AtomicU32::new(0);
+        // Dos emuladas de 4 y varias KVM de 2, todas a la vez: lo que fallo.
+        let pedidos = [4u32, 4, 2, 2, 2, 2, 4, 2];
+        std::thread::scope(|s| {
+            for &p in &pedidos {
+                let (nucleos, en_uso, maximo) = (&nucleos, &en_uso, &maximo);
+                s.spawn(move || {
+                    let _r = nucleos.reservar(p);
+                    let ahora = en_uso.fetch_add(p, Ordering::SeqCst) + p;
+                    maximo.fetch_max(ahora, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(20));
+                    en_uso.fetch_sub(p, Ordering::SeqCst);
+                });
+            }
+        });
+        assert!(maximo.load(Ordering::SeqCst) <= 8);
+        assert_eq!(*nucleos.libres.lock().unwrap(), 8, "todo se devuelve");
+    }
+
+    #[test]
+    fn lo_que_pide_mas_que_el_total_se_recorta_y_no_espera_siempre() {
+        let nucleos = Nucleos::nuevo(2);
+        let r = nucleos.reservar(4);
+        assert_eq!(r.n, 2);
+        drop(r);
+        assert_eq!(*nucleos.libres.lock().unwrap(), 2);
+    }
+
+    #[test]
+    fn un_no_aplica_solo_vale_por_debajo_de_obligatorio_desde() {
+        let ki = config::ObjetoBpf {
+            objeto: "aegis_kintegrity".into(),
+            requiere_kfunc: vec!["bpf_iter_task_new".into()],
+            obligatorio_desde: Some("6.7".into()),
+        };
+        // Debian 12 y openSUSE Leap 15.6 no tienen el iterador abierto.
+        assert!(no_aplica_admitido(&ki, "6.1.0-25-cloud-amd64").is_ok());
+        assert!(no_aplica_admitido(&ki, "6.4.0-150600.23.25-default").is_ok());
+        // Ubuntu 24.04 y Fedora si: ahi no pasar es un defecto.
+        let e = no_aplica_admitido(&ki, "6.8.0-45-generic").unwrap_err();
+        assert!(e.contains("6.7"), "{e}");
+        assert!(no_aplica_admitido(&ki, "6.19.3-200.fc44.x86_64").is_err());
+        // Sin `obligatorio_desde` se admite en cualquier kernel.
+        let libre = config::ObjetoBpf {
+            obligatorio_desde: None,
+            ..ki.clone()
+        };
+        assert!(no_aplica_admitido(&libre, "6.8.0-45-generic").is_ok());
+        // Y un objeto que no exige kfunc nunca puede no aplicar.
+        let sin = config::ObjetoBpf {
+            requiere_kfunc: Vec::new(),
+            ..ki
+        };
+        assert!(no_aplica_admitido(&sin, "5.10.0-32-cloud-amd64").is_err());
+    }
+
+    #[test]
+    fn las_versiones_se_comparan_por_mayor_y_menor() {
+        assert!(version_al_menos("6.7.0", "6.7"));
+        assert!(version_al_menos("6.10.2-arch1", "6.7"));
+        assert!(version_al_menos("7.0.1", "6.7"));
+        assert!(!version_al_menos("6.6.114-microsoft-standard-WSL2", "6.7"));
+        assert!(!version_al_menos("5.14.0-503.14.1.el9_5.x86_64", "6.7"));
+        assert!(!version_al_menos("desconocido", "6.7"));
+    }
 
     #[test]
     fn la_matriz_solo_prueba_binarios_de_este_arbol() {

@@ -2,12 +2,40 @@
 //!
 //! Es la unica parte del crate que necesita privilegios, BTF y un kernel
 //! reciente. Todo lo que DECIDE vive en [`crate::verdict`] y [`crate::engine`],
-//! que se prueban sin kernel.
+//! que se prueban sin kernel; y lo que interpreta las respuestas del kernel,
+//! en [`crate::abi`], que tambien.
+//!
+//! # Como se ejecuta un programa
+//!
+//! Los programas son iteradores `iter.s/task` (tipo TRACING), no programas
+//! `syscall`: el kernel registra `bpf_task_from_pid` para TRACING desde 6.2 y
+//! para SYSCALL solo desde 6.10, y con `syscall` Ubuntu 24.04 (6.8) rechazaba
+//! el objeto. La cabecera de `aegis_kintegrity.bpf.c` tiene la tabla medida.
+//!
+//! Cada programa tiene un enlace de iterador creado al cargar y anclado a UNA
+//! tarea —este proceso— con `link_info.task.tid`. Pedirle algo es:
+//!
+//! 1. escribir la peticion en la entrada 0 de su mapa ARRAY;
+//! 2. crear un iterador sobre el enlace y leerlo hasta el final;
+//! 3. decodificar lo leido, que es la misma estructura ya rellena.
+//!
+//! Como el iterador visita una sola tarea, el programa corre una sola vez por
+//! lectura y toma las dos vistas en esa unica invocacion.
+//!
+//! Un barrido son tantas lecturas como tramos de [`crate::abi::MAX_BARRIDO`]
+//! PID pida el motor ([`crate::tramos`]): cada una toma B y C de su tramo, y
+//! entre una y otra el hilo vuelve a espacio de usuario.
 
-use libbpf_rs::{MapCore, MapFlags, Object, ObjectBuilder, ProgramInput};
+use std::ffi::OsStr;
+use std::io::Read;
+use std::ptr::NonNull;
+
+use libbpf_rs::{AsRawLibbpf, Iter, Link, MapCore, MapFlags, Object, ObjectBuilder};
 
 use crate::abi::{KiArgs, KiConfirm, KiTask};
+use crate::engine::KernelViews;
 use crate::error::KiError;
+use crate::tramos::{self, Tramo};
 use crate::views::{self, Vista};
 
 /// Objeto eBPF empotrado en el binario.
@@ -16,6 +44,15 @@ const OBJETO: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/aegis_kintegrity
 const OBJETO_HMAC: &str = include_str!(concat!(env!("OUT_DIR"), "/aegis_kintegrity.hmac"));
 /// Clave con la que se firmo.
 const OBJETO_KEY: &str = include_str!(concat!(env!("OUT_DIR"), "/aegis_kintegrity.key"));
+
+/// Programa que toma las dos vistas.
+const PROG_BARRIDO: &str = "aegis_ki_barrido";
+/// Programa que confirma un TID.
+const PROG_CONFIRMAR: &str = "aegis_ki_confirmar";
+/// Mapa de peticion del barrido.
+const MAPA_BARRIDO: &str = "aegis_ki_arg";
+/// Mapa de peticion de la confirmacion.
+const MAPA_CONFIRMAR: &str = "aegis_ki_cnf";
 
 fn descifrar_hex(s: &str) -> Option<Vec<u8>> {
     if s.len() % 2 != 0 {
@@ -45,6 +82,12 @@ fn verificar_integridad() -> Result<(), KiError> {
 
 /// Vistas de kernel respaldadas por eBPF.
 pub struct BpfViews {
+    // Los enlaces van ANTES que el objeto: los campos se sueltan en el orden en
+    // que se declaran, y un enlace se desmonta mejor con su programa vivo.
+    /// Enlace de iterador del barrido.
+    barrido: Link,
+    /// Enlace de iterador de la confirmacion.
+    confirmacion: Link,
     obj: Object,
     /// Generacion del barrido en curso.
     ///
@@ -135,14 +178,63 @@ fn motivo_del_rechazo() -> String {
         .join(" | ")
 }
 
+/// Crea el enlace de iterador de un programa, anclado a este proceso.
+///
+/// El ancla es el PID del proceso —el TID de su lider de grupo—, no el del
+/// hilo que llama: el lider vive tanto como el proceso, y el hilo que carga el
+/// verificador puede ser cualquiera. El numero se interpreta en el espacio de
+/// nombres de PID de quien crea el enlace, que es este mismo proceso.
+///
+/// libbpf-rs 0.24 solo sabe parametrizar iteradores de mapa, asi que el
+/// `link_info` de tarea se construye aqui y se entrega a libbpf directamente.
+fn enlazar(obj: &Object, programa: &'static str) -> Result<Link, KiError> {
+    let prog = obj
+        .progs()
+        .find(|p| p.name() == OsStr::new(programa))
+        .ok_or_else(|| KiError::Bpf {
+            op: "buscar programa",
+            detail: format!("no existe {programa} en el objeto"),
+        })?;
+
+    let mut info = libbpf_sys::bpf_iter_link_info::default();
+    info.task.tid = std::process::id();
+    let opciones = libbpf_sys::bpf_iter_attach_opts {
+        sz: std::mem::size_of::<libbpf_sys::bpf_iter_attach_opts>() as _,
+        link_info: std::ptr::addr_of_mut!(info),
+        link_info_len: std::mem::size_of::<libbpf_sys::bpf_iter_link_info>() as _,
+        ..Default::default()
+    };
+    // SAFETY: `prog` es un programa cargado del objeto, que sigue vivo mientras
+    // dura la llamada; `opciones` e `info` son locales que libbpf solo lee
+    // durante la llamada y no retiene.
+    let ptr = unsafe {
+        libbpf_sys::bpf_program__attach_iter(prog.as_libbpf_object().as_ptr(), &opciones)
+    };
+    let Some(ptr) = NonNull::new(ptr) else {
+        // libbpf 1.x devuelve NULL y deja el error en errno.
+        let e = std::io::Error::last_os_error();
+        return Err(match e.raw_os_error() {
+            Some(libc::EPERM) => KiError::InsufficientPrivileges,
+            _ => KiError::Bpf {
+                op: "enlazar iterador",
+                detail: format!("{programa}: {e}"),
+            },
+        });
+    };
+    // SAFETY: el puntero lo acaba de crear libbpf, no es nulo y nadie mas lo
+    // posee; el `Link` pasa a ser su unico dueno y lo destruye al soltarse.
+    Ok(unsafe { Link::from_ptr(ptr) })
+}
+
 impl BpfViews {
-    /// Carga el verificador en el kernel.
+    /// Carga el verificador en el kernel y crea sus dos enlaces de iterador.
     ///
     /// # Errores
     ///
-    /// Un `EINVAL` al cargar suele significar que faltan los kfuncs
-    /// `bpf_task_from_pid` (Linux 6.1) o `bpf_iter_task_*` (Linux 6.7); un
-    /// `EPERM`, que falta `CAP_BPF`.
+    /// Un rechazo del verificador suele significar que faltan los kfuncs
+    /// `bpf_task_from_pid` (Linux 6.2) o `bpf_iter_task_*` (Linux 6.7); un
+    /// `EPERM`, que falta `CAP_BPF` o `CAP_PERFMON`, que un programa TRACING
+    /// exige los dos.
     pub fn cargar() -> Result<BpfViews, KiError> {
         verificar_integridad()?;
 
@@ -174,36 +266,45 @@ impl BpfViews {
             )),
         })?;
 
-        Ok(BpfViews { obj, gen: 0 })
+        let barrido = enlazar(&obj, PROG_BARRIDO)?;
+        let confirmacion = enlazar(&obj, PROG_CONFIRMAR)?;
+
+        Ok(BpfViews {
+            barrido,
+            confirmacion,
+            obj,
+            gen: 0,
+        })
     }
 
-    fn ejecutar<T: Copy>(&mut self, programa: &str, ctx: &mut T) -> Result<i32, KiError> {
-        // El contexto se pasa como bytes: el programa `SEC("syscall")` recibe un
-        // puntero real al espacio de usuario y escribe en el.
-        //
-        // `context_out` tiene que quedarse a `None`. El kernel devuelve EINVAL
-        // si se le da uno para un programa de tipo syscall, porque ya escribio
-        // directamente en `context_in`.
-        let bytes = unsafe {
-            std::slice::from_raw_parts_mut(ctx as *mut T as *mut u8, std::mem::size_of::<T>())
-        };
-        let prog = self
+    /// Escribe la peticion, ejecuta el programa una vez y devuelve lo que
+    /// respondio.
+    fn consultar(
+        &self,
+        mapa: &'static str,
+        enlace: &Link,
+        peticion: &[u8],
+    ) -> Result<Vec<u8>, KiError> {
+        let m = self
             .obj
-            .progs_mut()
-            .find(|p| p.name() == std::ffi::OsStr::new(programa))
+            .maps()
+            .find(|m| m.name() == OsStr::new(mapa))
             .ok_or_else(|| KiError::Bpf {
-                op: "buscar programa",
-                detail: format!("no existe {programa} en el objeto"),
+                op: "buscar mapa",
+                detail: format!("no existe {mapa}"),
             })?;
+        m.update(&0u32.to_ne_bytes(), peticion, MapFlags::ANY)
+            .map_err(|e| map_err("escribir la peticion", e))?;
 
-        let entrada = ProgramInput {
-            context_in: Some(bytes),
-            ..Default::default()
-        };
-        let salida = prog
-            .test_run(entrada)
-            .map_err(|e| map_err("bpf_prog_test_run", e))?;
-        Ok(salida.return_value as i32)
+        // Cada iterador es un seq_file nuevo: la lectura empieza siempre por la
+        // tarea ancla y el programa trabaja en esa primera visita.
+        let mut it = Iter::new(enlace).map_err(|e| map_err("crear el iterador", e))?;
+        let mut respuesta = Vec::with_capacity(64);
+        it.read_to_end(&mut respuesta).map_err(|e| KiError::Bpf {
+            op: "leer el iterador",
+            detail: e.to_string(),
+        })?;
+        Ok(respuesta)
     }
 
     /// Lee un mapa de vista y borra lo que no sea de la generacion actual.
@@ -211,7 +312,7 @@ impl BpfViews {
         let mapa = self
             .obj
             .maps()
-            .find(|m| m.name() == std::ffi::OsStr::new(nombre))
+            .find(|m| m.name() == OsStr::new(nombre))
             .ok_or_else(|| KiError::Bpf {
                 op: "buscar mapa",
                 detail: format!("no existe {nombre}"),
@@ -264,8 +365,19 @@ impl BpfViews {
     }
 }
 
-impl crate::engine::KernelViews for BpfViews {
+impl KernelViews for BpfViews {
     fn barrer(&mut self, primero: i32, ultimo: i32) -> Result<(Vista, Vista, u32), KiError> {
+        // El rango entero, en tramos: con `pid_max` = 4194304 son 64 lecturas.
+        self.barrer_tramos(&tramos::partir(primero, ultimo))
+    }
+
+    /// Una lectura del iterador por tramo; los mapas se leen una vez al final.
+    ///
+    /// Todos los tramos llevan la misma generacion, de modo que lo que escribe
+    /// uno no lo descarta el siguiente; y cada lectura toma B y C de su tramo
+    /// en una sola invocacion. Leer los mapas por tramo costaria una llamada al
+    /// sistema por entrada y por tramo: se leen al final, una vez.
+    fn barrer_tramos(&mut self, tramos: &[Tramo]) -> Result<(Vista, Vista, u32), KiError> {
         self.gen = self.gen.wrapping_add(1);
         // La generacion 0 se reserva para "sin escribir": saltarla evita que una
         // entrada nunca tocada pase por reciente al dar la vuelta el contador.
@@ -274,31 +386,39 @@ impl crate::engine::KernelViews for BpfViews {
         }
         let gen = self.gen;
 
-        let mut args = KiArgs {
-            primero,
-            ultimo,
-            gen,
-            ..Default::default()
-        };
-        let rc = self.ejecutar("aegis_ki_barrido", &mut args)?;
-        if rc != 0 || args.error != 0 {
-            return Err(KiError::Programa(if rc != 0 { rc } else { args.error }));
+        let mut desbordes = 0u32;
+        for t in tramos {
+            let peticion = KiArgs {
+                primero: t.primero,
+                ultimo: t.ultimo,
+                gen,
+                ..Default::default()
+            };
+            let bytes = self.consultar(MAPA_BARRIDO, &self.barrido, &peticion.a_bytes())?;
+            // Un tramo de mas de MAX_BARRIDO PID vuelve como ERR_ARGS y aborta
+            // el barrido: nada se recorta en silencio.
+            let r = KiArgs::respuesta(&bytes, gen)?;
+            desbordes = desbordes.saturating_add(r.desbordes);
         }
 
         let lista = self.leer_vista("aegis_ki_lista", gen)?;
         let pidmap = self.leer_vista("aegis_ki_pidmap", gen)?;
-        Ok((lista, pidmap, args.desbordes))
+        Ok((lista, pidmap, desbordes))
     }
 
     fn confirmar(&mut self, tid: u32) -> Result<(bool, bool, Option<u64>), KiError> {
-        let mut c = KiConfirm {
-            tid: tid as i32,
+        // Un TID que no cabe en el `s32` del kernel no puede existir en ninguna
+        // de las dos estructuras; y enviado tal cual volveria negativo, que en
+        // la respuesta significa error del programa.
+        let Ok(tid) = i32::try_from(tid) else {
+            return Ok((false, false, None));
+        };
+        let peticion = KiConfirm {
+            tid,
             ..Default::default()
         };
-        let rc = self.ejecutar("aegis_ki_confirmar", &mut c)?;
-        if rc != 0 {
-            return Err(KiError::Programa(rc));
-        }
+        let bytes = self.consultar(MAPA_CONFIRMAR, &self.confirmacion, &peticion.a_bytes())?;
+        let c = KiConfirm::respuesta(&bytes, tid)?;
         let start = if c.start_boottime != 0 {
             Some(c.start_boottime)
         } else {

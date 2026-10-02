@@ -26,6 +26,23 @@
  * Una tarea en C pero no en B es DKOM. Una tarea en las dos pero ausente de
  * `/proc` (vista A, en Ring 3) es ocultacion en espacio de usuario.
  *
+ * # Por tramos
+ *
+ * Cada invocacion trabaja sobre UN TRAMO `[primero, ultimo]` del espacio de PID
+ * de como mucho AEGIS_KI_MAX_BARRIDO (65536) numeros: C sondea el tramo y B
+ * guarda solo las tareas cuyo PID cae en el. `pid_max` llega a 4194304 (el
+ * valor que fija systemd en 64 bits: Ubuntu, Fedora), asi que el espacio entero
+ * son hasta 64 tramos, y el espacio de usuario los pide en lecturas sucesivas
+ * del iterador (crates/aegis-kintegrity/src/tramos.rs decide cuales). Asi:
+ *
+ *   - B y C de un mismo PID siguen tomandose en la MISMA invocacion;
+ *   - ninguna invocacion pasa de 65536 sondeos, y entre una y otra el hilo
+ *     vuelve a espacio de usuario, donde el planificador puede expropiarlo;
+ *   - una peticion de mas de 65536 PID se RECHAZA con AEGIS_KI_ERR_ARGS. La
+ *     version anterior la recortaba en silencio: con `pid_max` = 4194304 toda
+ *     tarea por encima del PID 65536 quedaba en B y fuera de C sin que el
+ *     informe lo dijera, y un DKOM ahi no se veia.
+ *
  * # Por que las dos vistas van en el MISMO programa
  *
  * Entre una vista y la siguiente, los procesos nacen y mueren. Tomarlas en dos
@@ -34,6 +51,43 @@
  * invocacion, separadas por microsegundos, y ademas existe
  * `aegis_ki_confirmar`, que vuelve a mirar UN solo TID por los dos caminos para
  * descartar la carrera antes de acusar a nadie.
+ *
+ * # Por que son iteradores `iter.s/task` y no programas `syscall`
+ *
+ * El kernel no permite un kfunc a todo programa: lo registra POR TIPO DE
+ * PROGRAMA (`kfunc_init`, kernel/bpf/helpers.c). Medido en el codigo:
+ *
+ *   kfunc                                   TRACING          SYSCALL
+ *   bpf_task_from_pid, bpf_task_release     desde 6.2        desde 6.10
+ *   bpf_iter_task_*, bpf_rcu_read_*         todos los tipos (conjunto comun)
+ *
+ * La version anterior eran programas `SEC("syscall")` ejecutados con
+ * BPF_PROG_RUN: cargaban en 6.10+ y Ubuntu 24.04 (6.8) los rechazaba con
+ * «calling kernel function bpf_task_from_pid is not allowed», aunque el kfunc
+ * existe desde 6.2. Un programa iterador es de tipo TRACING, y para TRACING
+ * todos los kfuncs de aqui estan permitidos desde que existen: el minimo pasa a
+ * ser el de `bpf_iter_task_new`, Linux 6.7.
+ *
+ * Lo que NO cambia es la propiedad de arriba. El enlace del iterador se crea
+ * con `link_info.task.tid` = el PID de este proceso (el lider del grupo, que
+ * vive tanto como el proceso), asi que el iterador visita UNA sola tarea y el
+ * programa corre UNA vez por lectura. Esa unica invocacion toma las dos vistas
+ * seguidas, igual que antes. La tarea que visita es solo el ancla que dispara
+ * el programa: no es una vista ni se compara con nada.
+ *
+ * Transporte:
+ *   peticion   el espacio de usuario escribe `struct aegis_ki_args` (o
+ *              `aegis_ki_confirm`) en la entrada 0 de un mapa ARRAY;
+ *   ejecucion  `read()` sobre el fd de `bpf_iter_create(enlace)`;
+ *   respuesta  el programa la devuelve con `bpf_seq_write` en esa misma
+ *              lectura: la misma estructura, ya rellena.
+ * La disposicion de las estructuras no cambia (ver aegis_kintegrity.h).
+ *
+ * `iter.s` y no `iter`: durmiente, como lo era `SEC("syscall")` para libbpf.
+ * El kernel lo ejecuta bajo `rcu_read_lock_trace` con la migracion desactivada
+ * y SIN desactivar la expropiacion, que importa en un tramo de 65536 PID; y
+ * el verificador razona el RCU exactamente igual que con la version anterior.
+ * El objetivo `task` admite programas durmientes (BPF_ITER_RESCHED).
  *
  * # Notas del verificador que costaron sangre
  *
@@ -46,11 +100,18 @@
  *   - El barrido de PID va con `bpf_loop` y no con un bucle desenrollado: 32768
  *     iteraciones desenrolladas superan el limite de complejidad de saltos del
  *     verificador ("the sequence of N jumps is too complex").
+ *   - Los contadores viven en el valor del mapa de peticion y no en la pila.
+ *     Un contador en la pila cambia en cada vuelta del iterador abierto o del
+ *     callback de `bpf_loop`, y la convergencia de esos bucles se razona
+ *     comparando estados; los verificadores de 6.7/6.8 son los menos
+ *     indulgentes con eso. Un incremento a traves de un puntero a mapa es una
+ *     escritura en memoria y no hace distintos dos estados.
  */
 
 /* vmlinux.h en lugar de <linux/bpf.h>: ademas de los tipos de kernel, es quien
- * aporta `struct task_struct` DEFINIDA y `struct bpf_iter_task` tal y como las
- * conoce el kernel de destino, que es justo lo que exigen las kfuncs de abajo. */
+ * aporta `struct task_struct` DEFINIDA, `struct bpf_iter_task` y el contexto
+ * `struct bpf_iter__task` tal y como las conoce el kernel de destino, que es
+ * justo lo que exigen las kfuncs y el objetivo de iterador de abajo. */
 #include "vmlinux.h"
 
 #include <bpf/bpf_helpers.h>
@@ -60,9 +121,10 @@
 #include "aegis_kintegrity.h"
 
 /*
- * GPL a secas y no dual: `bpf_task_from_pid`, `bpf_iter_task_*` y
- * `bpf_rcu_read_lock` estan marcadas GPL-only por el kernel. Es el unico
- * fichero del proyecto con esta licencia y esta aislado por ese motivo.
+ * GPL a secas y no dual: `bpf_task_from_pid`, `bpf_iter_task_*`,
+ * `bpf_rcu_read_lock` y `bpf_seq_write` estan marcadas GPL-only por el kernel.
+ * Es el unico fichero del proyecto con esta licencia y esta aislado por ese
+ * motivo.
  */
 char LICENSE[] SEC("license") = "GPL";
 
@@ -76,10 +138,11 @@ char LICENSE[] SEC("license") = "GPL";
  *     BTF_KIND_STRUCT del kernel.
  *   - El PID es `s32` en el BTF del kernel, no `int`.
  *
- * Las dos las resuelve vmlinux.h por construccion, y por eso ya no hay aqui ni
- * un `typedef int s32` ni una `struct bpf_iter_task` opaca escritos a mano:
- * eran precisamente el tipo de declaracion que acierta hoy y miente manana.
- * Ahora `s32` y `bpf_iter_task` son las del BTF del kernel.
+ * Las dos las resuelve vmlinux.h por construccion.
+ *
+ * Esta lista es la que comprueba la sonda del agente (`KFUNCS_TAREAS` en
+ * crates/aegis-agent/src/motores/mod.rs), y una prueba de alli la coteja con
+ * este fichero: anadir un kfunc aqui sin anadirlo alli rompe esa prueba.
  * ------------------------------------------------------------------------ */
 
 extern struct task_struct *bpf_task_from_pid(s32 pid) __ksym;
@@ -111,6 +174,23 @@ struct {
     __type(value, struct aegis_ki_task);
 } aegis_ki_pidmap SEC(".maps");
 
+/* Peticion del barrido: la entrada 0 la escribe el espacio de usuario antes de
+ * leer el iterador. Los nombres caben en los 15 caracteres del kernel. */
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct aegis_ki_args);
+} aegis_ki_arg SEC(".maps");
+
+/* Peticion de la confirmacion. */
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, struct aegis_ki_confirm);
+} aegis_ki_cnf SEC(".maps");
+
 /* ------------------------------------------------------------------------
  * Utilidades
  * ------------------------------------------------------------------------ */
@@ -139,13 +219,27 @@ static __always_inline void aegis_ki_retratar(struct task_struct *t,
     BPF_CORE_READ_STR_INTO(&out->comm, t, comm);
 }
 
-/* Contexto del barrido de PID que recibe el callback de `bpf_loop`. */
+/*
+ * Si esta invocacion es la que tiene que trabajar.
+ *
+ * El enlace esta anclado a una sola tarea, asi que el programa corre una vez
+ * con esa tarea y otra al terminar con `task == NULL` (la llamada de cierre del
+ * seq_file). Se trabaja solo en la primera. Exigir ademas `seq_num == 0` hace
+ * que, aunque el ancla se perdiera y el iterador recorriera todas las tareas,
+ * el barrido se hiciera una vez y no una por tarea.
+ */
+static __always_inline int aegis_ki_es_la_primera(struct bpf_iter__task *ctx)
+{
+    return ctx->task != (void *)0 && ctx->meta->seq_num == 0;
+}
+
+/* Contexto del barrido de PID que recibe el callback de `bpf_loop`. Solo lleva
+ * datos que no cambian durante el bucle: ver la ultima nota de cabecera. */
 struct aegis_ki_ctx_pid {
     int32_t primero;
     int32_t ultimo;
     uint32_t gen;
-    uint32_t hallados;
-    uint32_t desbordes;
+    uint32_t _pad;
 };
 
 /*
@@ -170,28 +264,59 @@ static int aegis_ki_sonda_pid(uint32_t i, void *ctx)
     bpf_task_release(t);
 
     uint32_t clave = (uint32_t)pid;
-    if (bpf_map_update_elem(&aegis_ki_pidmap, &clave, &v, BPF_ANY) == 0)
-        c->hallados++;
-    else
-        c->desbordes++;
+    long rc = bpf_map_update_elem(&aegis_ki_pidmap, &clave, &v, BPF_ANY);
+
+    uint32_t cero = 0;
+    struct aegis_ki_args *a = bpf_map_lookup_elem(&aegis_ki_arg, &cero);
+    if (a) {
+        if (rc == 0)
+            a->en_pidmap++;
+        else
+            a->desbordes++;
+    }
     return 0;
 }
 
 /* ------------------------------------------------------------------------
- * Barrido: las dos vistas en una sola invocacion
+ * Barrido: las dos vistas de UN tramo en una sola invocacion
  * ------------------------------------------------------------------------ */
 
-SEC("syscall")
-int aegis_ki_barrido(struct aegis_ki_args *a)
+SEC("iter.s/task")
+int aegis_ki_barrido(struct bpf_iter__task *ctx)
 {
+    struct seq_file *seq = ctx->meta->seq;
+    if (!aegis_ki_es_la_primera(ctx))
+        return 0;
+
+    uint32_t cero = 0;
+    struct aegis_ki_args *a = bpf_map_lookup_elem(&aegis_ki_arg, &cero);
     if (!a)
-        return AEGIS_KI_ERR_ARGS;
+        return 0; /* sin respuesta: el espacio de usuario lo trata como error */
 
+    /* El tramo se copia a la pila: no cambia durante los bucles, asi que no
+     * hace distintos los estados que compara el verificador (ver la ultima
+     * nota de cabecera; lo que cambia son los contadores, y esos van en el
+     * mapa). */
     uint32_t gen = a->gen;
-    uint32_t en_lista = 0;
-    uint32_t desbordes = 0;
+    int32_t primero = a->primero;
+    int32_t ultimo = a->ultimo;
+    a->en_lista = 0;
+    a->en_pidmap = 0;
+    a->desbordes = 0;
+    a->error = 0;
+    a->_pad = 0;
 
-    /* --- Vista B: recorrido de la lista de tareas --- */
+    /* Un tramo valido: no vacio, sin negativos y de AEGIS_KI_MAX_BARRIDO PID
+     * como mucho. Lo que no cumpla se rechaza ANTES de tomar ninguna vista:
+     * recortarlo dejaria PID sin sondear y un informe que no lo dice. */
+    if (primero < 0 || ultimo < primero ||
+        (int64_t)ultimo - (int64_t)primero + 1 > (int64_t)AEGIS_KI_MAX_BARRIDO) {
+        a->error = AEGIS_KI_ERR_ARGS;
+        bpf_seq_write(seq, a, sizeof(*a));
+        return 0;
+    }
+
+    /* --- Vista B: recorrido de la lista de tareas, quedandose con el tramo --- */
     struct bpf_iter_task it;
     struct task_struct *t;
 
@@ -200,13 +325,18 @@ int aegis_ki_barrido(struct aegis_ki_args *a)
                                 AEGIS_KI_ITER_TODOS_LOS_HILOS);
     if (!err) {
         while ((t = bpf_iter_task_next(&it))) {
+            int32_t pid = BPF_CORE_READ(t, pid);
+            /* Fuera del tramo no se guarda: lo trae la invocacion de SU tramo,
+             * junto con su vista C. */
+            if (pid < primero || pid > ultimo)
+                continue;
             struct aegis_ki_task v;
             aegis_ki_retratar(t, &v, gen);
-            uint32_t clave = (uint32_t)BPF_CORE_READ(t, pid);
+            uint32_t clave = (uint32_t)pid;
             if (bpf_map_update_elem(&aegis_ki_lista, &clave, &v, BPF_ANY) == 0)
-                en_lista++;
+                a->en_lista++;
             else
-                desbordes++;
+                a->desbordes++;
         }
     }
     /* Obligatorio en todos los caminos: ver la nota de cabecera. */
@@ -215,43 +345,30 @@ int aegis_ki_barrido(struct aegis_ki_args *a)
 
     if (err) {
         a->error = AEGIS_KI_ERR_ITERADOR;
-        return AEGIS_KI_ERR_ITERADOR;
+        bpf_seq_write(seq, a, sizeof(*a));
+        return 0;
     }
 
-    /* --- Vista C: sondeo del espacio de PID --- */
+    /* --- Vista C: sondeo del tramo del espacio de PID --- */
     struct aegis_ki_ctx_pid c = {
-        .primero = a->primero,
-        .ultimo = a->ultimo,
+        .primero = primero,
+        .ultimo = ultimo,
         .gen = gen,
-        .hallados = 0,
-        .desbordes = 0,
+        ._pad = 0,
     };
-    uint32_t cuantos = 0;
-    if (a->ultimo >= a->primero) {
-        int64_t rango = (int64_t)a->ultimo - (int64_t)a->primero + 1;
-        cuantos = rango > AEGIS_KI_MAX_BARRIDO ? AEGIS_KI_MAX_BARRIDO
-                                               : (uint32_t)rango;
-    }
+    /* Validado arriba: entre 1 y AEGIS_KI_MAX_BARRIDO, muy por debajo del
+     * BPF_MAX_LOOPS (2^23) de `bpf_loop`. El tramo entero, sin recorte. */
+    uint32_t cuantos = (uint32_t)(ultimo - primero) + 1;
     bpf_loop(cuantos, aegis_ki_sonda_pid, &c, 0);
 
-    a->en_lista = en_lista;
-    a->en_pidmap = c.hallados;
-    a->desbordes = desbordes + c.desbordes;
-    a->error = 0;
+    /* La respuesta sale por la misma lectura que disparo el barrido. */
+    bpf_seq_write(seq, a, sizeof(*a));
     return 0;
 }
 
 /* ------------------------------------------------------------------------
  * Confirmacion: un solo TID, por los dos caminos, en el mismo instante
  * ------------------------------------------------------------------------ */
-
-/* Contexto de la busqueda de un TID concreto en la lista. */
-struct aegis_ki_ctx_busca {
-    int32_t tid;
-    uint32_t hallado;
-    uint64_t start_boottime;
-    uint32_t tgid;
-};
 
 /*
  * Confirma o descarta una discrepancia.
@@ -262,20 +379,30 @@ struct aegis_ki_ctx_busca {
  * termino. Aqui se vuelve a mirar el MISMO TID por los dos caminos con
  * microsegundos de diferencia, de modo que un proceso que murio desaparece de
  * las dos y uno oculto conserva la asimetria.
+ *
+ * La respuesta devuelve el mismo `tid` que se pidio; un `tid` NEGATIVO en la
+ * respuesta es un AEGIS_KI_ERR_* (los TID reales son positivos).
  */
-SEC("syscall")
-int aegis_ki_confirmar(struct aegis_ki_confirm *c)
+SEC("iter.s/task")
+int aegis_ki_confirmar(struct bpf_iter__task *ctx)
 {
-    if (!c)
-        return AEGIS_KI_ERR_ARGS;
+    struct seq_file *seq = ctx->meta->seq;
+    if (!aegis_ki_es_la_primera(ctx))
+        return 0;
 
+    uint32_t cero = 0;
+    struct aegis_ki_confirm *c = bpf_map_lookup_elem(&aegis_ki_cnf, &cero);
+    if (!c)
+        return 0;
+
+    int32_t tid = c->tid;
     c->en_lista = 0;
     c->en_pidmap = 0;
     c->start_boottime = 0;
     c->tgid = 0;
 
     /* Camino 1: espacio de PID. */
-    struct task_struct *t = bpf_task_from_pid(c->tid);
+    struct task_struct *t = bpf_task_from_pid(tid);
     if (t) {
         c->en_pidmap = 1;
         c->start_boottime = aegis_inicio_de_tarea(t);
@@ -284,12 +411,6 @@ int aegis_ki_confirmar(struct aegis_ki_confirm *c)
     }
 
     /* Camino 2: lista de tareas. */
-    struct aegis_ki_ctx_busca b = {
-        .tid = c->tid,
-        .hallado = 0,
-        .start_boottime = 0,
-        .tgid = 0,
-    };
     struct bpf_iter_task it;
     struct task_struct *p;
     bpf_rcu_read_lock();
@@ -297,27 +418,27 @@ int aegis_ki_confirmar(struct aegis_ki_confirm *c)
                                 AEGIS_KI_ITER_TODOS_LOS_HILOS);
     if (!err) {
         while ((p = bpf_iter_task_next(&it))) {
-            if (BPF_CORE_READ(p, pid) == b.tid) {
-                b.hallado = 1;
-                b.start_boottime = aegis_inicio_de_tarea(p);
-                b.tgid = BPF_CORE_READ(p, tgid);
-                /* No se corta el bucle: el iterador tiene que agotarse o
-                 * quedarse en un estado que el verificador no acepta al
-                 * destruirlo a medias en algunos kernels. Recorrer lo que
-                 * queda cuesta microsegundos. */
+            if (BPF_CORE_READ(p, pid) != tid)
+                continue;
+            c->en_lista = 1;
+            /* El retrato del espacio de PID manda; el de la lista solo se
+             * usa si el PID no resolvio. */
+            if (!c->en_pidmap) {
+                c->start_boottime = aegis_inicio_de_tarea(p);
+                c->tgid = BPF_CORE_READ(p, tgid);
             }
+            /* No se corta el bucle: el iterador tiene que agotarse o
+             * quedarse en un estado que el verificador no acepta al
+             * destruirlo a medias en algunos kernels. Recorrer lo que
+             * queda cuesta microsegundos. */
         }
     }
     bpf_iter_task_destroy(&it);
     bpf_rcu_read_unlock();
 
     if (err)
-        return AEGIS_KI_ERR_ITERADOR;
+        c->tid = AEGIS_KI_ERR_ITERADOR;
 
-    c->en_lista = b.hallado;
-    if (!c->en_pidmap && b.hallado) {
-        c->start_boottime = b.start_boottime;
-        c->tgid = b.tgid;
-    }
+    bpf_seq_write(seq, c, sizeof(*c));
     return 0;
 }

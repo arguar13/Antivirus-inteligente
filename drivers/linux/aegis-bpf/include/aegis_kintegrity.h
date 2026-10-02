@@ -34,24 +34,49 @@
 #  include <stdint.h>
 #endif
 
-/* Capacidad de los mapas de vista. 65536 cubre `pid_max` por defecto (32768)
- * con holgura para un sistema que lo haya subido. Al desbordarse se CUENTA, no
- * se descarta en silencio: un barrido incompleto no puede pasar por limpio. */
+/* Capacidad de los mapas de vista: TAREAS (hilos) vivas a la vez, no numeros
+ * de PID. Todos los tramos de un barrido escriben en los mismos mapas. Al
+ * desbordarse se CUENTA, no se descarta en silencio: un barrido incompleto no
+ * puede pasar por limpio. */
 #define AEGIS_KI_MAX_TAREAS   65536u
 
-/* Iteraciones maximas del barrido de PID en una invocacion. */
+/* PID que abarca, como mucho, UNA invocacion del barrido: un tramo. `pid_max`
+ * llega a 4194304 (PID_MAX_LIMIT en 64 bits), asi que el espacio entero se
+ * cubre en varias lecturas del iterador, una por tramo. Una peticion de mas
+ * PID es AEGIS_KI_ERR_ARGS: nunca se recorta en silencio. */
 #define AEGIS_KI_MAX_BARRIDO  65536u
 
 /* Banderas de `bpf_iter_task_new`. */
 #define AEGIS_KI_ITER_SOLO_PROCESOS      0u  /* solo lideres de grupo de hilos */
 #define AEGIS_KI_ITER_TODOS_LOS_HILOS    1u  /* todas las tareas              */
 
-/* Errores devueltos por los programas. */
+/* Errores devueltos por los programas. ERR_ARGS: tramo vacio, con negativos o
+ * de mas de AEGIS_KI_MAX_BARRIDO PID. */
 #define AEGIS_KI_ERR_ARGS      (-1)
 #define AEGIS_KI_ERR_ITERADOR  (-2)
 
 /* Longitud de `comm` en el kernel, incluido el terminador. */
 #define AEGIS_KI_COMM_LEN 16
+
+/*
+ * TRANSPORTE
+ *
+ * Los programas son iteradores `iter.s/task` (tipo TRACING) anclados a UNA
+ * tarea, este mismo proceso, de modo que cada `read()` del iterador ejecuta el
+ * programa una sola vez:
+ *
+ *   1. el espacio de usuario escribe la peticion en la entrada 0 del mapa
+ *      ARRAY del programa (`aegis_ki_arg` o `aegis_ki_cnf`);
+ *   2. lee el fd de `bpf_iter_create(enlace)` hasta el final;
+ *   3. lo leido es la MISMA estructura, ya rellena por el programa con
+ *      `bpf_seq_write`, y mide exactamente `sizeof` de ella.
+ *
+ * Una lectura vacia significa que el programa no llego a trabajar. Las
+ * estructuras de abajo no cambian de disposicion respecto de la version
+ * `SEC("syscall")`: cambia por donde viajan, no como son. Ademas objeto y
+ * espejo viajan juntos —el objeto va empotrado y firmado en el mismo binario—,
+ * asi que no hay dos versiones del transporte que puedan encontrarse.
+ */
 
 /*
  * Retrato de una tarea vista por el kernel.
@@ -71,15 +96,17 @@ struct aegis_ki_task {
 };                                     /* 40 bytes                            */
 
 /*
- * Argumentos y resultados del barrido.
+ * Argumentos y resultados del barrido de UN tramo.
  *
- * El programa escribe DIRECTAMENTE en esta estructura del espacio de usuario:
- * los programas `SEC("syscall")` reciben su contexto como un puntero real y
- * `bpf_prog_test_run` no debe llevar `ctx_out`, o el kernel devuelve EINVAL.
+ * Peticion: `primero`, `ultimo` y `gen`. `[primero, ultimo]` delimita las DOS
+ * vistas: C sondea esos PID y B guarda solo las tareas cuyo PID cae ahi. Los
+ * tramos de un mismo barrido llevan la misma `gen`. Respuesta: la misma
+ * estructura con los contadores del tramo y `error`; `gen` vuelve tal cual, y
+ * el espacio de usuario comprueba que es la que pidio.
  */
 struct aegis_ki_args {
-    int32_t primero;    /*  0: primer PID del barrido                           */
-    int32_t ultimo;     /*  4: ultimo PID del barrido, inclusive                */
+    int32_t primero;    /*  0: primer PID del tramo                             */
+    int32_t ultimo;     /*  4: ultimo PID del tramo, inclusive                  */
     uint32_t gen;        /*  8: generacion; descarta entradas de barridos previos */
     uint32_t en_lista;   /* 12: tareas vistas en la lista de tareas              */
     uint32_t en_pidmap;  /* 16: tareas halladas en el espacio de PID             */
@@ -95,6 +122,8 @@ struct aegis_ki_args {
  * pasan milisegundos y un proceso puede haber muerto, lo que produciria una
  * discrepancia falsa. Aqui las dos consultas se hacen con microsegundos de
  * diferencia sobre el mismo TID.
+ *
+ * En la respuesta `tid` vuelve tal cual; si es NEGATIVO es un AEGIS_KI_ERR_*.
  */
 struct aegis_ki_confirm {
     int32_t tid;               /*  0: TID a confirmar                           */
