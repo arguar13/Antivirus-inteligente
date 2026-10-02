@@ -34,6 +34,7 @@ dependencies = [
  "aegis-behavior",
  "aegis-ctl",
  "aegis-edgeml",
+ "aegis-enforce",
  "aegis-entidad",
  "aegis-fleet",
  "aegis-harden",
@@ -49,6 +50,7 @@ dependencies = [
  "aegis-ransom",
  "aegis-scal",
  "aegis-trabajador",
+ "aegis-vuln",
  "aegis-watchdog",
  "anyhow",
  "blake3",
@@ -232,6 +234,7 @@ dependencies = [
 name = "aegis-enforce"
 version = "0.1.0"
 dependencies = [
+ "aegis-prueba",
  "aegis-sandbox",
  "aegis-scal",
  "thiserror 2.0.20",

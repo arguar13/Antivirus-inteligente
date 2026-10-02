@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Linea base de la postura del kernel (FASE 5.2 del MP-16)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  La lee el motor `postura` del agente (embebida al compilar con include_str!:
+#  una linea base que se pudiera editar en el host sin firmar seria lo primero
+#  que un intruso bajaria) y la valida una prueba de aegis-vuln (`nucleo`), que
+#  exige una entrada por ajuste y ninguna desconocida.
+#
+#  `minimo` NO es el valor del sysctl: es el RANGO de proteccion, de 0 (ninguna)
+#  hacia arriba, porque el valor no siempre ordena. La escala de cada ajuste:
+#
+#    lockdown                          0 none · 1 integrity · 2 confidentiality
+#    kernel.kptr_restrict              rango = valor (0..2)
+#    kernel.dmesg_restrict             rango = valor (0..1)
+#    kernel.unprivileged_bpf_disabled  0 valor 0 · 1 valor 2 · 2 valor 1 (irreversible)
+#    userns                            0 abiertos · 1 cerrados a no-root
+#                                      (unprivileged_userns_clone=0 o
+#                                      apparmor_restrict_unprivileged_userns=1)
+#                                      · 2 sin espacios de usuario (max=0)
+#    kernel.yama.ptrace_scope          rango = valor (0..3; 3 irreversible)
+#    kernel.perf_event_paranoid        0 valor <= 0 · 1 · 2 · 3 valor >= 3 (Debian)
+#    kernel.kexec_load_disabled        rango = valor (0..1; 1 irreversible)
+#    kernel.modules_disabled           rango = valor (0..1; 1 irreversible)
+#    mac                               0 sin MAC · 1 disponible sin imponer
+#                                      (SELinux permisivo, AppArmor sin perfiles
+#                                      en enforce) · 2 impone
+#
+#  `nivel`:
+#    base         por debajo es una brecha: señal de severidad Baja
+#    recomendado  por debajo es un consejo: severidad Info. Son los ajustes que
+#                 rompen algo legitimo en una parte de los hosts (contenedores
+#                 sin root, carga tardia de modulos, kdump, Secure Boot)
+#
+#  Las elecciones que no son obvias:
+#    - lockdown pide integrity y no confidentiality: confidentiality cierra
+#      bpf_probe_read_kernel y tracefs y deja ciega la telemetria del agente.
+#    - ptrace_scope pide 1, no 3: con 3 ni root lee memoria ajena y el motor de
+#      memoria del agente queda DEGRADADO.
+
+[linea_base]
+"lockdown" = { minimo = 1, nivel = "recomendado" }
+"kernel.kptr_restrict" = { minimo = 1, nivel = "base" }
+"kernel.dmesg_restrict" = { minimo = 1, nivel = "base" }
+"kernel.unprivileged_bpf_disabled" = { minimo = 1, nivel = "base" }
+"userns" = { minimo = 1, nivel = "recomendado" }
+"kernel.yama.ptrace_scope" = { minimo = 1, nivel = "base" }
+"kernel.perf_event_paranoid" = { minimo = 2, nivel = "base" }
+"kernel.kexec_load_disabled" = { minimo = 1, nivel = "recomendado" }
+"kernel.modules_disabled" = { minimo = 1, nivel = "recomendado" }
+"mac" = { minimo = 2, nivel = "base" }

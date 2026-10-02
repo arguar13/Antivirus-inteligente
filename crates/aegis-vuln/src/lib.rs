@@ -28,6 +28,7 @@
 
 pub mod cve;
 pub mod inventory;
+pub mod nucleo;
 pub mod posture;
 pub mod version;
 

@@ -63,6 +63,11 @@ aegis-watchdog = { path = "../aegis-watchdog" }
 # tools/lineabase-agente.txt, y aegis-presupuesto no tiene dependencias.
 aegis-fleet = { path = "../aegis-fleet" }
 aegis-presupuesto = { path = "../aegis-presupuesto" }
+# H-28: la postura de aplicacion (disponible frente a aplicado, con evidencia
+# medida sobre el trabajador confinado) la da aegis-enforce. Es de la casa, de
+# la capa plataforma, y no trae ningun crate nuevo al agente: aegis-sandbox,
+# aegis-scal y thiserror ya estaban.
+aegis-enforce = { path = "../aegis-enforce" }
 # Ola A de la FASE 2 del MP-16: integridad de ficheros de configuracion por
 # significado, forense de memoria en vivo, verificacion cruzada de tareas del
 # kernel y balizas de C2 por el ritmo de las conexiones. Todos entran como
@@ -71,6 +76,10 @@ aegis-presupuesto = { path = "../aegis-presupuesto" }
 aegis-integridad = { path = "../aegis-integridad" }
 aegis-memhunter = { path = "../aegis-memhunter" }
 aegis-l7hunter = { path = "../aegis-l7hunter" }
+# FASE 5.2 del MP-16: la lectura de la postura del kernel y su linea base viven
+# en aegis-vuln (modulo `nucleo`); el agente la relee en caliente como motor.
+# Solo arrastra thiserror, que ya estaba.
+aegis-vuln = { path = "../aegis-vuln" }
 # El verificador eBPF de kintegrity solo existe con la telemetria de kernel.
 aegis-kintegrity = { path = "../aegis-kintegrity", optional = true }
 # Resumen del contenido ya notificado de un fichero vigilado (integridad).

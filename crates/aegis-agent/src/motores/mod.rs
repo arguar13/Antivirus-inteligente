@@ -14,6 +14,9 @@ pub mod integridad;
 pub mod memoria;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 pub mod nucleo;
+#[cfg(target_os = "linux")]
+pub mod postura;
+pub mod rol;
 pub mod secuestro;
 pub mod triaje;
 
@@ -153,26 +156,68 @@ impl Host for HostAgente<'_> {
                 leer_primera_linea(Path::new("/proc/sys/kernel/yama/ptrace_scope")).as_deref(),
             ),
             Requisito::KfuncsTareas => match std::fs::read("/sys/kernel/btf/vmlinux") {
-                Ok(btf) => kfuncs_tareas(&btf),
+                Ok(btf) => kfuncs_tareas(
+                    &btf,
+                    std::fs::read_to_string("/proc/self/status").ok().as_deref(),
+                ),
                 Err(e) => Err(format!("sin /sys/kernel/btf/vmlinux: {e}")),
             },
         }
     }
 }
 
-/// Los kfuncs que necesita la verificacion cruzada de tareas.
-const KFUNCS_TAREAS: [&str; 3] = [
+/// Los kfuncs que llaman los programas de la verificacion cruzada de tareas.
+///
+/// Son TODOS los que `aegis_kintegrity.bpf.c` declara `__ksym`, no una
+/// muestra: una prueba de abajo coteja esta lista con ese fichero.
+const KFUNCS_TAREAS: [&str; 7] = [
     "bpf_iter_task_new",
     "bpf_iter_task_next",
+    "bpf_iter_task_destroy",
     "bpf_task_from_pid",
+    "bpf_task_release",
+    "bpf_rcu_read_lock",
+    "bpf_rcu_read_unlock",
 ];
 
-/// Si el BTF del kernel declara los kfuncs de tareas.
+/// CAP_SYS_ADMIN; desde Linux 5.8 abarca a CAP_BPF y a CAP_PERFMON.
+const CAP_SYS_ADMIN: u32 = 21;
+/// CAP_PERFMON.
+const CAP_PERFMON: u32 = 38;
+/// CAP_BPF.
+const CAP_BPF: u32 = 39;
+
+/// Si este kernel y este proceso pueden sostener la verificacion cruzada de
+/// tareas.
 ///
-/// Se busca el nombre ENTRE NUL en la tabla de cadenas del BTF: la
-/// version del kernel no sirve, porque RHEL los trae por backport y otros los
-/// quitan de la configuracion.
-fn kfuncs_tareas(btf: &[u8]) -> Result<(), String> {
+/// # Lo que se promete, y por que ahora se puede
+///
+/// Que el BTF DECLARE un kfunc no dice que un programa pueda LLAMARLO: el
+/// kernel lo registra por tipo de programa (`kfunc_init`, en
+/// kernel/bpf/helpers.c). Medido en el codigo del kernel:
+///
+/// | kfunc | TRACING | SYSCALL |
+/// |---|---|---|
+/// | `bpf_task_from_pid`, `bpf_task_release` | desde 6.2, cuando aparecen | desde 6.10 |
+/// | `bpf_iter_task_*` (6.7), `bpf_rcu_read_*` (6.2) | todos los tipos | todos los tipos |
+///
+/// Con los programas `SEC("syscall")` esta sonda prometia de mas en 6.7-6.9:
+/// Ubuntu 24.04 (6.8) declara `bpf_task_from_pid` y lo rechaza en ese tipo.
+/// Los programas son ahora iteradores `iter.s/task` (tipo TRACING), y para
+/// TRACING declarado equivale a permitido en todo kernel de la rama principal:
+/// la sonda puede decidir por el BTF. Una prueba de abajo ata esta promesa a
+/// la seccion de los programas del objeto; si alguien vuelve a `syscall`, cae.
+///
+/// Lo que el tipo TRACING exige y el BTF no dice son privilegios: CAP_BPF y
+/// CAP_PERFMON, o CAP_SYS_ADMIN, donde `syscall` se conformaba con CAP_BPF.
+///
+/// Los nombres se buscan ENTRE NUL en la tabla de cadenas del BTF: la version
+/// del kernel no sirve, porque RHEL los trae por backport y otros los quitan
+/// de la configuracion. La ultima palabra la tiene la carga: un kernel con
+/// parches propios que declare y no permita deja el motor sin datos con el
+/// motivo del verificador, y la matriz de kernels lo cuenta como fallo de esta
+/// sonda.
+fn kfuncs_tareas(btf: &[u8], status: Option<&str>) -> Result<(), String> {
     let faltan: Vec<&str> = KFUNCS_TAREAS
         .iter()
         .copied()
@@ -184,12 +229,32 @@ fn kfuncs_tareas(btf: &[u8]) -> Result<(), String> {
         })
         .collect();
     if faltan.is_empty() {
-        Ok(())
+        privilegios_tracing(status)
     } else {
         Err(format!(
             "el kernel no declara {} (Linux 6.7+)",
             faltan.join(", ")
         ))
+    }
+}
+
+/// El conjunto efectivo de capacidades de un `/proc/<pid>/status`.
+fn cap_eff(status: &str) -> Option<u64> {
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("CapEff:"))
+        .and_then(|h| u64::from_str_radix(h.trim(), 16).ok())
+}
+
+/// Si este proceso puede cargar y enlazar un programa TRACING.
+fn privilegios_tracing(status: Option<&str>) -> Result<(), String> {
+    let status = status.ok_or("sin /proc/self/status")?;
+    let caps = cap_eff(status).ok_or("CapEff ilegible en /proc/self/status")?;
+    let tiene = |c: u32| caps & (1u64 << c) != 0;
+    if tiene(CAP_SYS_ADMIN) || (tiene(CAP_BPF) && tiene(CAP_PERFMON)) {
+        Ok(())
+    } else {
+        Err("un programa tracing exige CAP_BPF y CAP_PERFMON, o CAP_SYS_ADMIN".into())
     }
 }
 
@@ -219,24 +284,101 @@ fn memoria_ajena(status: Option<&str>, yama: Option<&str>) -> Result<(), String>
 mod pruebas {
     use super::*;
 
+    /// Una tabla de cadenas de BTF con esos nombres, cada uno entre NUL.
+    fn btf_con(nombres: &[&str]) -> Vec<u8> {
+        let mut b = vec![0u8];
+        for n in nombres {
+            b.extend_from_slice(n.as_bytes());
+            b.push(0);
+        }
+        b
+    }
+
+    /// Un `status` cuyo `CapEff` tiene exactamente esas capacidades.
+    fn status_con(caps: &[u32]) -> String {
+        let mascara = caps.iter().fold(0u64, |m, c| m | (1u64 << c));
+        format!("CapEff: {mascara:016x}")
+    }
+
+    /// El objeto eBPF de la verificacion cruzada, tal y como se compila.
+    const OBJETO_TAREAS: &str =
+        include_str!("../../../../drivers/linux/aegis-bpf/src/aegis_kintegrity.bpf.c");
+
+    /// La seccion de los programas de tareas: iteradores de tareas durmientes,
+    /// que el kernel carga como programas de tipo TRACING.
+    const SECCION_TAREAS: &str = "iter.s/task";
+
     #[test]
     fn los_kfuncs_se_buscan_como_nombres_completos() {
-        let todo = b"\0bpf_iter_task_new\0bpf_iter_task_next\0bpf_task_from_pid\0";
-        assert!(kfuncs_tareas(todo).is_ok());
+        let root = status_con(&[CAP_SYS_ADMIN]);
+        assert!(kfuncs_tareas(&btf_con(&KFUNCS_TAREAS), Some(&root)).is_ok());
         // Ni un prefijo ni un sufijo valen: bpf_iter_task_new_x y
         // xbpf_iter_task_new no declaran bpf_iter_task_new.
-        let prefijo = b"\0bpf_iter_task_new_x\0bpf_iter_task_next\0bpf_task_from_pid\0";
-        assert!(kfuncs_tareas(prefijo)
-            .unwrap_err()
-            .contains("bpf_iter_task_new"));
-        let sufijo = b"\0xbpf_iter_task_new\0bpf_iter_task_next\0bpf_task_from_pid\0";
-        assert!(kfuncs_tareas(sufijo).is_err());
-        let viejo = b"\0bpf_task_from_pid\0";
-        let e = kfuncs_tareas(viejo).unwrap_err();
+        for impostor in ["bpf_iter_task_new_x", "xbpf_iter_task_new"] {
+            let mut nombres = KFUNCS_TAREAS.to_vec();
+            nombres[0] = impostor;
+            let e = kfuncs_tareas(&btf_con(&nombres), Some(&root)).unwrap_err();
+            assert!(e.contains("bpf_iter_task_new"), "{e}");
+        }
+        // Un 6.2-6.6: tiene bpf_task_from_pid y el RCU, no el iterador abierto.
+        let viejo = btf_con(&[
+            "bpf_task_from_pid",
+            "bpf_task_release",
+            "bpf_rcu_read_lock",
+            "bpf_rcu_read_unlock",
+        ]);
+        let e = kfuncs_tareas(&viejo, Some(&root)).unwrap_err();
         assert!(
-            e.contains("bpf_iter_task_new") && e.contains("bpf_iter_task_next"),
+            e.contains("bpf_iter_task_new")
+                && e.contains("bpf_iter_task_destroy")
+                && !e.contains("bpf_task_from_pid"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn el_tipo_tracing_exige_cap_bpf_y_cap_perfmon() {
+        let btf = btf_con(&KFUNCS_TAREAS);
+        let con = |caps: &[u32]| kfuncs_tareas(&btf, Some(&status_con(caps)));
+        assert!(con(&[CAP_BPF, CAP_PERFMON]).is_ok());
+        assert!(con(&[CAP_SYS_ADMIN]).is_ok());
+        // CAP_BPF basta para un programa syscall; para uno tracing, no.
+        let e = con(&[CAP_BPF]).unwrap_err();
+        assert!(e.contains("CAP_PERFMON"), "{e}");
+        assert!(con(&[CAP_PERFMON]).is_err());
+        assert!(con(&[]).is_err());
+        assert!(kfuncs_tareas(&btf, Some("sin campo")).is_err());
+        assert!(kfuncs_tareas(&btf, None).is_err());
+    }
+
+    #[test]
+    fn la_sonda_comprueba_exactamente_los_kfuncs_que_llama_el_objeto() {
+        let mut declarados: Vec<&str> = OBJETO_TAREAS
+            .lines()
+            .map(str::trim_start)
+            .filter(|l| l.starts_with("extern "))
+            .filter_map(|l| l.split_once('(').map(|(antes, _)| antes))
+            .filter_map(|antes| antes.rsplit_once([' ', '*']))
+            .map(|(_, nombre)| nombre)
+            .collect();
+        declarados.sort_unstable();
+        let mut sonda = KFUNCS_TAREAS.to_vec();
+        sonda.sort_unstable();
+        assert_eq!(declarados, sonda);
+    }
+
+    #[test]
+    fn la_promesa_de_la_sonda_esta_atada_al_tipo_de_programa() {
+        // La tabla de `kfuncs_tareas` vale para TRACING: con `SEC("syscall")`
+        // la sonda volveria a prometer en 6.7-6.9 lo que ese tipo no permite.
+        let esperada = format!("SEC({SECCION_TAREAS:?})");
+        let secciones: Vec<&str> = OBJETO_TAREAS
+            .lines()
+            .map(str::trim_start)
+            .filter(|l| l.starts_with("SEC("))
+            .collect();
+        assert_eq!(secciones.len(), 2, "{secciones:?}");
+        assert!(secciones.iter().all(|s| *s == esperada), "{secciones:?}");
     }
 
     #[test]

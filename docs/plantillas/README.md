@@ -137,7 +137,13 @@ de integración y de endurecimiento:
   estado en JSON, comprobar la configuración).
 - **Windows y macOS no son producto.** El driver de Windows compila pero cargar la
   protección viva exige un certificado de Microsoft; en macOS hay análisis de
-  binarios, no un agente. La reputación en la nube tiene cliente pero no servicio.
+  binarios, no un agente.
+- **La reputación k-anónima no es producto.** El cliente (`aegis-intel`, `GET
+  /v1/rep/<prefijo>` en texto) y la ruta del servidor (`/api/reputacion/{prefijo}`,
+  JSON en Redis con una hora de vida) hablan protocolos distintos, ningún
+  instalable consulta y no hay corpus: con cubos casi vacíos el prefijo no da el
+  anonimato de «miles de hashes». Se retira hasta que exista el canal autenticado
+  agente-servidor (FASE 6).
 
 ## Estructura del repositorio
 

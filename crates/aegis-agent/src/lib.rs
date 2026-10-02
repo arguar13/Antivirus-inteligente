@@ -14,6 +14,8 @@
 
 #![deny(missing_docs)]
 
+#[cfg(target_os = "linux")]
+pub mod aplicacion;
 pub mod capacidades;
 pub mod decode;
 pub mod edge_ml;

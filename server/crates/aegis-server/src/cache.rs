@@ -12,6 +12,16 @@
 //! servidor sabe que alguien pregunto por un cubo de miles de hashes posibles,
 //! no por cual. Es el mismo principio del "k-anonymity" de las bases de
 //! contrasenas filtradas.
+//!
+//! # Lo que NO es todavia (FASE 5.4 del MP-16)
+//!
+//! Un servicio en uso. El anonimato de un cubo es el numero de entradas que
+//! tiene, y sin corpus un cubo tiene una o ninguna: quien conoce el corpus
+//! puede adivinar la consulta. Lo que si se sostiene es que el servidor no
+//! aprende nada de un hash que no tenga ya. Ademas, ningun agente consulta esta
+//! ruta (el cliente `aegis-intel` habla `GET /v1/rep/<prefijo>` en texto) y
+//! `registrar_reputacion` renueva el plazo de una hora del cubo ENTERO en cada
+//! alta. Por eso el README no la da como capacidad.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};

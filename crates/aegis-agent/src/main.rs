@@ -21,6 +21,10 @@ use aegis_agent::motores::memoria::MotorMemoria;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::nucleo::MotorNucleo;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
+use aegis_agent::motores::postura::MotorPostura;
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+use aegis_agent::motores::rol::{ConfigRol, MotorRol};
+#[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::secuestro::MotorSecuestro;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::triaje::MotorTriaje;
@@ -449,13 +453,26 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
             Err(m) => (Err(m), MotorEstatico::inerte(), None, None, None),
         };
 
+    // La postura de aplicacion (H-28), SIEMPRE al arrancar, como las
+    // capacidades: con el trabajador confinado como testigo si arranco; sin el,
+    // nada puede salir aplicado. Solo se lee y se publica (solo-auditoria).
+    for l in informar_aplicacion(analista.as_deref()) {
+        eprintln!("aegis-agent: {l}");
+    }
+
     // El arbitro: el UNICO que invoca motores y el unico que combina lo que
     // dicen. Cada motor se registra segun lo que este host le ofrece, y el que
     // no puede correr aqui queda declarado, nunca omitido en silencio.
     let identidad = Identidad::del_host();
+    // Lo que publican por su cuenta la postura del kernel y la linea base por
+    // rol (FASE 5 del MP-16): se suma al informe periodico y a `aegisctl status`.
+    let informe_postura: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let informe_rol: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
     let mut arbitro: Arbitro<EventoAgente> = Arbitro::nuevo(ConfigArbitro::default());
     {
         let host = HostAgente::nuevo(&caps, host_trabajador);
+        let rol = MotorRol::nuevo(ConfigRol::del_host(), Arc::clone(&informe_rol));
+        eprintln!("aegis-agent: rol: {}", rol.resumen());
         let integridad = MotorIntegridad::nuevo(identidad.clone());
         eprintln!(
             "aegis-agent: integridad: vigila {} fichero(s): {}",
@@ -475,6 +492,11 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
             Box::new(MotorMemoria::nuevo()),
             Box::new(MotorNucleo::nuevo(&identidad)),
             Box::new(MotorBaliza::nuevo()),
+            Box::new(MotorPostura::nuevo(
+                identidad.clone(),
+                Arc::clone(&informe_postura),
+            )),
+            Box::new(rol),
         ];
         for m in motores {
             let nombre = m.ficha().nombre;
@@ -537,6 +559,11 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
                 b.ultimo_informe = Instant::now();
                 let mut lineas = informar(&p, &b.arbitro, analista.as_deref());
                 lineas.push(informar_kernel(contadores));
+                for propio in [&informe_postura, &informe_rol] {
+                    if let Ok(g) = propio.lock() {
+                        lineas.extend(g.iter().cloned());
+                    }
+                }
                 // El estado de los motores viaja con el siguiente latido al plano
                 // de control; aqui solo se deja, sin red.
                 if let Some(pc) = plano.as_ref() {
@@ -730,7 +757,7 @@ fn informar(
     ));
     for m in arbitro.estado() {
         lineas.push(format!(
-            "motor {}: camino={} evaluaciones={} senales={} p99_ns={} excesos={} suspensiones={} sin_datos={:?} memoria={}{}",
+            "motor {}: camino={} evaluaciones={} senales={} p99_ns={} excesos={} suspensiones={} sin_datos={:?} memoria={}{}{}",
             m.nombre,
             m.camino.nombre(),
             m.evaluaciones,
@@ -740,6 +767,13 @@ fn informar(
             m.suspensiones,
             m.sin_datos,
             m.memoria,
+            // Lo que el motor dice de si mismo (`Motor::detalle`): el del
+            // nucleo, cuanto del espacio de PID lleva mirado. Va antes del
+            // motivo de «sin datos», que es texto libre y cierra la linea.
+            m.detalle
+                .as_deref()
+                .map(|d| format!(" {d}"))
+                .unwrap_or_default(),
             m.ultimo_sin_datos
                 .as_deref()
                 .map(|u| format!(" ultimo_sin_datos=«{u}»"))
@@ -766,7 +800,30 @@ fn informar(
             e.ultimo_ilegible.as_deref().unwrap_or("-")
         ));
     }
+    lineas.extend(informar_aplicacion(analista));
     lineas
+}
+
+/// La postura de aplicacion, en lineas (H-28).
+///
+/// Con trabajador, la ultima que midio el hilo analista: es el dueño del
+/// trabajador, el unico que puede medirlo sin que su pid cambie de proceso a
+/// mitad. Sin trabajador se mide aqui y sin testigo, y entonces lo mas que
+/// sale es DISPONIBLE. Solo lee `/proc`: no decide ni impide nada.
+#[cfg(all(target_os = "linux", feature = "bpf"))]
+fn informar_aplicacion(analista: Option<&std::sync::Mutex<EstadoAnalista>>) -> Vec<String> {
+    use aegis_agent::aplicacion;
+    let medida = match analista {
+        Some(a) => a.lock().ok().and_then(|g| g.aplicacion.clone()),
+        None => Some(aplicacion::medir(None)),
+    };
+    match medida {
+        Some(m) => aplicacion::lineas(&m),
+        None => vec![
+            "aplicacion: sin medida que publicar (el hilo analista no ha dejado ninguna)"
+                .to_string(),
+        ],
+    }
 }
 
 #[cfg(not(all(target_os = "linux", feature = "bpf")))]
