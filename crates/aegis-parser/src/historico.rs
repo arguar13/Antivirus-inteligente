@@ -652,6 +652,7 @@ fn expresion_interna(
         if precedencia < minimo {
             break;
         }
+        a.operador()?;
         let op = a.avanzar().expect("el operador acaba de comprobarse").token;
         let der = expresion(a, ambito, precedencia + 1, subconsultas)?;
         izq = match op {

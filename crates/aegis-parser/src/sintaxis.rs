@@ -54,6 +54,18 @@ pub const PROFUNDIDAD_MAXIMA: usize = 32;
 /// convierte una consulta barata en un bucle anidado.
 pub const ELEMENTOS_IN_MAXIMOS: usize = 256;
 
+/// Operadores `AND`/`OR` que admite una consulta, contando subconsultas.
+///
+/// El tope de profundidad cuenta el anidamiento explicito, pero una cadena
+/// `a OR b OR c ...` se analiza en un bucle y produce un arbol tan profundo
+/// como largo es la cadena: todo lo que lo recorre (planificar, evaluar,
+/// liberarlo) es recursivo, y con veinte mil terminos desbordaba la pila de un
+/// hilo de 2 MiB y abortaba el servidor. Con este tope ningun arbol de
+/// condicion pasa de `TERMINOS_MAXIMOS + PROFUNDIDAD_MAXIMA` niveles; 256 es el
+/// mismo criterio que [`ELEMENTOS_IN_MAXIMOS`] y deja mas de cuatro veces de
+/// margen sobre lo medido (mil terminos aun caben en 2 MiB).
+pub const TERMINOS_MAXIMOS: usize = 256;
+
 /// Analiza una consulta y la valida contra el esquema.
 pub fn analizar(consulta: &str) -> Result<Consulta, ErrorConsulta> {
     let mut a = Analizador::nuevo(consulta)?;
@@ -96,11 +108,42 @@ pub(crate) struct Analizador {
     pos: usize,
     fin_entrada: usize,
     profundidad: usize,
+    /// Operadores `AND`/`OR` vistos en toda la consulta (ver
+    /// [`TERMINOS_MAXIMOS`]).
+    operadores: usize,
 }
 
 impl Analizador {
     /// Analiza el texto en tokens y prepara el recorrido.
     pub(crate) fn nuevo(consulta: &str) -> Result<Analizador, ErrorConsulta> {
+        if consulta.len() > lexico::ENTRADA_MAXIMA_BYTES {
+            return Err(ErrorConsulta::nuevo(
+                format!(
+                    "la consulta ocupa {} bytes; el maximo es {}",
+                    consulta.len(),
+                    lexico::ENTRADA_MAXIMA_BYTES
+                ),
+                lexico::ENTRADA_MAXIMA_BYTES,
+                consulta.len(),
+            )
+            .con_sugerencia("divide la caceria en varias consultas mas cortas"));
+        }
+        if let Some((i, c)) = consulta
+            .char_indices()
+            .find(|(_, c)| lexico::caracter_vetado(*c))
+        {
+            return Err(ErrorConsulta::nuevo(
+                format!(
+                    "la consulta contiene el caracter U+{:04X}, de control o de direccion de texto",
+                    u32::from(c)
+                ),
+                i,
+                i + c.len_utf8(),
+            )
+            .con_sugerencia(
+                "quitalo: no aparece en ningun dato que se cace y la consola no lo mostraria",
+            ));
+        }
         let tokens = lexico::analizar(consulta).map_err(|(i, f)| {
             ErrorConsulta::nuevo("no entiendo este texto", i, f).con_sugerencia(
                 "AegisQL admite identificadores, numeros y cadenas entre comillas simples",
@@ -115,6 +158,7 @@ impl Analizador {
             pos: 0,
             fin_entrada: consulta.len(),
             profundidad: 0,
+            operadores: 0,
         })
     }
 
@@ -154,6 +198,22 @@ impl Analizador {
     /// Sale de un nivel abierto con [`Analizador::entrar`].
     pub(crate) fn salir(&mut self) {
         self.profundidad = self.profundidad.saturating_sub(1);
+    }
+
+    /// Cuenta un operador `AND`/`OR`; compartido con el historico para que los
+    /// dos dialectos tengan el mismo techo de arbol.
+    pub(crate) fn operador(&mut self) -> Result<(), ErrorConsulta> {
+        self.operadores += 1;
+        if self.operadores > TERMINOS_MAXIMOS {
+            let (i, f) = self.tramo_actual();
+            return Err(ErrorConsulta::nuevo(
+                format!("la condicion tiene mas de {TERMINOS_MAXIMOS} operadores AND/OR"),
+                i,
+                f,
+            )
+            .con_sugerencia("usa IN (...) para listas de valores, o divide la caceria"));
+        }
+        Ok(())
     }
 
     /// Tramo al que apuntar en un error "aqui esperaba otra cosa".
@@ -452,6 +512,7 @@ impl Analizador {
             if precedencia < minimo {
                 break;
             }
+            self.operador()?;
             let op = self
                 .avanzar()
                 .expect("el operador acaba de comprobarse")
@@ -937,6 +998,40 @@ mod pruebas {
             .contains("positivo"));
     }
 
+    /// Una cadena larga de OR/AND no anida nada y aun asi construye un arbol
+    /// tan profundo como larga es: con veinte mil terminos desbordaba la pila
+    /// de un hilo de 2 MiB (los del servidor) y ABORTABA el proceso. Se mide
+    /// en un hilo de ese tamano, que es donde el fallo existia.
+    #[test]
+    fn una_cadena_de_operadores_desmesurada_se_rechaza_sin_desbordar() {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(|| {
+                let cadena = |n: usize, op: &str| {
+                    format!(
+                        "SELECT pid FROM processes WHERE {}",
+                        vec!["uid = 0"; n + 1].join(op)
+                    )
+                };
+                // Justo en el tope: se acepta, y se planifica sin desbordar.
+                for op in [" OR ", " AND "] {
+                    let c = ok(&cadena(TERMINOS_MAXIMOS, op));
+                    let _ = crate::plan::planificar(c);
+                    let e = err(&cadena(TERMINOS_MAXIMOS + 1, op));
+                    assert!(e.mensaje.contains("AND/OR"), "{}", e.mensaje);
+                    // Veinte mil terminos ya no caben en la entrada: se rechaza
+                    // antes de trocearla, que es lo que importa (sin desbordar).
+                    let _ = err(&cadena(20_000, op));
+                }
+                // El historico comparte el contador.
+                let h = crate::historico::analizar(&cadena(20_000, " OR "));
+                assert!(h.is_err(), "el historico tambien tiene que rechazarla");
+            })
+            .expect("hilo de prueba")
+            .join()
+            .expect("sin desborde de pila");
+    }
+
     #[test]
     fn una_lista_in_desmesurada_se_rechaza() {
         let valores: Vec<String> = (0..ELEMENTOS_IN_MAXIMOS + 5)
@@ -957,8 +1052,9 @@ mod pruebas {
     #[test]
     fn una_anidacion_desmesurada_se_rechaza_sin_desbordar_la_pila() {
         // Sin el limite de profundidad esto mata el proceso, y en el servidor
-        // seria una denegacion de servicio de una linea.
-        let n = 5_000;
+        // seria una denegacion de servicio de una linea. Mil niveles caben en
+        // el tope de longitud de la entrada: lo que se prueba es la profundidad.
+        let n = 1_000;
         let q = format!(
             "SELECT pid FROM processes WHERE {}uid = 0{}",
             "(".repeat(n),
