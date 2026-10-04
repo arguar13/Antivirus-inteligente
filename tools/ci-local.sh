@@ -1744,8 +1744,18 @@ paso finales "Finales de linea · ningun fichero del arbol con CRLF" \
 # fichero SE VE ejecutable (NTFS bajo WSL) y en git queda 100644: el primer
 # clon en Linux —el runner de CI— falla con «Permission denied». Paso con
 # veintiun scripts, dieciseis de ellos verificadores, en la FASE 0 del MP-15.
+# Script es todo `.sh` y todo fichero que empieza por `#!`: los scripts de
+# mantenedor del paquete (deploy/paquete/postinst...) y tools/ml/entrenar.py no
+# terminan en .sh, y un guion de commits les quito el +x que tenian en el arbol
+# verificado (el +x vivia solo en el indice y un `git reset` lo borro). dpkg no
+# ejecuta un postinst sin el bit.
 paso permisos "Permisos · todo script versionado es ejecutable en git" \
-    bash -c 'malos="$(git ls-files -s -- "*.sh" | awk "\$1 != \"100755\" {print \$4}")"; \
+    bash -c 'malos="$(git ls-files -s -z | while IFS= read -r -d "" l; do \
+                 m="${l%% *}"; f="${l#*$(printf "\t")}"; [ "$m" = 100755 ] && continue; \
+                 [ "$m" = 120000 ] && continue; \
+                 case "$f" in *.sh) echo "$f"; continue ;; esac; \
+                 [ -f "$f" ] && [ "$(head -c 3 "$f" | tr -d "\000")" = "#!/" ] && echo "$f"; \
+             done)"; \
              [ -z "$malos" ] || { echo "scripts sin bit de ejecucion en git:"; echo "$malos"; \
              echo "arreglo: git update-index --chmod=+x <fichero>"; exit 1; }'
 # Un script con un error de sintaxis no falla hasta que alguien lo ejecuta, y si
