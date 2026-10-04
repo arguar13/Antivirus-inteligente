@@ -46,6 +46,10 @@ set -uo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$RAIZ/tools/ci/_comun.sh"
+source "$RAIZ/tools/toolchain/fijado.sh"
+# Desde la raiz: rustup elige el rustc por rust-toolchain.toml, y la libunwind
+# que se copia al sysroot tiene que salir del rustc fijado.
+cd "$RAIZ" || exit 1
 
 SYSROOT="${AEGIS_MUSL_SYSROOT:-/opt/aegis/musl-sysroot}"
 
@@ -58,7 +62,7 @@ SYSROOT="${AEGIS_MUSL_SYSROOT:-/opt/aegis/musl-sysroot}"
 # `contiene` hace la busqueda sobre una cadena YA capturada, asi que no queda
 # ningun proceso a la izquierda al que SIGPIPE pueda tumbar.
 contiene() {  # contiene <texto> <patron-extendido>
-    printf '%s' "$1" | grep -Eq -- "$2" && return 0 || return 1
+    printf '%s' "$1" | grep >/dev/null -E -- "$2" && return 0 || return 1
 }
 TRIPLE_MUSL="x86_64-linux-musl"
 TRIPLE_RUST="x86_64-unknown-linux-musl"
@@ -96,6 +100,19 @@ if ! hay musl-gcc; then
 fi
 [ "$faltan" -eq 0 ] || exit 1
 ok "musl-dev, musl-tools y linux-libc-dev presentes"
+
+# --- Versiones fijadas -------------------------------------------------------
+# El sysroot se compone SOLO con las versiones de tools/toolchain/fijado.toml. Un
+# `apt upgrade` que cambie musl, las cabeceras del kernel o el compilador cambia
+# el binario que se entrega: si pasa, se ve aqui y se decide subiendo la version
+# fijada, no en silencio.
+paso "versiones fijadas (tools/toolchain/fijado.toml)"
+if ! desvios="$(fijado_desvios_paquetes)"; then
+    fallo "los paquetes de este sistema no son los fijados"
+    printf '%s\n' "$desvios" | sed 's/^/      | /'
+    exit 1
+fi
+ok "paquetes de $(fijado_valor sysroot-musl distribucion) en la version fijada"
 
 # --- Composicion ------------------------------------------------------------
 paso "componer $SYSROOT"
@@ -383,6 +400,18 @@ if ! contiene "$salida" "__NR_bpf=321 .*argp=ok"; then
     exit 1
 fi
 ok "compila, enlaza estatico y ejecuta ($salida)"
+
+# --- Sello ------------------------------------------------------------------
+# De que se construyo este sysroot y que huella tiene. tools/ci/hermetico.sh no
+# construye nada con un sysroot sin sello, sellado por otra receta o con otras
+# versiones, o cuyo arbol haya cambiado despues de sellarlo. Por eso CUALQUIER
+# cambio de este fichero obliga a rehacer el sysroot.
+paso "sello del sysroot"
+if ! fijado_escribir_sello "$SYSROOT" "$RAIZ/tools/toolchain/preparar_musl.sh"; then
+    fallo "no se pudo escribir $SYSROOT/SELLO"
+    exit 1
+fi
+ok "$SYSROOT/SELLO (arbol $(fijado_sello_valor "$SYSROOT/SELLO" arbol | cut -c1-16)...)"
 
 echo
 printf '%sSysroot listo.%s Exporta para cargo:\n' "$NEGRITA" "$FIN"

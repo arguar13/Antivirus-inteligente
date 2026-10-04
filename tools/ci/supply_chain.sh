@@ -8,6 +8,10 @@
 #                dependencias de desarrollo incluidas (.cargo/audit.toml)
 #   cargo-vet    que cada crate de terceros este AUDITADO por alguien de
 #                confianza o figure como excepcion registrada (supply-chain/)
+#   codigo_nativo.py  que el C, C++ y ensamblador que los crates compilan y
+#                enlazan en los instalables este REVISADO, con la licencia de
+#                cada parte (tools/config/codigo-nativo.toml). cargo-deny ve la
+#                licencia del crate, no la del C que vendoriza.
 #
 # POR QUE FALLA SI FALTA UNA HERRAMIENTA
 #
@@ -34,6 +38,11 @@ for herramienta in cargo-deny cargo-audit cargo-vet; do
         FALLOS=$((FALLOS + 1))
     fi
 done
+if ! hay python3; then
+    paso "python3"
+    fallo "falta python3: lo usa la revision del codigo nativo"
+    FALLOS=$((FALLOS + 1))
+fi
 [ "$FALLOS" -eq 0 ] || exit 1
 
 for ws in "${ESPACIOS[@]}"; do
@@ -54,6 +63,23 @@ for ws in "${ESPACIOS[@]}"; do
         || FALLOS=$((FALLOS + 1))
 done
 
+# El codigo nativo que cargo-deny no ve: el C, C++ y ensamblador que compilan
+# los crates con script de construccion y que acaba enlazado en los
+# instalables. Cada crate que lo aporta tiene que estar revisado en su version
+# exacta, con la licencia de cada parte (tools/config/codigo-nativo.toml). Asi
+# entro libelf de elfutils (GPL-2.0-or-later OR LGPL-3.0-or-later) en el agente
+# estatico sin que ninguna puerta lo viera: libbpf-sys declara BSD-2-Clause.
+# Las decisiones de licencia pendientes no fallan, pero se imprimen siempre.
+paso "codigo nativo revisado (tools/config/codigo-nativo.toml)"
+log="$(mktemp)"
+if python3 "$RAIZ/tools/ci/codigo_nativo.py" comprobar > "$log" 2>&1; then
+    ok "$(tail -1 "$log")"
+    grep '^DECISION PENDIENTE' "$log" | sed 's/^/      | /'
+else
+    fallo; tail -40 "$log" | sed 's/^/      | /'; FALLOS=$((FALLOS + 1))
+fi
+rm -f "$log"
+
 # La excepcion de RUSTSEC-2023-0071 (rsa, «Marvin Attack») en deny.toml y en
 # .cargo/audit.toml se sostiene SOLO mientras rsa se use para verificar con
 # clave publica. Si alguien introduce una operacion con clave privada RSA en
@@ -70,6 +96,23 @@ if [ -z "$privadas" ]; then
 else
     fallo "hay operaciones con clave privada RSA: la excepcion ya no vale"
     printf '%s\n' "$privadas" | sed 's/^/      | /'
+    FALLOS=$((FALLOS + 1))
+fi
+
+# wasmtime solo como oraculo de PRUEBAS, sin modelo de componentes. Sostiene las
+# excepciones de wasmtime de .cargo/audit.toml: todas suponen que wasmtime no
+# llega a nada que se distribuye (solo lo arrastra yara-x, dependencia de prueba
+# de aegis-patron) y RUSTSEC-2026-0327 supone ademas que `component-model` no se
+# compila. Si cualquiera deja de ser cierto, las excepciones mienten: esto falla.
+paso "wasmtime solo en pruebas y sin modelo de componentes (sostiene sus excepciones)"
+distribuido="$(cargo tree -q --workspace -e no-dev --target all -i wasmtime 2>&1 || true)"
+componentes="$(cargo tree -q --workspace --target all -e features -i wasmtime 2>/dev/null \
+    | grep -o 'wasmtime feature "component-model[a-z-]*"' | sort -u || true)"
+if [ -z "$distribuido" ] && [ -z "$componentes" ]; then
+    ok
+else
+    fallo "wasmtime llega a lo que se distribuye o compila el modelo de componentes: sus excepciones ya no valen"
+    printf '%s\n%s\n' "$distribuido" "$componentes" | sed '/^$/d; s/^/      | /'
     FALLOS=$((FALLOS + 1))
 fi
 

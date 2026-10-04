@@ -257,7 +257,7 @@ if [ "$SOLO" = "--reanudar" ]; then
     SIN_GRUPO=""
     for g in $(grep -oE '\$SOLO" (=|!=) "[a-z0-9][a-z0-9-]*"' "$0" \
                    | grep -oE '"[a-z0-9][a-z0-9-]*"$' | tr -d '"' | sort -u); do
-        echo "$LISTA" | grep -qxF "$g" || SIN_GRUPO="$SIN_GRUPO $g"
+        echo "$LISTA" | grep >/dev/null -xF "$g" || SIN_GRUPO="$SIN_GRUPO $g"
     done
     if [ -n "$SIN_GRUPO" ]; then
         printf '%s==> La lista de grupos no cubre:%s%s\n' "$ROJO" "$SIN_GRUPO" "$FIN"
@@ -338,7 +338,11 @@ if [ "$SOLO" = "--reanudar" ]; then
         # esta maquina, y `reproducible` compila dos veces, una desde cero. No
         # estan colgados: compilan.
         plazo="$PLAZO_POR_GRUPO"
-        [ "$g" = "kernels" ] && plazo="${PLAZO_KERNELS:-150m}"
+        # kernels: 8 microVM KVM (rapidas, 3 en paralelo) y 2 arm64 EMULADAS. Con
+        # el ciclo de vida de paquetes (FASE 3) y el rango de 5 tecnicas (FASE 4)
+        # cada arm64 llega a ~90 min bajo emulacion (plazo_emulado_s de
+        # kernels.toml), asi que el tope del grupo deja sitio a la tanda emulada.
+        [ "$g" = "kernels" ] && plazo="${PLAZO_KERNELS:-240m}"
         case "$g" in
             hermetico | reproducible) plazo="${PLAZO_COMPILACION:-120m}" ;;
         esac
@@ -386,6 +390,14 @@ paso() {
         FALLOS=$((FALLOS + 1))
     fi
 }
+
+# La toolchain antes que nada: todo lo que sigue compila, y un verde obtenido
+# con otro compilador no dice nada del artefacto que se entrega.
+# rust-toolchain.toml la elige; esto comprueba que es la fijada
+# (tools/toolchain/fijado.toml). El sysroot musl lo comprueba hermetico.sh.
+# Coste: leer dos versiones y un manifiesto; segundos.
+paso toolchain "Toolchain · rustc, cargo y rust-std son los fijados" \
+    ./tools/toolchain/comprobar_toolchain.sh
 
 paso rust  "Rust · formato"            cargo fmt --all --check
 paso rust  "Rust · clippy (-D warnings)" cargo clippy --all-targets -- -D warnings
@@ -1413,6 +1425,23 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "motores" ]; then
     fi
 fi
 
+# Motor Sigma del agente (FASE 4 del MP-16): el compilador y el evaluador sin
+# retroceso compartidos con la fabrica, el origen del contenido fijado a un
+# commit de SigmaHQ con licencia y atribucion, y cada regla probada con eventos
+# GENERADOS desde la propia regla, en el motor del agente. Sin contenido
+# importado no falla: lo declara («SIN CONTENIDO»).
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "sigma" ]; then
+    printf '%s==>%s Sigma · reglas en el agente, eventos generados y presupuesto de FP\n' "$GRIS" "$FIN"
+    if ./tools/verificar-sigma.sh > $LOGS/aegis-sigma-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-sigma-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-sigma-ci.log | tail -40
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
 # Trabajador confinado (FASE 1 del MP-16): los parsers de bytes hostiles corren
 # en un proceso aparte con seccomp, Landlock, sin red, uid propio, cgroup y
 # plazo. Confinamiento real como root, la invariante «ningun parser sin objetivo
@@ -1425,6 +1454,22 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "trabajador" ]; then
     else
         printf '    %sFALLO%s\n' "$ROJO" "$FIN"
         sed 's/^/    | /' $LOGS/aegis-trabajador-ci.log | tail -60
+        FALLOS=$((FALLOS + 1))
+    fi
+fi
+
+# Canal de contenido firmado (FASE 4.5 del MP-16): reglas y modelos separados
+# del binario, con firma hibrida, epoca monotona, anillos, modo por regla,
+# apagado individual y rollback. Y la puerta de publicacion sobre contenido/:
+# un paquete que rompe un motor no llega a publicarse.
+if [ -z "${SOLO:-}" ] || [ "$SOLO" = "contenido" ]; then
+    printf '%s==>%s Contenido · canal firmado y puerta de publicacion\n' "$GRIS" "$FIN"
+    if ./tools/verificar-contenido.sh > $LOGS/aegis-contenido-ci.log 2>&1; then
+        sed 's/^/    | /' $LOGS/aegis-contenido-ci.log
+        printf '    %sOK%s\n' "$VERDE" "$FIN"
+    else
+        printf '    %sFALLO%s\n' "$ROJO" "$FIN"
+        sed 's/^/    | /' $LOGS/aegis-contenido-ci.log | tail -40
         FALLOS=$((FALLOS + 1))
     fi
 fi
@@ -1633,7 +1678,15 @@ if [ -z "${SOLO:-}" ] || [ "$SOLO" = "redteam" ]; then
         cargo build -q -p aegis-syscallguard --example syscall_probe 2>/dev/null
         cargo build -q -p aegis-fleet --example fleet_probe 2>/dev/null
         make -C drivers/linux/aegis-bpf build sign >/dev/null 2>&1 || true
-        if python3 tests/red_team_sim.py > $LOGS/aegis-redteam.log 2>&1; then
+        # El escenario 1 examina target/release/aegis-agent. Se compila AQUI, de
+        # este arbol: si no, juzgaba el binario que hubiera dejado en disco otro
+        # grupo u otra tanda, y su veredicto hablaba de otro codigo (en verde o en
+        # rojo). Misma orden que los grupos presupuesto y trabajador.
+        if ! cargo build -q --release -p aegis-agent > $LOGS/aegis-redteam-build.log 2>&1; then
+            printf '    %sFALLO%s: no compila el agente de release que examina el escenario 1\n' "$ROJO" "$FIN"
+            sed 's/^/    | /' $LOGS/aegis-redteam-build.log | tail -30
+            FALLOS=$((FALLOS + 1))
+        elif python3 tests/red_team_sim.py > $LOGS/aegis-redteam.log 2>&1; then
             printf '    %sOK%s\n' "$VERDE" "$FIN"
         else
             printf '    %sFALLO%s\n' "$ROJO" "$FIN"
@@ -1671,10 +1724,18 @@ fi
 #   arquitectura   capas sin ciclos, idioma unico de nombres, modelo de amenazas
 #   cadena         cargo-deny, cargo-audit y cargo-vet en los cuatro workspaces
 #   hermetico      binarios estaticos musl de los instalables (FALLA sin sysroot)
+#   auditoria      (FASE 7 del MP-16) SBOM contra Cargo.lock y licencias; SBOM y
+#                  procedencia SLSA v1 del build junto a dist-hermetico/
+#   paquetes       (FASE 3 del MP-16) .deb y .rpm del agente, construidos dos
+#                  veces desde los binarios hermeticos: mismos SHA-256
 #   kernels        cada distribucion de tools/config/kernels.toml en su microVM:
 #                  capacidades, verificador eBPF y pruebas e2e. OBLIGATORIA: sin
 #                  KVM no hay veredicto, y no hay verde
+#   marcador       (FASE 4 del MP-16) scorecard con lo que la matriz acaba de
+#                  medir, en target/marcador/; lo no medido dice «sin medir»
 #   documentacion  README y matriz de capacidades coinciden con el codigo
+#   runbooks       (FASE 7 del MP-16) cada orden de nuestros binarios citada en
+#                  docs/operacion/ y deploy/ existe en su --help
 # ─────────────────────────────────────────────────────────────────────────────
 paso finales "Finales de linea · ningun fichero del arbol con CRLF" \
     bash -c 'crlf="$(git ls-files --eol | grep "w/crlf" || true)"; \
@@ -1687,12 +1748,31 @@ paso permisos "Permisos · todo script versionado es ejecutable en git" \
     bash -c 'malos="$(git ls-files -s -- "*.sh" | awk "\$1 != \"100755\" {print \$4}")"; \
              [ -z "$malos" ] || { echo "scripts sin bit de ejecucion en git:"; echo "$malos"; \
              echo "arreglo: git update-index --chmod=+x <fichero>"; exit 1; }'
+# Un script con un error de sintaxis no falla hasta que alguien lo ejecuta, y si
+# no lo ejecuta ninguna puerta no falla nunca: tools/ci/artifacts.sh estuvo roto
+# sin que nada lo dijera. `bash -n` (o `sh -n` para los de #!/bin/sh) sobre todo
+# script de shell versionado. Coste: leer cada script una vez; segundos.
+paso sintaxis "Sintaxis · todo script de shell versionado se puede analizar" \
+    ./tools/ci/sintaxis_shell.sh
 paso arquitectura "Arquitectura · capas, idioma de los nombres y modelo de amenazas" \
     cargo xtask arquitectura
 paso cadena "Cadena de suministro · deny, audit y vet en los cuatro workspaces" \
     ./tools/ci/supply_chain.sh
 paso hermetico "Artefactos hermeticos · binarios estaticos de los instalables" \
     ./tools/ci/hermetico.sh
+# FASE 7 del MP-16: paquete para auditoria externa. Va justo detras de los
+# artefactos hermeticos porque los necesita. Primero, sin tocar nada, compara
+# el SBOM versionado (docs/generado/auditoria/sbom/) con el Cargo.lock y exige
+# licencia a cada crate; despues comprueba que dist-hermetico/ sale de ESTE
+# arbol (HUELLA) y coincide con su SHA256SUMS, y solo entonces escribe a su
+# lado el SBOM con el hash de cada binario y la procedencia SLSA v1, sin
+# firmar. Una procedencia de otro arbol seria una procedencia falsa.
+# Coste: compilar y probar xtask, dos `cargo tree` por instalable y un
+# sha256sum de los binarios; del orden de un minuto, disco y RAM despreciables.
+paso auditoria "Auditoria externa · pruebas de xtask (SBOM, extractores, SLSA)" \
+    cargo test --locked --manifest-path xtask/Cargo.toml
+paso auditoria "Auditoria externa · SBOM contra Cargo.lock, licencias y procedencia del build" \
+    cargo xtask sbom --comprobar --dist dist-hermetico
 # H-06: los MISMOS instalables, construidos dos veces (un destino con cache y
 # otro desde cero, SOURCE_DATE_EPOCH del commit) y con el SHA-256 comparado; si
 # difieren, FALLA con diagnostico. Va junto a `hermetico` porque necesita lo
@@ -1700,18 +1780,44 @@ paso hermetico "Artefactos hermeticos · binarios estaticos de los instalables" 
 # grupos caros: una construccion hermetica entera por tanda, mas la incremental.
 paso reproducible "Reproducibilidad · los instalables construidos dos veces dan el mismo SHA-256" \
     ./tools/construir-reproducible.sh
+# FASE 3 del MP-16: los paquetes .deb y .rpm del agente, construidos DOS veces
+# desde los binarios de `hermetico` y comparados byte a byte (SOURCE_DATE_EPOCH
+# del commit). Construye en directorios temporales: no toca el arbol. La matriz
+# de kernels los instala, actualiza, revierte y quita de verdad con dpkg y rpm.
+# Coste: dos empaquetados de binarios ya hechos, segundos.
+paso paquetes "Paquetes · .deb y .rpm reproducibles desde los binarios hermeticos" \
+    ./tools/empaquetar.sh --comprobar-reproducible --arq x86_64
 # La matriz CONSTRUYE lo que prueba: las sondas y el verificador de x86-64, y los
 # artefactos cruzados de aarch64 (sondas, verificador y agente). Usar artefactos
 # que ya estuvieran en disco probaria un arbol que no es este, y en un runner
 # limpio no existirian. El agente hermetico de x86-64 lo deja el grupo
 # `hermetico` (el de reproducibilidad construye en otros destinos y no lo toca).
+# Los paquetes .deb y .rpm de las dos arquitecturas (FASE 3 del MP-16) se
+# empaquetan aqui desde esos binarios, en dist-paquetes[-aarch64]/ (fuera de
+# git), con la HUELLA de los binarios: xtask no los mete en la microVM si
+# salen de otro arbol.
 paso kernels "Matriz de kernels · cada distribucion real en su microVM" \
     bash -c 'make -C drivers/linux/aegis-bpf build verify-estatico \
              && cargo xtask kernels traer \
              && tools/matriz-kernels/construir-cruzado.sh aarch64 \
+             && tools/empaquetar.sh --matriz --arq x86_64 \
+             && tools/empaquetar.sh --matriz --arq aarch64 \
              && cargo xtask kernels ejecutar'
+# El scorecard publico (FASE 4 del MP-16): cada cifra sale de lo que la matriz
+# acaba de medir y lo que no se midio dice «sin medir». Se genera en
+# target/marcador/ (escribir en el arbol cambiaria su huella a mitad de tanda);
+# `cargo xtask marcador --publicar` lo lleva a docs/generado/ antes del commit.
+paso marcador "Scorecard · cobertura ATT&CK, deteccion, FP y latencia medidos" \
+    cargo xtask marcador
 paso documentacion "Documentacion generada · README y matriz coinciden con el codigo" \
     cargo xtask docs --comprobar
+# FASE 7 del MP-16: un runbook o un fichero de deploy/ que cita una opcion que
+# el binario no tiene falla aqui, y no a las tres de la madrugada (H-30, H-40).
+# Coste: una construccion de depuracion de aegis-agent, aegisctl y
+# aegis-watchdog (reutiliza lo que dejo `rust` donde las features coinciden)
+# y leer su --help; disco y RAM, los de esa construccion.
+paso runbooks "Runbooks · cada orden citada existe en el --help de su binario" \
+    ./tools/verificar-runbooks.sh
 
 # AegisSupremacy (FASE 112): la demostracion sobre las 63 categorias, con veto
 # sobre el PROYECTO ENTERO. Comprueba que la tabla de docs/107 tiene las 63 y que

@@ -69,7 +69,17 @@ if [ ! -x "$CCWRAP" ]; then
 fi
 ok "$SYSROOT"
 
-if ! rustup target list --installed 2>/dev/null | grep -qx "$TRIPLE"; then
+# --- La toolchain fijada ----------------------------------------------------
+# Un artefacto hermetico construido con otro rustc, otra musl u otro gcc es OTRO
+# artefacto aunque salga del mismo commit. Antes de construir nada se exige la
+# toolchain de tools/toolchain/fijado.toml y un sysroot sellado por la receta
+# actual con esas mismas versiones.
+if ! "$RAIZ/tools/toolchain/comprobar_toolchain.sh" --sysroot "$SYSROOT"; then
+    fallo "la toolchain o el sysroot no son los fijados: no se construye nada"
+    exit 1
+fi
+
+if ! rustup target list --installed 2>/dev/null | grep >/dev/null -x "$TRIPLE"; then
     fallo "falta el objetivo de Rust $TRIPLE"
     echo "      | instalalo con: rustup target add $TRIPLE"
     exit 1
@@ -178,12 +188,12 @@ for b in "${CONSTRUIDOS[@]}"; do
     ruta="$DIST/$b"
     problemas=""
 
-    if readelf -l "$ruta" 2>/dev/null | grep -q "INTERP"; then
+    if readelf -l "$ruta" 2>/dev/null | grep >/dev/null "INTERP"; then
         problemas="$problemas PT_INTERP"
     fi
     dinamicas="$(readelf -d "$ruta" 2>/dev/null | grep -cE "\(NEEDED\)" || true)"
     [ "${dinamicas:-0}" -gt 0 ] && problemas="$problemas ${dinamicas}xNEEDED"
-    if readelf -d "$ruta" 2>/dev/null | grep -qE "\(RPATH\)|\(RUNPATH\)"; then
+    if readelf -d "$ruta" 2>/dev/null | grep >/dev/null -E "\(RPATH\)|\(RUNPATH\)"; then
         problemas="$problemas RPATH"
     fi
     # El simbolo nulo del indice 0 siempre es UND: no cuenta.
@@ -251,6 +261,7 @@ huella        : $HUELLA
 objetivo      : $TRIPLE
 enlazado      : $MODO
 sysroot       : $SYSROOT
+sello sysroot : $(sed -n 's/^arbol=//p' "$SYSROOT/SELLO" 2>/dev/null)
 compilador C  : $($CCWRAP --version 2>/dev/null | head -1)
 compilador    : $(rustc --version 2>/dev/null)
 rustflags     : ${FLAGS_RUST[*]}

@@ -46,8 +46,11 @@ echo "      | artefactos universales (sin dependencia de la libc): tools/ci/herm
 # La lista sale de tools/config/instalables.toml (la unica del proyecto): los
 # binarios del workspace del agente, como `paquete:binario:features`.
 mapfile -t PUBLICADOS < <(cargo xtask instalables --workspace agente)
+if [ "${#PUBLICADOS[@]}" -eq 0 ]; then
+    fallo "cargo xtask instalables no devolvio ningun binario del agente"
+    exit 1
+fi
 DIR_TARGET="${CARGO_TARGET_DIR:-$RAIZ/target}"
-)
 
 rm -rf "$DIST"; mkdir -p "$DIST"
 FALLOS=0
@@ -91,7 +94,7 @@ for b in "${CONSTRUIDOS[@]}"; do
     else
         descripcion="(sin 'file' para inspeccionar)"
     fi
-    if printf '%s' "$descripcion" | grep -q "statically linked"; then
+    if printf '%s' "$descripcion" | grep >/dev/null "statically linked"; then
         ESTATICOS=$((ESTATICOS+1))
     else
         DINAMICOS=$((DINAMICOS+1))
@@ -134,7 +137,7 @@ for b in "${CONSTRUIDOS[@]}"; do
     if ! [ -s "$DIST/$b" ]; then
         printf '      | %-18s VACIO\n' "$b"; HUMO=$((HUMO+1)); continue
     fi
-    if hay file && ! file -b "$DIST/$b" | grep -q "ELF 64-bit.*executable"; then
+    if hay file && ! file -b "$DIST/$b" | grep >/dev/null "ELF 64-bit.*executable"; then
         printf '      | %-18s no es un ejecutable ELF de 64 bits\n' "$b"
         HUMO=$((HUMO+1)); continue
     fi

@@ -1,0 +1,158 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Código nativo de terceros que entra en los binarios instalables
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  cargo-deny juzga cada crate por el campo `license` de su Cargo.toml. Un crate
+#  que VENDORIZA código C declara ahí la licencia de sus enlaces de Rust, no la
+#  del C que compila y enlaza estáticamente: libbpf-sys dice BSD-2-Clause y lleva
+#  dentro libelf de elfutils (GPL-2.0-or-later OR LGPL-3.0-or-later) y zlib. Con
+#  la feature `hermetico` las dos acaban DENTRO del agente estático, y ninguna
+#  puerta lo veía.
+#
+#  Esta es la lista REVISADA de ese código. La lee
+#  `tools/ci/codigo_nativo.py comprobar` (tools/ci/supply_chain.sh, grupo
+#  `cadena` de make ci), que FALLA si:
+#
+#    - un crate de terceros del grafo de dependencias NORMALES de los
+#      instalables (tools/config/instalables.toml) compila o trae código nativo
+#      —`links`, o script de construcción con cc/cmake, o fuentes C/C++/
+#      ensamblador u objetos precompilados— y no está aquí con su versión EXACTA;
+#    - una entrada ya no está en el grafo (la lista no puede mentir por exceso);
+#    - `licencia_cargo` no es lo que dice el Cargo.toml del crate;
+#    - ninguna de las alternativas (OR) de un componente es admisible —todas sus
+#      partes (AND) en `[licenses] allow` de deny.toml, la misma lista con la que
+#      cargo-deny juzga los crates— y el componente no declara
+#      `decision_pendiente`; o la declara y una alternativa ya es admisible;
+#    - falta un fichero de licencia declarado.
+#
+#  Las decisiones pendientes NO hacen fallar la puerta, pero la puerta las
+#  imprime cada vez: son decisiones del propietario (licencias), no de CI, y
+#  mientras estén abiertas se ven. Esta lista no elige licencias ni genera
+#  avisos de terceros: eso depende de esas decisiones.
+#
+#  Revisar una entrada es leer el crate EN ESA VERSIÓN: qué C trae, bajo qué
+#  licencia está cada parte, qué se compila con las features que usamos. Una
+#  versión nueva es código nuevo y se revisa otra vez: por eso la clave es
+#  nombre + versión exacta, y por eso la puerta falla al subirla.
+#
+#  `origen` es la expresión SPDX del autor de cada parte.
+
+# Espacios de trabajo con instalables y los objetivos para los que se
+# construyen. El grafo depende del objetivo (dependencias por `cfg`), así que se
+# recorre para cada uno. Un workspace con instalables que no esté aquí hace
+# fallar la puerta.
+[espacios.agente]
+manifiesto = "Cargo.toml"
+# x86-64: el agente hermético (musl). aarch64: el agente cruzado de la matriz
+# de kernels (tools/matriz-kernels/construir-cruzado.sh).
+objetivos = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-gnu"]
+
+[espacios.servidor]
+manifiesto = "server/Cargo.toml"
+objetivos = ["x86_64-unknown-linux-gnu"]
+
+# ─── Crates con código nativo ────────────────────────────────────────────────
+
+[[crate]]
+nombre = "libbpf-sys"
+version = "1.7.0+v1.7.0"
+licencia_cargo = "BSD-2-Clause"
+revision = "Hallazgo de auditoría: el C vendorizado no lo ve cargo-deny."
+nota = """
+Con la feature `hermetico` del agente (libbpf-rs/vendored) se compilan desde este
+crate libbpf, libelf y zlib y se enlazan estáticamente. Sin ella (`bpf`, la de
+desarrollo) solo libbpf sale de aquí y libelf/zlib son las .so del anfitrión. El
+agente cruzado de aarch64 (`estatico-sistema`, tools/matriz-kernels/) enlaza la
+libelf.a, libz.a y la glibc estática (LGPL-2.1-or-later) de la DISTRIBUCIÓN:
+solo sirve para la matriz de kernels y no se distribuye; si algún día se
+distribuye, entra en la misma decisión de licencias que libelf."""
+
+[[crate.componente]]
+nombre = "enlaces de Rust de libbpf-sys"
+origen = "BSD-2-Clause"
+ficheros_licencia = ["LICENSE"]
+
+[[crate.componente]]
+nombre = "libbpf v1.7.0 (libbpf/CHECKPOINT-COMMIT ca0f39a369c5f927c3d004e63a5a778b08a9df94)"
+origen = "LGPL-2.1 OR BSD-2-Clause"
+ficheros_licencia = ["libbpf/LICENSE", "libbpf/LICENSE.BSD-2-Clause"]
+
+[[crate.componente]]
+nombre = "libelf de elfutils 0.191 (solo libelf/; ni libdw ni las herramientas)"
+origen = "GPL-2.0-or-later OR LGPL-3.0-or-later"
+ficheros_licencia = ["elfutils/COPYING-LGPLV3", "elfutils/COPYING", "elfutils/COPYING-GPLV2"]
+decision_pendiente = """
+Ninguna de sus dos licencias es admisible tal cual en un binario estático que se
+distribuye: qué licencia aplicar y cómo cumplirla (o sustituir libelf) lo decide
+el propietario. Pregunta abierta junto con la licencia del propio proyecto."""
+
+[[crate.componente]]
+nombre = "zlib 1.2.13"
+origen = "Zlib"
+ficheros_licencia = ["zlib/LICENSE"]
+
+[[crate]]
+nombre = "ring"
+version = "0.17.14"
+licencia_cargo = "Apache-2.0 AND ISC"
+revision = "Hallazgo de auditoría. Llega por rustls y rcgen (aegis-fleet) y también al servidor (aegis-server)."
+
+[[crate.componente]]
+nombre = "ring: C y ensamblador propios y de BoringSSL"
+origen = "Apache-2.0 AND ISC"
+ficheros_licencia = ["LICENSE", "LICENSE-BoringSSL", "LICENSE-other-bits"]
+
+[[crate]]
+nombre = "blake3"
+version = "1.8.7"
+licencia_cargo = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
+revision = "Hallazgo de auditoría. El script compila con cc las rutas SIMD en C/ensamblador."
+
+[[crate.componente]]
+nombre = "BLAKE3: implementaciones SIMD en C y ensamblador"
+origen = "CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception"
+ficheros_licencia = ["LICENSE_A2"]
+
+[[crate]]
+nombre = "vsprintf"
+version = "2.0.0"
+licencia_cargo = "MIT"
+revision = "Hallazgo de auditoría. Llega por libbpf-rs (agente)."
+
+[[crate.componente]]
+nombre = "src/lib.c: envoltorio de vsnprintf"
+origen = "MIT"
+ficheros_licencia = ["LICENSE"]
+
+[[crate]]
+nombre = "tract-linalg"
+version = "0.23.8"
+licencia_cargo = "MIT OR Apache-2.0"
+revision = """
+Hallazgo de auditoría. Llega por tract-onnx (aegis-edgeml, agente): su script
+genera ensamblador de kernels de álgebra lineal desde plantillas y lo compila
+con cc."""
+
+[[crate.componente]]
+nombre = "tract-linalg: kernels en ensamblador generados desde plantillas"
+origen = "MIT OR Apache-2.0"
+ficheros_licencia = ["LICENSE-APACHE", "LICENSE-MIT"]
+
+[[crate]]
+nombre = "rayon-core"
+version = "1.13.0"
+licencia_cargo = "MIT OR Apache-2.0"
+revision = "Llega por tract-onnx (feature por defecto `transformers` -> tract-transformers -> rayon)."
+# Declara `links = "rayon-core"` y por eso la puerta lo detecta, pero no enlaza
+# nada: su build.rs solo existe para que `links` impida dos rayon-core en el
+# mismo binario. Si una versión nueva compilara algo, la puerta lo diría.
+sin_codigo_nativo = "solo `links` para impedir dos copias; build.rs vacío, sin fuentes nativas"
+
+# ─── Lo que aporta el sysroot musl (no son crates; la puerta no lo recorre) ──
+#
+# musl libc 1.2.5 (MIT), la libunwind de LLVM del rust-std de musl
+# (Apache-2.0 WITH LLVM-exception) y la biblioteca estándar de Rust
+# (MIT OR Apache-2.0). argp-standalone y musl-obstack (LGPL) están en el
+# sysroot porque el configure de elfutils los exige, pero NO se enlazan en el
+# agente: libbpf-sys solo pide -lelf -lz -lbpf, y si libelf.a los necesitara el
+# enlace fallaría. Entran en la misma decisión de licencias si eso cambia.

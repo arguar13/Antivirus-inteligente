@@ -33,7 +33,7 @@ REDIS_URL="${AEGIS_TEST_REDIS_URL:-redis://127.0.0.1:6379}"
 export PGCONNECT_TIMEOUT=5
 
 pg_responde() {
-    psql -X -w -t -A -c 'SELECT 1' "$PG_URL" 2>/dev/null | grep -qx 1
+    psql -X -w -t -A -c 'SELECT 1' "$PG_URL" 2>/dev/null | grep >/dev/null -x 1
 }
 
 redis_responde() {
@@ -114,7 +114,7 @@ arrancar_postgresql() {
     base="${base%%\?*}"
     if [ -n "$base" ]; then
         if ! runuser -u postgres -- psql -X -p "$puerto" -t -A \
-                -c "SELECT 1 FROM pg_database WHERE datname = '$base'" | grep -qx 1; then
+                -c "SELECT 1 FROM pg_database WHERE datname = '$base'" | grep >/dev/null -x 1; then
             printf '==> creando la base de pruebas %s\n' "$base"
             if ! runuser -u postgres -- createdb -p "$puerto" "$base"; then
                 printf '%sFALLO%s no se pudo crear la base %s\n' "$ROJO" "$FIN" "$base"

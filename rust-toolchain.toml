@@ -1,0 +1,29 @@
+# Toolchain de Rust con la que se construye y se prueba AegisCore.
+#
+# rustup la aplica a TODO cargo que se lance dentro del repositorio (los cuatro
+# espacios de trabajo: raiz, server/, swarm-net/ y xtask/). Hasta ahora la
+# version la decidia la maquina —el `default` de rustup de quien lanzara la
+# tanda— y tres sitios decian tres cosas: el runner 1.94.0, la imagen hermetica
+# 1.94.1 y el workflow de GitHub `stable`. Dos construcciones del mismo commit
+# podian salir de compiladores distintos sin que nada lo dijera.
+#
+# No es el MSRV: `rust-version` del Cargo.toml raiz (1.85) sigue siendo el piso
+# que el codigo promete. Esto es el compilador EXACTO de los artefactos.
+#
+# Los hashes de este canal (rustc, cargo y los rust-std de cada objetivo) estan
+# en tools/toolchain/fijado.toml, y tools/toolchain/comprobar_toolchain.sh
+# (grupo `toolchain` de make ci) FALLA si el compilador en uso no es este.
+# El fuzzing sigue usando su nightly fijada (tools/toolchain/nightly-fuzz.txt)
+# con `cargo +<nightly>`, que tiene prioridad sobre este fichero.
+#
+# Para subir de version: cambiar `channel` aqui y los valores de fijado.toml en
+# el MISMO commit (los da rustup en lib/rustlib/multirust-channel-manifest.toml).
+# `targets`: los dos objetivos que construye make ci (el hermetico de x86-64 y
+# el cruzado de aarch64 de la matriz de kernels). rustup instala los que falten;
+# los que ya haya (deploy/ci/instalar-runner.sh anade aarch64-unknown-linux-musl)
+# no se tocan.
+[toolchain]
+channel = "1.94.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-gnu"]

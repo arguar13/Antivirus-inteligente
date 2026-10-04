@@ -282,3 +282,36 @@ make -C drivers/linux/aegis-bpf core-check   # ¿lleva reubicaciones CO-RE?
 make -C drivers/linux/aegis-bpf core-matrix  # ¿reubican contra otros kernels?
 make -C drivers/linux/aegis-bpf verify       # ¿las acepta el verificador?
 ```
+
+## 37.5 Toolchain fijada y código nativo revisado
+
+Un artefacto hermético es función del código **y** de la toolchain. Hasta ahora
+nada fijaba el compilador —cada máquina usaba el `default` de su rustup; el
+runner instalaba un canal, la imagen otro y el workflow `stable`— ni el sysroot,
+que se componía con la musl y las cabeceras que tuviera la distribución.
+
+- `rust-toolchain.toml` elige el canal; `tools/toolchain/fijado.toml` fija la
+  salida exacta de `rustc --version` y `cargo --version`, el manifiesto del
+  canal, el SHA-256 de cada `rust-std` y las versiones de los paquetes con los
+  que se compone el sysroot y se compila el C (musl, UAPI, gcc, binutils).
+- `preparar_musl.sh` no compone un sysroot con otras versiones y deja en él un
+  `SELLO`: la receta por su SHA-256, el `rustc` del que sale la libunwind, las
+  versiones y la huella del árbol. Cambiar la receta obliga a rehacer el
+  sysroot.
+- `tools/toolchain/comprobar_toolchain.sh` es la puerta: grupo `toolchain` de
+  `make ci` (Rust) y primer paso de `hermetico.sh` (Rust y sysroot).
+
+El agente estático lleva dentro código C y ensamblador de terceros: libbpf,
+**libelf de elfutils** y zlib (desde `libbpf-sys`), ring, BLAKE3 y los kernels
+de `tract-linalg`. cargo-deny no lo ve: juzga el campo `license` de cada crate,
+y libbpf-sys declara BSD-2-Clause. `tools/config/codigo-nativo.toml` es la lista
+revisada de ese código, crate a crate y versión a versión, para todos los
+instalables; `tools/ci/codigo_nativo.py comprobar` (grupo `cadena`) falla si
+entra código nativo sin revisar o con una licencia que `deny.toml` no admite
+sin una decisión declarada.
+
+La licencia de libelf (GPL-2.0-or-later OR LGPL-3.0-or-later) dentro de un
+binario estático, y con ella la licencia del propio proyecto y los avisos de
+terceros que acompañen a los binarios, son **decisiones pendientes del
+propietario**. La puerta las imprime en cada ejecución; hasta que se tomen, el
+repositorio no genera avisos de terceros.

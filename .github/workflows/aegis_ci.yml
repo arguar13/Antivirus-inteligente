@@ -76,7 +76,12 @@ jobs:
           key: ${{ matrix.toolchain }}
       # El cotejo de ABI compila una sonda en C con los dos compiladores.
       - run: sudo apt-get update && sudo apt-get install -y clang
+      # rust-toolchain.toml fija el compilador de los artefactos; esta matriz
+      # prueba OTROS a proposito (el MSRV). RUSTUP_TOOLCHAIN tiene prioridad
+      # sobre rust-toolchain.toml: sin el, la fila del MSRV probaria el fijado.
       - run: ./tools/ci/test.sh
+        env:
+          RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
 
   # ---------------------------------------------------------------------------
   # 3. Programas eBPF ante el verificador REAL del kernel. Compilar no demuestra

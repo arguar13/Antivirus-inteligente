@@ -53,7 +53,9 @@ LABEL org.opencontainers.image.title="AegisCore hermetic builder" \
 # Versiones fijadas. Un toolchain que se mueve solo no es hermetico: dos
 # construcciones del mismo commit darian binarios distintos y nadie sabria por
 # que.
-ARG RUST_VERSION=1.94.1
+# Tiene que ser el `channel` de rust-toolchain.toml: lo comprueba
+# tools/toolchain/comprobar_toolchain.sh (grupo `toolchain` de make ci).
+ARG RUST_VERSION=1.94.0
 ARG BPFTOOL_VERSION=v7.5.0
 ARG LLVM_VERSION=18
 
@@ -207,6 +209,7 @@ RUN set -eu; \
 # ---------------------------------------------------------------------------
 COPY tools/toolchain/preparar_musl.sh /tmp/aegis/tools/toolchain/
 COPY tools/ci/_comun.sh               /tmp/aegis/tools/ci/
+COPY tools/toolchain/fijado.sh tools/toolchain/fijado.toml /tmp/aegis/tools/toolchain/
 RUN /tmp/aegis/tools/toolchain/preparar_musl.sh && rm -rf /tmp/aegis
 
 ENV CC_x86_64_unknown_linux_musl=/opt/aegis/musl-sysroot/bin/aegis-musl-gcc \

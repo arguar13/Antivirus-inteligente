@@ -95,12 +95,10 @@ vez de fingir que pasó.
 El job `artifacts` no solo compila: produce el material que un cliente despliega,
 y de eso hay que poder responder byte a byte.
 
-- **Binarios estáticos.** Se compila contra `x86_64-unknown-linux-musl`, que
-  produce binarios sin dependencia de la libc del sistema: despliegan en
-  cualquier distribución, que es justo lo que hace falta en una flota
-  heterogénea. En CI se instala `musl-tools` porque varias dependencias llevan C
-  (`yara-x`, `ring`, `libbpf`); donde falte, el script cae al objetivo del
-  anfitrión y **declara** que el binario es dinámico.
+- **Binarios del objetivo del anfitrión**, enlazados contra su libc: validan el
+  empaquetado. Los estáticos universales que se entregan a un cliente los
+  produce `tools/ci/hermetico.sh` ([módulo 37](37-hermetico.md)), y la lista de
+  binarios de los dos sale de `tools/config/instalables.toml`.
 - **`strip`** de símbolos: en un binario distribuido son información de más para
   un atacante.
 - **`SHA256SUMS`** de cada artefacto.
@@ -110,6 +108,13 @@ y de eso hay que poder responder byte a byte.
 - **Prueba de humo**: cada artefacto tiene que ser un ELF de 64 bits válido y no
   estar truncado. No se exige que respondan a `--help`, porque varios son
   demonios cuyo comportamiento correcto es quedarse ejecutando.
+
+`artifacts.sh` estuvo sin poder ejecutarse desde que su lista de binarios pasó a
+salir de `cargo xtask instalables`: quedó un paréntesis huérfano. Nadie lo vio
+porque solo lo llaman este workflow —que no arranca— y el runner de respaldo;
+`make ci` no. Desde entonces el grupo `sintaxis` de `make ci`
+(`tools/ci/sintaxis_shell.sh`) analiza con `bash -n` (`sh -n` para los de
+`#!/bin/sh`) todo script de shell versionado, lo ejecute quien lo ejecute.
 
 ---
 
