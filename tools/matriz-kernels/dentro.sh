@@ -860,6 +860,45 @@ cv_esperar_informe() {
     done
 }
 
+# Una rafaga de $1 exec medida contra el MISMO agente. Deja CV_ANTES y
+# CV_DESPUES (eventos del arbitro antes y despues) y devuelve 0 si se pudo
+# medir.
+#
+# El watchdog puede reiniciar al agente a mitad de prueba (se publica, no se
+# juzga: ver convivencia_watchdog_reinicio), y el agente nuevo empieza su
+# contador en cero: comparar una lectura del agente viejo con una del nuevo da
+# «no ve» con el agente viendo. Una medida vale si el pid del agente es el
+# mismo al principio y al final y el contador no bajo (bajar solo pasa al
+# cambiar de agente: dentro de uno es monotono). Si no vale se repite UNA vez
+# (CV_REMEDIDAS lo cuenta); si tampoco, devuelve 1 y la prueba lo nombra.
+cv_medir() {
+    for _ in 1 2; do
+        p0="$(pq_agente)"
+        CV_ANTES="$(cv_eventos)"
+        cv_rafaga "$1"
+        cv_esperar_informe
+        CV_DESPUES="$(cv_eventos)"
+        p1="$(pq_agente)"
+        if [ -n "$p0" ] && [ "$p0" = "$p1" ] && [ -n "$CV_ANTES" ] && [ -n "$CV_DESPUES" ] \
+            && [ "$CV_DESPUES" -ge "$CV_ANTES" ]; then
+            return 0
+        fi
+        CV_REMEDIDAS=$((${CV_REMEDIDAS:-0} + 1))
+    done
+    return 1
+}
+
+# El veredicto de una medida de cv_medir: añade a `fallos` «$2(antes->despues)»
+# si el agente no vio al menos $1 eventos, o «$2:agente-cambiante» si no hubo
+# un mismo agente que medir.
+cv_ve() {
+    if [ "$3" -ne 0 ]; then
+        fallos="$fallos $2:agente-cambiante(${CV_ANTES:-?}->${CV_DESPUES:-?})"
+    elif [ "$CV_DESPUES" -lt $((CV_ANTES + $1)) ]; then
+        fallos="$fallos $2(${CV_ANTES}->${CV_DESPUES})"
+    fi
+}
+
 cv_latido_fresco() {
     [ -f /run/aegiscore/agent.heartbeat ] \
         && [ $(($(date +%s) - $(stat -c %Y /run/aegiscore/agent.heartbeat))) -le "${1:-5}" ]
@@ -928,6 +967,7 @@ convivencia_en_vivo() {
     fallos=""
     hecho=""
     CV_DESDE="@$(date +%s)"
+    CV_REMEDIDAS=0
     pq_instalar "$ext" "$(pq_fichero "$ext" 1)" "$plazo" > "$T/c0.log" 2>&1 \
         || { linea "AEGIS-MATRIZ|prueba|$id|falla|no se instalo el paquete"; volcar "$T/c0.log" 20; return; }
     # El primer informe del agente recien instalado: bajo emulacion tarda mas
@@ -940,11 +980,9 @@ convivencia_en_vivo() {
         activo="no"
         systemctl is-active --quiet auditd 2> /dev/null && activo="si"
         auditctl -a always,exit -F arch=b64 -S execve -k aegis-convivencia > "$T/c1.log" 2>&1
-        a0="$(cv_eventos)"
         r0="$(grep -c 'key="aegis-convivencia"' /var/log/audit/audit.log 2> /dev/null)"
-        cv_rafaga 200
-        cv_esperar_informe
-        a1="$(cv_eventos)"
+        cv_medir 200
+        medida=$?
         # auditd escribe su log de forma ASINCRONA; bajo la carga de la matriz
         # tarda en volcar los 200 registros. Se sondea unos segundos.
         r1="$(grep -c 'key="aegis-convivencia"' /var/log/audit/audit.log 2> /dev/null)"
@@ -957,10 +995,10 @@ convivencia_en_vivo() {
         auditctl -d always,exit -F arch=b64 -S execve -k aegis-convivencia > /dev/null 2>&1
         # Lo FUNCIONAL: el agente vio los 200 exec junto a auditd. Eso es la
         # coexistencia, y es fallo duro si no se cumple.
-        [ -n "$a0" ] && [ -n "$a1" ] && [ "$a1" -ge $((a0 + 200)) ] || fallos="$fallos auditd:agente-no-ve(${a0:-?}->${a1:-?})"
+        cv_ve 200 auditd:agente-no-ve "$medida"
         # Que AUDITD mismo haya volcado sus 200 registros se PUBLICA, no juzga:
         # es su flush asincrono bajo contencion (10 microVM en 8 nucleos), no la
-        # coexistencia del agente, que ya quedo probada con a1>=a0+200.
+        # coexistencia del agente, que ya quedo probada arriba.
         if [ "$activo" = si ]; then
             linea "AEGIS-MEDIDA|aegis-agent|convivencia_auditd_registros|$((${r1:-0} - ${r0:-0}))|de_200"
         fi
@@ -983,34 +1021,31 @@ convivencia_en_vivo() {
         sleep 1
         i=$((i + 1))
     done
-    b0="$(cv_eventos)"
-    cv_rafaga 200
-    cv_esperar_informe
-    b1="$(cv_eventos)"
+    cv_medir 200
+    medida=$?
+    cv_ve 200 ebpf:instalado-no-ve "$medida"
     systemctl stop aegis-segundo
     journalctl -u aegis-segundo --no-pager -o cat > "$T/c2.log" 2>&1
     systemctl reset-failed aegis-segundo > /dev/null 2>&1
     rm -rf /run/aegis-segundo /usr/local/bin/aegis-agent-segundo
     s_emitidos="$(sed -n 's/.*parada limpia\. kernel: emitidos=\([0-9]*\) .*/\1/p' "$T/c2.log")"
     s_perdidos="$(sed -n 's/.*parada limpia\. kernel: emitidos=[0-9]* perdidos=\([0-9]*\) .*/\1/p' "$T/c2.log")"
-    [ -n "$b0" ] && [ -n "$b1" ] && [ "$b1" -ge $((b0 + 200)) ] || fallos="$fallos ebpf:instalado-no-ve(${b0:-?}->${b1:-?})"
     [ "${s_emitidos:-0}" -gt 0 ] && [ "${s_perdidos:-1}" -eq 0 ] || fallos="$fallos ebpf:segundo(emitidos=${s_emitidos:-?},perdidos=${s_perdidos:-?})"
     # El que se va desengancha LO SUYO: el instalado sigue viendo.
-    cv_rafaga 100
-    cv_esperar_informe
-    b2="$(cv_eventos)"
-    [ -n "$b2" ] && [ "$b2" -ge $((b1 + 100)) ] || fallos="$fallos ebpf:tras-irse-el-segundo(${b1:-?}->${b2:-?})"
+    cv_medir 100
+    medida=$?
+    cv_ve 100 ebpf:tras-irse-el-segundo "$medida"
     hecho="$hecho ebpf-segundo-consumidor"
     if command -v bpftrace > /dev/null 2>&1; then
-        timeout 10 bpftrace -e 'tracepoint:syscalls:sys_enter_execve { @n = count(); }' > "$T/c2b.log" 2>&1 &
+        # bpftrace engancha el mismo tracepoint durante 45 s: las rafagas caen
+        # dentro aunque la medida se repita una vez (dos esperas de 12 s).
+        timeout 45 bpftrace -e 'tracepoint:syscalls:sys_enter_execve { @n = count(); }' > "$T/c2b.log" 2>&1 &
         bt=$!
         sleep 3
-        e0="$(cv_eventos)"
-        cv_rafaga 100
+        cv_medir 100
+        medida=$?
         wait "$bt"
-        cv_esperar_informe
-        e1="$(cv_eventos)"
-        [ -n "$e1" ] && [ "$e1" -ge $((${e0:-0} + 100)) ] || fallos="$fallos ebpf:con-bpftrace"
+        cv_ve 100 ebpf:con-bpftrace "$medida"
         hecho="$hecho bpftrace"
     fi
     linea "AEGIS-MEDIDA|aegis-agent|convivencia_ebpf_ejercida|1|si_no"
@@ -1036,19 +1071,16 @@ convivencia_en_vivo() {
         done
         if [ -s "$d/listo" ]; then
             ag="$(pq_agente)"
-            f0="$(cv_eventos)"
             # La ejecucion espera al vecino; el agente recibe el exec antes (la
             # sonda es la entrada de execve) y su analista, al leer el fichero,
             # tambien espera.
             "$d/vigilado/cuelga-uno" &
             colgado=$!
             sleep 2
-            cv_rafaga 200
-            cv_esperar_informe
-            f1="$(cv_eventos)"
+            cv_medir 200
+            medida=$?
             cv_latido_fresco 5 || fallos="$fallos fanotify:latido-parado-con-el-analista-esperando"
-            [ -n "$f0" ] && [ -n "$f1" ] && [ "$f1" -ge $((f0 + 200)) ] \
-                || fallos="$fallos fanotify:camino-caliente-esperando(${f0:-?}->${f1:-?})"
+            cv_ve 200 fanotify:camino-caliente-esperando "$medida"
             wait "$colgado"
             # Matar al vecino con una peticion pendiente: el kernel concede lo
             # pendiente al cerrarse su descriptor, nada se queda colgado.
@@ -1093,6 +1125,7 @@ convivencia_en_vivo() {
     cv_journal > "$T/c4.log"
     reinicio=0; grep -q -- '-> reiniciado' "$T/c4.log" && reinicio=1
     linea "AEGIS-MEDIDA|aegis-agent|convivencia_watchdog_reinicio|$reinicio|si_no"
+    linea "AEGIS-MEDIDA|aegis-agent|convivencia_medidas_repetidas|$CV_REMEDIDAS|medidas"
     pq_quitar "$ext" "" > "$T/c5.log" 2>&1 || fallos="$fallos desinstalar"
     cv_journal > "$T/c4.log"
     perdidos="$(sed -n 's/.*parada limpia\. kernel: emitidos=[0-9]* perdidos=\([0-9]*\) .*/\1/p' "$T/c4.log" | tail -n 1)"

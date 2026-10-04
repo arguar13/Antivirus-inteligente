@@ -1580,6 +1580,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    /// Lo que devuelven, llamada a llamada, `pq_agente` y `cv_eventos` (con
+    /// la espera anulada): asi se simula un reinicio del agente entre las dos
+    /// lecturas de una medida de convivencia. Van en ficheros porque cada
+    /// llamada corre en una subcapa (`$(...)`).
+    #[cfg(unix)]
+    fn medir_con(pids: &str, eventos: &str, guion: &str) -> String {
+        arnes(
+            &format!(
+                "siguiente() {{ set -- $1; printf '%s' \"$1\"; }}; \
+                 resto() {{ set -- $1; shift; printf '%s' \"$*\"; }}; \
+                 sacar() {{ siguiente \"$(cat \"$T2/$1\")\"; resto \"$(cat \"$T2/$1\")\" > \"$T2/$1.n\"; mv \"$T2/$1.n\" \"$T2/$1\"; }}; \
+                 pq_agente() {{ sacar p; }}; cv_eventos() {{ sacar e; }}; \
+                 cv_esperar_informe() {{ :; }}; cv_rafaga() {{ :; }}; \
+                 T2=$(mktemp -d); printf '%s' '{pids}' > \"$T2/p\"; printf '%s' '{eventos}' > \"$T2/e\"; \
+                 fallos=''; CV_REMEDIDAS=0; {guion}; rm -rf \"$T2\""
+            ),
+            None,
+        )
+    }
+
+    /// El watchdog puede reiniciar al agente a mitad de la prueba de
+    /// convivencia (se publica, no se juzga), y el agente nuevo cuenta desde
+    /// cero: comparar una lectura del viejo con una del nuevo daba «no ve» con
+    /// el agente viendo. La medida se repite una vez sobre un mismo agente.
+    #[cfg(unix)]
+    #[test]
+    fn el_arnes_no_compara_contadores_de_dos_agentes() {
+        let g = "cv_medir 200; r=$?; cv_ve 200 ebpf:instalado-no-ve $r; \
+                 printf 'r=%s rem=%s fallos=[%s]' $r $CV_REMEDIDAS \"$fallos\"";
+        // Sin reinicio: una medida y vale.
+        assert_eq!(medir_con("7 7", "1000 1300", g), "r=0 rem=0 fallos=[]");
+        // Cambia el pid entre lecturas: se repite y la segunda vale.
+        assert_eq!(
+            medir_con("7 8 8 8", "5000 40 40 300", g),
+            "r=0 rem=1 fallos=[]"
+        );
+        // Mismo pid pero el contador baja (el reinicio cayo entre la lectura
+        // del pid y la del contador): tambien se repite.
+        assert_eq!(
+            medir_con("7 7 7 7", "5000 40 40 300", g),
+            "r=0 rem=1 fallos=[]"
+        );
+        // Un agente que no se deja medir dos veces seguidas se nombra.
+        let v = medir_con("1 2 3 4", "10 20 30 40", g);
+        assert!(v.contains("r=1 rem=2"), "{v}");
+        assert!(v.contains("ebpf:instalado-no-ve:agente-cambiante"), "{v}");
+        // Y un agente que de verdad no ve sigue siendo fallo.
+        let v = medir_con("7 7", "1000 1100", g);
+        assert!(
+            v.contains("fallos=[ ebpf:instalado-no-ve(1000->1100)]"),
+            "{v}"
+        );
+    }
+
     #[test]
     fn familias_de_kernel() {
         assert!(familia_coincide("5.10", "5.10.0-32-cloud-amd64"));
