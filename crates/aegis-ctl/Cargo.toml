@@ -16,6 +16,11 @@ thiserror = "2"
 libc = "0.2"
 aegis-scan = { path = "../aegis-scan" }
 aegis-resp = { path = "../aegis-resp" }
+# La definicion unica de «credencial en claro» (el redactor de la captura),
+# para redactar lo que el canal de control entrega a una persona: el
+# autodiagnostico (FASE 7 del MP-16). Capa de motores, por debajo de esta;
+# arrastra aegis-wire y aegis-net SIN la caracteristica xdp: nada de C.
+aegis-captura = { path = "../aegis-captura" }
 
 [[bin]]
 name = "aegisctl"

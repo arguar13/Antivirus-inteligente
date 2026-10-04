@@ -1,5 +1,7 @@
 # 79 · AegisMac y AegisEnforce — macOS, y qué se impone de verdad
 
+> **macOS no es producto.** Hace falta que Apple apruebe el entitlement com.apple.developer.endpoint-security.client, una System Extension firmada con Developer ID y la notarización. Lo que este documento cuenta de macOS es biblioteca o diseño: no protege ninguna máquina macOS. Ver [Plataformas](matriz-capacidades.md#plataformas).
+
 > FASE 84. `crates/aegis-macho/`, `crates/aegis-enforce/`,
 > `tools/verificar-mac.sh`.
 

@@ -19,6 +19,10 @@ máquina.
 
 {{estado}}
 
+### Plataformas
+
+{{plataformas}}
+
 ## En cifras
 
 {{cifras}}
@@ -133,11 +137,14 @@ de integración y de endurecimiento:
 - **El cliente de flota es una demostración autocontenida.** `aegis-fleet` levanta
   su propia autoridad de certificación y su propio plano de control y se habla a sí
   mismo; no se conecta al `aegis-server` real, y el diagrama no dibuja esa flecha.
-- **El despliegue con Ansible llama a órdenes que el agente no tiene** (enrolar,
-  estado en JSON, comprobar la configuración).
-- **Windows y macOS no son producto.** El driver de Windows compila pero cargar la
-  protección viva exige un certificado de Microsoft; en macOS hay análisis de
-  binarios, no un agente.
+- **No hay matrícula por CSR.** El rol de Ansible instala el paquete y escribe el
+  enlace con el plano de control, pero la identidad del agente (certificado y
+  clave) la emite la consola y viaja cifrada con `ansible-vault`.
+- **Windows y macOS no son producto** ([Plataformas](docs/matriz-capacidades.md#plataformas)).
+  El driver de Windows compila, pero cargar la protección viva exige ser miembro
+  de la Microsoft Virus Initiative, un driver ELAM y la firma por atestación de
+  Microsoft; en macOS hay análisis de binarios, no un agente: falta el
+  entitlement de Endpoint Security de Apple.
 - **La reputación k-anónima no es producto.** El cliente (`aegis-intel`, `GET
   /v1/rep/<prefijo>` en texto) y la ruta del servidor (`/api/reputacion/{prefijo}`,
   JSON en Redis con una hora de vida) hablan protocolos distintos, ningún
@@ -156,7 +163,7 @@ drivers/linux/aegis-bpf Sondas eBPF CO-RE y filtro XDP (C, libbpf)
 kernel/windows/         Driver de Windows (C, WDK): compila; su carga viva es un muro
 shared/include/         Contrato ABI Ring 0 ↔ Ring 3 (fuente de verdad)
 server/panel/           Consola SOC web, embebida en el binario del servidor
-deploy/                 Terraform, Ansible e instalador de Windows
+deploy/                 Terraform y Ansible; el instalador de Windows no es producto
 tools/                  CI local, verificadores y configuración (tools/config/)
 docs/                   Documentos vivos y registro de fases
 ```
@@ -176,6 +183,10 @@ Corre en cada endpoint, con privilegios.
 ## Documentación
 
 {{documentacion}}
+
+**Operación del piloto**: [runbooks](docs/operacion/README.md) para instalar,
+actualizar, revertir y desinstalar el agente, recoger su diagnóstico, decidir el
+paso de un anillo a imponer y atender los incidentes del propio agente.
 
 ## Desarrollo
 

@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Plataformas: qué es producto y qué no (FASE 7 del MP-16, H-36)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  De aquí salen el bloque {{plataformas}} del README y la sección
+#  «Plataformas» de la matriz (`cargo xtask docs`), y la puerta de
+#  `cargo xtask arquitectura` (xtask/src/plataformas.rs):
+#
+#    1. cada documento de `documentos` lleva, en sus primeras líneas, la
+#       cabecera EXACTA que se genera con `nombre` y `requisito`;
+#    2. todo docs/*.md cuyo título nombre un `alias` de una plataforma que no
+#       es producto está en `documentos` o en `[[excepcion]]`, con su motivo;
+#    3. ninguna frase de `[prohibido]` aparece en el README, su plantilla, la
+#       matriz, docs/, docs/operacion/ ni deploy/README.md.
+#
+#  Cambiar `requisito` obliga a cambiar la cabecera de cada documento: es lo
+#  que impide que el documento y la tabla digan cosas distintas.
+
+[[plataforma]]
+nombre = "Linux"
+estado = "producto"
+detalle = "El agente (x86_64 y aarch64) en las distribuciones de la matriz de kernels; producto es solo lo que la tabla de crates marca como tal"
+
+[[plataforma]]
+nombre = "Windows"
+estado = "no-producto"
+detalle = "Un driver que compila (`kernel/windows/`), un instalador MSI y bibliotecas (ELAM, PPL, análisis de PE); nada protege una máquina Windows"
+requisito = "Hace falta ser miembro de la Microsoft Virus Initiative (MVI), un driver ELAM y la firma del driver por atestación en el portal de hardware de Microsoft (con certificado EV), y PPL para el servicio; lo decide Microsoft, no este repositorio."
+alias = ["windows", "elam", "ppl"]
+documentos = [
+    "docs/35-despliegue.md",
+    "docs/42-windows.md",
+    "docs/50-autodefensa.md",
+    "docs/55-resiliencia.md",
+]
+
+[[plataforma]]
+nombre = "macOS"
+estado = "no-producto"
+detalle = "Análisis de binarios Mach-O desde Linux (`aegis-macho`, biblioteca); no existe un agente que corra en macOS"
+requisito = "Hace falta que Apple apruebe el entitlement com.apple.developer.endpoint-security.client, una System Extension firmada con Developer ID y la notarización."
+alias = ["macos"]
+documentos = ["docs/79-macos-y-aplicacion.md"]
+
+[[excepcion]]
+documento = "docs/78-windows-pe.md"
+motivo = "describe cómo el agente de Linux analiza ejecutables de Windows (PE); no es un agente para Windows"
+
+[prohibido]
+# Sin distinguir mayúsculas. Antes de añadir una, comprobar que no está en un
+# documento histórico por otro motivo (p. ej. «Windows, macOS» aparece en la
+# 79 en una enumeración que no promete nada).
+frases = [
+    "multiplataforma",
+    "soporta windows",
+    "soporta macos",
+    "compatible con windows",
+    "compatible con macos",
+    "agente para windows",
+    "agente para macos",
+    "agente de windows",
+    "agente de macos",
+    "llegan en las fases",
+]

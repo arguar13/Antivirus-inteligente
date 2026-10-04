@@ -12,6 +12,8 @@
 //! - [`server`]: el servidor que embebe el agente y el cliente que usa la CLI.
 //! - [`handler`]: el manejador real, que conecta cada comando con el motor de
 //!   escaneo, el de respuesta y la cuarentena.
+//! - [`redaccion`]: lo que no puede salir del endpoint hacia una persona
+//!   (credenciales, nombre del equipo, rutas de usuario, correos, IPv4).
 
 // SEGURIDAD DE MEMORIA IMPUESTA POR EL COMPILADOR (FASE 80).
 //
@@ -28,6 +30,7 @@
 
 pub mod handler;
 pub mod protocol;
+pub mod redaccion;
 pub mod server;
 
 pub use handler::{AgentControl, StatusSource};

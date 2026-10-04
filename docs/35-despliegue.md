@@ -1,5 +1,7 @@
 # Módulo 35 — Despliegue corporativo: nube, flota Linux y flota Windows
 
+> **Windows no es producto.** Hace falta ser miembro de la Microsoft Virus Initiative (MVI), un driver ELAM y la firma del driver por atestación en el portal de hardware de Microsoft (con certificado EV), y PPL para el servicio; lo decide Microsoft, no este repositorio. Lo que este documento cuenta de Windows es biblioteca o diseño: no protege ninguna máquina Windows. Ver [Plataformas](matriz-capacidades.md#plataformas).
+
 > Componentes: `deploy/terraform/`, `deploy/ansible/`, `deploy/windows/`,
 > `deploy/validar.sh`, `tools/ci/despliegue.sh`.
 
@@ -72,6 +74,14 @@ extremo a extremo, entre el endpoint y el proceso que lo atiende.
 ---
 
 ## 35.3 Desplegar en la flota Linux sin tumbarla
+
+> **Corrección (H-30, H-40; FASE 7 del MP-16).** El rol que describía esta
+> sección no podía arrancar el agente: le pasaba `--config`, que el agente
+> rechaza, y llamaba a órdenes que no existen. Hoy el rol instala el paquete
+> (la unidad, root con su conjunto límite de capacidades, es la del paquete) y
+> escribe el enlace con el plano de control. La matrícula por CSR no existe:
+> la clave del agente **sí viaja**, cifrada con `ansible-vault`. Lo vigente
+> está en [los runbooks](operacion/instalar.md); lo que sigue es histórico.
 
 Desplegar un EDR en miles de máquinas a la vez es la forma más rápida de tumbar
 una organización con un solo paquete defectuoso. El playbook avanza **por

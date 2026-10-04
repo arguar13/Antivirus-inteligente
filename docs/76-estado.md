@@ -285,7 +285,7 @@ sino el motivo. Ésa es la fase entera en una línea.
 | Autoataque | agotamiento, pánico, fuga y mentira | — |
 | Determinismo | dos lecturas seguidas, fila a fila | — |
 | Comparativa | las 10 consultas, medidas aquí | **osquery no está instalado**: sus cifras se citan, no se miden |
-| Plataformas | Linux | Windows y macOS llegan en las FASES 83 y 84 |
+| Plataformas | Linux | Windows y macOS no son producto (matriz de capacidades, «Plataformas») |
 | `forbid(unsafe_code)` | el crate entero | el `unsafe` de los atributos extendidos vive en `aegis-scal` |
 
 ## Lo que este crate no puede hacer nunca

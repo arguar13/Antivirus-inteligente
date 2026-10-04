@@ -1,5 +1,7 @@
 # Módulo 55 — Resiliencia empresarial: ABI de ELAM/PPL y tamper criptográfico
 
+> **Windows no es producto.** Hace falta ser miembro de la Microsoft Virus Initiative (MVI), un driver ELAM y la firma del driver por atestación en el portal de hardware de Microsoft (con certificado EV), y PPL para el servicio; lo decide Microsoft, no este repositorio. Lo que este documento cuenta de Windows es biblioteca o diseño: no protege ninguna máquina Windows. Ver [Plataformas](matriz-capacidades.md#plataformas).
+
 > Componentes: `crates/aegis-selfdefense/` (módulos `abi`, `resiliencia`, sobre
 > las piezas de autodefensa del módulo 50).
 

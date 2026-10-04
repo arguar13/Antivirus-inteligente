@@ -1,5 +1,7 @@
 # Módulo 50 — Autodefensa legítima: ELAM, PPL y Tamper Protection con OTP
 
+> **Windows no es producto.** Hace falta ser miembro de la Microsoft Virus Initiative (MVI), un driver ELAM y la firma del driver por atestación en el portal de hardware de Microsoft (con certificado EV), y PPL para el servicio; lo decide Microsoft, no este repositorio. Lo que este documento cuenta de Windows es biblioteca o diseño: no protege ninguna máquina Windows. Ver [Plataformas](matriz-capacidades.md#plataformas).
+
 > Componentes: `crates/aegis-selfdefense/`,
 > `kernel/windows/aegis/aegis_tamper_politica.c`,
 > `server/crates/aegis-server/src/autodefensa.rs`.

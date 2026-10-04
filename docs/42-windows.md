@@ -1,11 +1,14 @@
 # Módulo 42 — Paridad de defensa en Windows: ETW-Ti y ObRegisterCallbacks
 
+> **Windows no es producto.** Hace falta ser miembro de la Microsoft Virus Initiative (MVI), un driver ELAM y la firma del driver por atestación en el portal de hardware de Microsoft (con certificado EV), y PPL para el servicio; lo decide Microsoft, no este repositorio. Lo que este documento cuenta de Windows es biblioteca o diseño: no protege ninguna máquina Windows. Ver [Plataformas](matriz-capacidades.md#plataformas).
+
 > Componentes: `kernel/windows/aegis/`, `kernel/windows/etwti/`,
 > `tools/verificar-windows.sh`.
 
-En Linux el agente se defiende con eBPF y LSM. En Windows hacen falta otras dos
-piezas, y ninguna de las dos es opcional si el producto tiene que sobrevivir a
-un atacante que ya es SYSTEM.
+En Linux el agente observa con eBPF; defenderse a sí mismo con BPF LSM todavía
+no existe (H-05, FASE 7 del MP-16). En Windows harían falta otras dos piezas, y
+ninguna de las dos es opcional si el producto tiene que sobrevivir a un atacante
+que ya es SYSTEM.
 
 ---
 
@@ -191,5 +194,8 @@ certificados.
 
 # El driver, en Windows con el WDK
 msbuild kernel\windows\aegis\aegis.vcxproj /p:Configuration=Release /p:Platform=x64
-signtool sign /fd sha256 /ac ELAM.cer /f aegis-antimalware.pfx aegis.sys
+# Solo para pruebas con TESTSIGNING: en Windows 10 y posteriores un driver de
+# kernel se carga en produccion unicamente con la firma por atestacion del
+# portal de hardware de Microsoft, y uno ELAM exige ademas ser miembro de MVI.
+signtool sign /fd sha256 /f aegis-prueba.pfx aegis.sys
 ```
