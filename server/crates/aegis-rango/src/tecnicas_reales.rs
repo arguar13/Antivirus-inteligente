@@ -1,6 +1,5 @@
-//! Emulaciones REALES, benignas y reversibles, de tecnicas ATT&CK — la parte que
-//! no necesita llamadas al sistema crudas (las que si las necesitarian estan
-//! aplazadas: ver el binario `aegis-rango`).
+//! Emulaciones REALES, benignas y reversibles, de tecnicas ATT&CK, hechas con
+//! `std` y utilidades del sistema.
 //!
 //! # La diferencia con el catalogo de marcadores
 //!

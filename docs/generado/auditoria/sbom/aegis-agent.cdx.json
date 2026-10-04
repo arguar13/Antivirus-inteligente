@@ -6859,7 +6859,7 @@
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "c82c7f272f228774182b7b3a075f52b2ba753d32461b27b6392ce3b10ec862ec"
+          "content": "bfa3d5689d6a9bc4a489e960ac2599a099d6e00024faf39c9b588ecd8c36ab34"
         }
       ],
       "name": "postura-kernel.toml",

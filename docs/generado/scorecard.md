@@ -2,7 +2,7 @@
 
 > GENERADO por `cargo xtask marcador` en `make ci`, despues de la matriz de kernels. No editar a mano. Cada cifra sale de una linea medida; una celda sin dato dice «sin medir».
 
-Arbol de los binarios medidos: `fa81e97425eb4d5765d08054679cb7e7f304b72fbc0745ff65f2ca1df6d10f07`
+Arbol de los binarios medidos: `eb3228b602d3199fbf6e979418be4fe1c80d86e37cfff1f0b3bb52cb8e5b813f`
 
 Imagenes con resultado: debian-11, rocky-9, ubuntu-22.04, debian-12, amazon-linux-2023, opensuse-leap-15.6, ubuntu-24.04, fedora-44, ubuntu-24.04-arm64, debian-12-arm64
 
@@ -14,9 +14,9 @@ Emulaciones reales contra el agente publicado en cada microVM (`rango-en-vivo`).
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | T1053.003 | ninguno | hueco | hueco | hueco | hueco | hueco | hueco | hueco | hueco | hueco | hueco |
 | T1071.001 | l7hunter | hueco | hueco | hueco | hueco | hueco | hueco | hueco | 97 s | hueco | hueco |
-| T1098.004 | conductual | 45 s | 45 s | 45 s | 45 s | 45 s | hueco | 45 s | 45 s | 46 s | 45 s |
+| T1098.004 | conductual | 45 s | 46 s | 45 s | 45 s | 45 s | hueco | 45 s | 45 s | 46 s | 45 s |
 | T1486 | ninguno | hueco | hueco | hueco | hueco | hueco | hueco | hueco | hueco | hueco | hueco |
-| T1564 | nucleo | hueco | hueco | hueco | hueco | hueco | hueco | 90 s | hueco | 91 s | hueco |
+| T1564 | nucleo | hueco | hueco | hueco | hueco | hueco | hueco | 91 s | hueco | 91 s | hueco |
 
 | Imagen | Tecnicas detectadas |
 |---|---|
@@ -55,16 +55,16 @@ Corpus de laboratorio analizado dentro de una microVM sin red (`corpus-en-vivo`)
 
 | Medida | Imagen | Valor |
 |---|---|---|
-| analisis p99 en el trabajador confinado | debian-11 | 536.91 ms |
-| analisis p99 en el trabajador confinado | rocky-9 | 449.46 ms |
-| analisis p99 en el trabajador confinado | ubuntu-22.04 | 580.97 ms |
-| analisis p99 en el trabajador confinado | debian-12 | 343.95 ms |
-| analisis p99 en el trabajador confinado | amazon-linux-2023 | 313.10 ms |
-| analisis p99 en el trabajador confinado | opensuse-leap-15.6 | 288.65 ms |
-| analisis p99 en el trabajador confinado | ubuntu-24.04 | 358.35 ms |
-| analisis p99 en el trabajador confinado | fedora-44 | 410.84 ms |
-| analisis p99 en el trabajador confinado | ubuntu-24.04-arm64 | 118.99 ms |
-| analisis p99 en el trabajador confinado | debian-12-arm64 | 1242.12 ms |
+| analisis p99 en el trabajador confinado | debian-11 | 509.28 ms |
+| analisis p99 en el trabajador confinado | rocky-9 | 572.41 ms |
+| analisis p99 en el trabajador confinado | ubuntu-22.04 | 637.41 ms |
+| analisis p99 en el trabajador confinado | debian-12 | 343.71 ms |
+| analisis p99 en el trabajador confinado | amazon-linux-2023 | 335.06 ms |
+| analisis p99 en el trabajador confinado | opensuse-leap-15.6 | 279.23 ms |
+| analisis p99 en el trabajador confinado | ubuntu-24.04 | 368.26 ms |
+| analisis p99 en el trabajador confinado | fedora-44 | 369.09 ms |
+| analisis p99 en el trabajador confinado | ubuntu-24.04-arm64 | 156.14 ms |
+| analisis p99 en el trabajador confinado | debian-12-arm64 | 1302.64 ms |
 | desde la emulacion hasta la señal (mediana, rango) | todas | 45 s |
 
 Latencia de veredicto sobre el corpus: sin medir.

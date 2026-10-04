@@ -145,12 +145,6 @@ de integración y de endurecimiento:
   de la Microsoft Virus Initiative, un driver ELAM y la firma por atestación de
   Microsoft; en macOS hay análisis de binarios, no un agente: falta el
   entitlement de Endpoint Security de Apple.
-- **La reputación k-anónima no es producto.** El cliente (`aegis-intel`, `GET
-  /v1/rep/<prefijo>` en texto) y la ruta del servidor (`/api/reputacion/{prefijo}`,
-  JSON en Redis con una hora de vida) hablan protocolos distintos, ningún
-  instalable consulta y no hay corpus: con cubos casi vacíos el prefijo no da el
-  anonimato de «miles de hashes». Se retira hasta que exista el canal autenticado
-  agente-servidor (FASE 6).
 
 ## Estructura del repositorio
 

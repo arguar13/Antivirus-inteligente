@@ -114,19 +114,6 @@ El servidor sabe que alguien preguntó por un cubo de miles de hashes posibles, 
 por cuál. Un prefijo más largo estrecharía el cubo y rompería la garantía: **se
 rechaza con 400** en vez de responder con menos privacidad.
 
-> **Corrección (FASE 5.4 del MP-16): retirado como capacidad.** Lo de arriba
-> describe una ruta del servidor, no un servicio en uso. Ningún agente la
-> consulta: el cliente `aegis-intel` pide `GET /v1/rep/<prefijo>` y espera
-> líneas de texto, y esta ruta es `/api/reputacion/{prefijo}` y responde JSON.
-> Las altas se hacen a mano por `POST /api/reputacion` y el cubo entero caduca
-> a la hora (cada alta renueva el plazo de todo el cubo). Sin corpus, un cubo
-> no agrupa «miles de hashes»: con una o dos entradas, quien conoce el corpus
-> puede adivinar por cuál se preguntó. Lo que sí se sostiene es más estrecho:
-> el servidor no aprende nada de un hash que no tenga ya. Vuelve cuando haya
-> canal autenticado agente-servidor (la respuesta en claro se puede
-> falsificar) y un corpus propio: prevalencia en la flota y veredictos de
-> detonación.
-
 ---
 
 ## 32.6 Cómo se prueba: cero imitaciones

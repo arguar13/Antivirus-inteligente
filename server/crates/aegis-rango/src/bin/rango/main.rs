@@ -17,10 +17,7 @@
 //!   `AEGIS-RANGO|ejecuta|<id>|<pid|->`     (el pid del proceso implicado, si lo hay)
 //!   `AEGIS-RANGO|revierte|<id>|<ok|residuo>`
 //!
-//! Trae las cinco tecnicas que se hacen con `std` y utilidades del sistema. Las
-//! dos que necesitarian llamadas al sistema crudas (exec desde memfd, T1620, y
-//! escritura por ptrace, T1055.008) no existen: estan aplazadas a una decision
-//! del propietario (FASE 5.1 del MP-16) y no se emulan.
+//! Trae las cinco tecnicas que se hacen con `std` y utilidades del sistema.
 
 use std::process::ExitCode;
 

@@ -15,10 +15,6 @@ corte del enlace dejaría al usuario sin protección.
 
 ## 5.1 Reputación con k-anonimato
 
-> **Estado (FASE 5.4 del MP-16): diseño, no producto.** El cliente existe
-> (`crates/aegis-intel`); el servicio con corpus no. Ver la corrección de
-> [32.5](32-plano-control.md) y el README.
-
 ### El problema de privacidad
 
 Enviar el SHA-256 completo de cada fichero que se ejecuta parece inocuo y no lo
