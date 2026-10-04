@@ -32,6 +32,7 @@ name = "aegis-agent"
 version = "0.1.0"
 dependencies = [
  "aegis-behavior",
+ "aegis-contenido",
  "aegis-ctl",
  "aegis-edgeml",
  "aegis-enforce",
@@ -49,6 +50,7 @@ dependencies = [
  "aegis-prueba",
  "aegis-ransom",
  "aegis-scal",
+ "aegis-sigma",
  "aegis-trabajador",
  "aegis-vuln",
  "aegis-watchdog",
@@ -58,6 +60,7 @@ dependencies = [
  "libbpf-rs",
  "libc",
  "serde_json",
+ "sha2",
  "thiserror 2.0.20",
 ]
 
@@ -123,9 +126,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aegis-contenido"
+version = "0.1.0"
+dependencies = [
+ "aegis-patron",
+ "aegis-update",
+ "sha2",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "aegis-ctl"
 version = "0.1.0"
 dependencies = [
+ "aegis-captura",
  "aegis-resp",
  "aegis-scan",
  "libc",
@@ -514,6 +528,7 @@ version = "0.1.0"
 dependencies = [
  "aegis-prueba",
  "goblin",
+ "sha2",
  "thiserror 2.0.20",
  "tract-onnx",
 ]
@@ -708,6 +723,10 @@ dependencies = [
  "aegis-entidad",
  "thiserror 2.0.20",
 ]
+
+[[package]]
+name = "aegis-sigma"
+version = "0.1.0"
 
 [[package]]
 name = "aegis-swarm"

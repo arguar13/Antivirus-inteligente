@@ -28,13 +28,13 @@ crates = [
 crates = [
     "aegis-scal", "aegis-sensor", "aegis-sandbox", "aegis-enforce",
     "aegis-firmware", "aegis-kguard", "aegis-harden", "aegis-vmi",
-    "aegis-audit", "aegis-resp", "aegis-update",
+    "aegis-audit", "aegis-resp", "aegis-update", "aegis-contenido",
 ]
 
 [motores]
 crates = [
     # Agente
-    "aegis-motor", "aegis-trabajador", "aegis-behavior", "aegis-scan", "aegis-ml", "aegis-edgeml", "aegis-emu",
+    "aegis-motor", "aegis-sigma", "aegis-trabajador", "aegis-behavior", "aegis-scan", "aegis-ml", "aegis-edgeml", "aegis-emu",
     "aegis-emular", "aegis-decompile", "aegis-disasm", "aegis-instrumentar",
     "aegis-ransom", "aegis-rollback", "aegis-unpacker", "aegis-evasion",
     "aegis-forensics", "aegis-memhunter", "aegis-volcado", "aegis-kintegrity",

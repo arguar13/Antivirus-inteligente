@@ -4,6 +4,7 @@ exclude = ["fuzz", "swarm-net", "xtask"]
 members = [
     "crates/aegis-entidad",
     "crates/aegis-motor",
+    "crates/aegis-sigma",
     "crates/aegis-trabajador",
     "crates/aegis-estado",
     "crates/aegis-parser",
@@ -33,6 +34,7 @@ members = [
     "crates/aegis-audit",
     "crates/aegis-ctl",
     "crates/aegis-update",
+    "crates/aegis-contenido",
     "crates/aegis-forensics",
     "crates/aegis-custodia",
     "crates/aegis-pe",

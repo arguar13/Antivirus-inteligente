@@ -17,7 +17,9 @@
 #[cfg(target_os = "linux")]
 pub mod aplicacion;
 pub mod capacidades;
+pub mod contenido;
 pub mod decode;
+pub mod diagnostico;
 pub mod edge_ml;
 pub mod error;
 pub mod graph;

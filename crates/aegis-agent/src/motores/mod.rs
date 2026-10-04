@@ -18,7 +18,13 @@ pub mod nucleo;
 pub mod postura;
 pub mod rol;
 pub mod secuestro;
+pub mod sigma;
 pub mod triaje;
+// La fuente de verdad de los motores registrables (Hallazgo 0 de la
+// FASE 4): de aqui salen tanto lo que el arbitro registra como lo que
+// `--motores` imprime.
+#[cfg(target_os = "linux")]
+pub mod registro;
 
 use std::path::Path;
 

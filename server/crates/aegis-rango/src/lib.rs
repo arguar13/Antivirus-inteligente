@@ -53,6 +53,9 @@ pub mod catalogo;
 pub mod cobertura;
 pub mod rango;
 pub mod tecnica;
+// Emulaciones REALES (benignas y reversibles) para la prueba en vivo de la
+// matriz. No tienen unsafe: la biblioteca conserva su `#![forbid(unsafe_code)]`.
+pub mod tecnicas_reales;
 
 pub use cobertura::{medir_cobertura, Estado, FuenteSenales, InformeCobertura, ResultadoTecnica};
 pub use rango::{ConfirmacionRango, ErrorRango, Plataforma, PruebaDeRango, Rango};

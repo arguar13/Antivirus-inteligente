@@ -9,25 +9,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[cfg(all(target_os = "linux", feature = "bpf"))]
-use aegis_agent::motores::baliza::MotorBaliza;
-#[cfg(all(target_os = "linux", feature = "bpf"))]
-use aegis_agent::motores::conducta::MotorConducta;
-#[cfg(all(target_os = "linux", feature = "bpf"))]
-use aegis_agent::motores::estatico::{EstadoAnalista, MotorEstatico, MotorModelo, Resultado};
+use aegis_agent::motores::estatico::{EstadoAnalista, MotorEstatico, Resultado};
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::integridad::MotorIntegridad;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
-use aegis_agent::motores::memoria::MotorMemoria;
-#[cfg(all(target_os = "linux", feature = "bpf"))]
-use aegis_agent::motores::nucleo::MotorNucleo;
-#[cfg(all(target_os = "linux", feature = "bpf"))]
-use aegis_agent::motores::postura::MotorPostura;
-#[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::rol::{ConfigRol, MotorRol};
-#[cfg(all(target_os = "linux", feature = "bpf"))]
-use aegis_agent::motores::secuestro::MotorSecuestro;
-#[cfg(all(target_os = "linux", feature = "bpf"))]
-use aegis_agent::motores::triaje::MotorTriaje;
 #[cfg(all(target_os = "linux", feature = "bpf"))]
 use aegis_agent::motores::{EventoAgente, HostAgente, Identidad};
 #[cfg(all(target_os = "linux", feature = "bpf"))]
@@ -83,17 +69,38 @@ const AYUDA: &str = "aegis-agent - agente de deteccion de AegisCore
      
      USO: aegis-agent [--stats-interval SEGUNDOS] [--harden]
           [--control-socket RUTA] [--latido RUTA] [--plano-control RUTA]
+          aegis-agent --diagnostico [--json] [--control-socket RUTA] [--latido RUTA]
           aegis-agent --capacidades [--maquina]
+          aegis-agent --contenido estado|instalar FICHERO|ajustes FICHERO|revertir
+                      [--dir RUTA] [--clave RUTA] [--canal NOMBRE]
      
      --capacidades  informa de lo que ofrece este kernel (BTF, tracefs,
                     ringbuf, BPF LSM, cgroup, SELinux/AppArmor, lockdown)
                     y de lo que se degrada; sale con 3 si no habria
                     telemetria de kernel. Con --maquina, lineas AEGIS-CAP/DEG.
+     --diagnostico  autodiagnostico para soporte, redactado (sin credenciales,
+                    nombre del equipo, rutas de usuario, correos ni IPv4):
+                    version y HUELLA, kernel y degradaciones, motores y su
+                    ultimo «sin datos», trabajador, perdidas, memoria, plano
+                    de control y ultimos veredictos. No arranca el agente:
+                    pregunta al que esta en marcha por su --control-socket
+                    (por defecto, el de la unidad del paquete). --json: en JSON.
      --latido RUTA  donde escribe el latido que vigila aegis-watchdog
                     (por defecto /run/aegiscore/agent.heartbeat).
+     --motores      imprime los motores que el arbitro registraria (nombre,
+                    firma, camino, requisitos); es la fuente de la cobertura
+                    del rango. Con --escribir regenera docs/generado/motores.txt.
      --plano-control RUTA  enlace con el plano de control, en solo
                     auditoria (por defecto /etc/aegiscore/plano-control.toml;
                     sin ese fichero el agente protege en local y no reporta).
+     --contenido    canal de contenido firmado (FASE 4.5), sin arrancar el
+                    agente: estado dice que paquete hay y si verifica;
+                    instalar y ajustes aplican un paquete o unos ajustes
+                    sellados (firma hibrida, epoca monotona, anillo);
+                    revertir vuelve al paquete anterior. Por defecto
+                    --dir /var/lib/aegiscore/contenido, --clave
+                    /etc/aegiscore/contenido.pub y --canal estable. Ningun
+                    motor consume aun este contenido (solo auditoria).
      
      Requiere CAP_BPF y CAP_PERFMON (o root) para cargar las sondas,
      y un kernel con CONFIG_DEBUG_INFO_BTF=y. Para confinar a su
@@ -165,6 +172,18 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::SUCCESS;
     }
 
+    // Autodiagnostico para soporte (FASE 7 del MP-16): no arranca el agente ni
+    // lo toca; reune lo que soporte necesita, redactado, y sale.
+    if args.get(1).map(String::as_str) == Some("--diagnostico") {
+        return aegis_agent::diagnostico::orden(&args[2..], capacidades);
+    }
+
+    // Ordenes del canal de contenido firmado (FASE 4.5 del MP-16): no arrancan
+    // el agente; informan, instalan, aplican ajustes o revierten, y salen.
+    if args.get(1).map(String::as_str) == Some("--contenido") {
+        return aegis_agent::contenido::orden(&args[2..]);
+    }
+
     if args.get(1).map(String::as_str) == Some("--capacidades") {
         return match args.get(2).map(String::as_str) {
             None => informar_capacidades(false),
@@ -174,6 +193,10 @@ fn main() -> std::process::ExitCode {
                 std::process::ExitCode::from(2)
             }
         };
+    }
+
+    if args.get(1).map(String::as_str) == Some("--motores") {
+        return imprimir_motores(&args);
     }
 
     let o = match opciones(&args) {
@@ -188,6 +211,9 @@ fn main() -> std::process::ExitCode {
         }
     };
 
+    // Que contenido firmado hay y si verifica, SIEMPRE al arrancar (FASE 4.5
+    // del MP-16). Nunca impide arrancar, y ningun motor lo consume aun.
+    aegis_agent::contenido::informar_al_arrancar();
     blindar(o.harden);
     ejecutar(o)
 }
@@ -227,6 +253,33 @@ fn informar_capacidades(maquina: bool) -> std::process::ExitCode {
     }
 }
 
+/// `--motores`: la fuente de verdad de los motores registrables, tal y como la
+/// genera el codigo. Es lo que el rango lee para medir la cobertura que
+/// PERMITIRIAN los motores registrados, sin ejecutar ningun ataque.
+#[cfg(target_os = "linux")]
+fn imprimir_motores(args: &[String]) -> std::process::ExitCode {
+    if args.get(2).map(String::as_str) == Some("--escribir") {
+        return match aegis_agent::motores::registro::escribir_fichero() {
+            Ok(()) => {
+                eprintln!("aegis-agent: docs/generado/motores.txt regenerado");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("aegis-agent: no se pudo escribir docs/generado/motores.txt: {e}");
+                std::process::ExitCode::from(2)
+            }
+        };
+    }
+    print!("{}", aegis_agent::motores::registro::texto_generado());
+    std::process::ExitCode::SUCCESS
+}
+
+#[cfg(not(target_os = "linux"))]
+fn imprimir_motores(_args: &[String]) -> std::process::ExitCode {
+    eprintln!("aegis-agent: --motores solo esta disponible en Linux");
+    std::process::ExitCode::from(2)
+}
+
 /// Fuente de estado para el canal de control, respaldada por el pipeline.
 ///
 /// Solo lee contadores atomicos, asi que compartir el pipeline con el hilo de
@@ -256,7 +309,12 @@ impl aegis_ctl::StatusSource for EstadoPipeline {
         "running".to_string()
     }
     fn detalle(&self) -> Vec<String> {
-        self.informe.lock().map(|g| g.clone()).unwrap_or_default()
+        let mut d = self.informe.lock().map(|g| g.clone()).unwrap_or_default();
+        // Lo que no cambia en cada informe (el arranque del trabajador y los
+        // motores que no se registraron) y los ultimos veredictos, ya
+        // redactados: lo que el autodiagnostico lee (FASE 7 del MP-16).
+        d.extend(aegis_agent::diagnostico::lineas_registradas());
+        d
     }
 }
 
@@ -336,6 +394,7 @@ fn veredicto(v: &aegis_entidad::Veredicto, plano: Option<&PlanoControl>) {
             s.porque
         );
     }
+    aegis_agent::diagnostico::anotar_veredicto(v);
 }
 
 /// Entrega al arbitro lo que el camino frio termino de analizar.
@@ -442,6 +501,9 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
         match MotorEstatico::arrancar_con_trabajador() {
             Ok((a, declarado)) => {
                 eprintln!("aegis-agent: trabajador confinado: {declarado}");
+                aegis_agent::diagnostico::anotar_arranque(format!(
+                    "trabajador: confinado: {declarado}"
+                ));
                 (
                     Ok(()),
                     a.motor,
@@ -450,7 +512,12 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
                     Some(a.hilo),
                 )
             }
-            Err(m) => (Err(m), MotorEstatico::inerte(), None, None, None),
+            Err(m) => {
+                aegis_agent::diagnostico::anotar_arranque(format!(
+                    "trabajador: NO disponible: {m}"
+                ));
+                (Err(m), MotorEstatico::inerte(), None, None, None)
+            }
         };
 
     // La postura de aplicacion (H-28), SIEMPRE al arrancar, como las
@@ -479,35 +546,32 @@ fn ejecutar(o: Opciones) -> std::process::ExitCode {
             integridad.vigilados().len(),
             integridad.vigilados().join(" ")
         );
-        let motores: Vec<Box<dyn aegis_motor::Motor<EventoAgente>>> = vec![
-            Box::new(MotorTriaje::nuevo(
-                Arc::clone(&pipeline),
-                GraphConfig::default().max_nodes,
-            )),
-            Box::new(MotorConducta::nuevo(identidad.clone())),
-            Box::new(MotorSecuestro::nuevo(identidad.clone())),
-            Box::new(estatico),
-            Box::new(MotorModelo),
-            Box::new(integridad),
-            Box::new(MotorMemoria::nuevo()),
-            Box::new(MotorNucleo::nuevo(&identidad)),
-            Box::new(MotorBaliza::nuevo()),
-            Box::new(MotorPostura::nuevo(
-                identidad.clone(),
-                Arc::clone(&informe_postura),
-            )),
-            Box::new(rol),
-        ];
+        let motores = aegis_agent::motores::registro::construir(
+            &identidad,
+            Arc::clone(&pipeline),
+            estatico,
+            integridad,
+            rol,
+            Arc::clone(&informe_postura),
+        );
         for m in motores {
             let nombre = m.ficha().nombre;
             match arbitro.registrar(m, &host) {
                 Ok(()) => eprintln!("aegis-agent: motor {nombre} registrado"),
-                Err(o) => eprintln!(
-                    "aegis-agent: DEGRADADO motor={} requisito={}: {}",
-                    o.motor,
-                    o.requisito.nombre(),
-                    o.motivo
-                ),
+                Err(o) => {
+                    eprintln!(
+                        "aegis-agent: DEGRADADO motor={} requisito={}: {}",
+                        o.motor,
+                        o.requisito.nombre(),
+                        o.motivo
+                    );
+                    aegis_agent::diagnostico::anotar_arranque(format!(
+                        "motor {} DEGRADADO: requisito={} motivo=«{}»",
+                        o.motor,
+                        o.requisito.nombre(),
+                        o.motivo
+                    ));
+                }
             }
         }
     }

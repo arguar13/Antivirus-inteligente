@@ -384,6 +384,7 @@ dependencies = [
  "aegis-ips",
  "aegis-pqc",
  "aegis-presupuesto",
+ "aegis-sigma",
  "aegis-sync",
  "aegis-update",
  "serde",
@@ -500,6 +501,10 @@ dependencies = [
  "serde_json",
  "sha2",
 ]
+
+[[package]]
+name = "aegis-sigma"
+version = "0.1.0"
 
 [[package]]
 name = "aegis-swarm"

@@ -1,0 +1,17 @@
+# Motores registrables del agente. GENERADO por el codigo:
+#   aegis-agent --motores > docs/generado/motores.txt
+# No editar a mano: la prueba `el_fichero_generado_esta_al_dia`
+# (crates/aegis-agent/src/motores/registro.rs) falla si difiere.
+# columnas: nombre <TAB> firma <TAB> camino <TAB> requisitos
+baliza	l7hunter	frio	telemetria-kernel
+conducta	conductual	caliente	telemetria-kernel
+estatico	estatico	frio	telemetria-kernel,trabajador-confinado
+integridad	conductual	frio	telemetria-kernel
+memoria	memhunter	frio	telemetria-kernel,memoria-ajena
+modelo	aprendizaje	frio	telemetria-kernel,trabajador-confinado
+nucleo	nucleo	frio	kfuncs-tareas
+postura	fwaudit	frio	
+rol	conductual	caliente	telemetria-kernel
+secuestro	conductual	caliente	telemetria-kernel
+sigma	conductual	caliente	telemetria-kernel
+triaje	conductual	caliente	telemetria-kernel

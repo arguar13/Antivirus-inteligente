@@ -76,14 +76,27 @@ aegis-enforce = { path = "../aegis-enforce" }
 aegis-integridad = { path = "../aegis-integridad" }
 aegis-memhunter = { path = "../aegis-memhunter" }
 aegis-l7hunter = { path = "../aegis-l7hunter" }
+# Reglas Sigma (FASE 4 del MP-16): el compilador y el evaluador sin retroceso
+# compartidos con la fabrica de contenido; motor en solo-auditoria. Sin
+# dependencias de terceros (tools/lineabase-agente.txt no cambia).
+aegis-sigma = { path = "../aegis-sigma" }
 # FASE 5.2 del MP-16: la lectura de la postura del kernel y su linea base viven
 # en aegis-vuln (modulo `nucleo`); el agente la relee en caliente como motor.
 # Solo arrastra thiserror, que ya estaba.
 aegis-vuln = { path = "../aegis-vuln" }
+# El canal de contenido firmado (FASE 4.5 del MP-16): el agente solo carga
+# reglas y modelos de un paquete con firma hibrida, epoca monotona y anillo.
+# Trae aegis-update y aegis-patron, ya en el arbol: ningun crate de terceros
+# nuevo (tools/lineabase-agente.txt no cambia).
+aegis-contenido = { path = "../aegis-contenido" }
 # El verificador eBPF de kintegrity solo existe con la telemetria de kernel.
 aegis-kintegrity = { path = "../aegis-kintegrity", optional = true }
 # Resumen del contenido ya notificado de un fichero vigilado (integridad).
 blake3 = "1"
+# El SHA-256 del binario en ejecucion para el autodiagnostico (FASE 7 del
+# MP-16): es el resumen de SHA256SUMS y de los paquetes, el que soporte
+# compara. Ya justificado en tools/lineabase-agente.txt y en el arbol.
+sha2 = "0.10"
 dashmap = "6"
 thiserror = "2"
 libbpf-rs = { version = "0.24", optional = true }

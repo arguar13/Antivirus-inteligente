@@ -11,6 +11,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[[bin]]
+name = "aegis-rango"
+path = "src/bin/rango/main.rs"
+
 [dependencies]
 # Errores nombrados, igual que el resto del plano de control.
 thiserror = "2"

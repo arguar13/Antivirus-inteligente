@@ -137,13 +137,20 @@ done
 echo "==> Motores: cada modulo de src/motores/ implementa el contrato y se registra"
 REG_FALLOS=0
 for f in "$AGENTE"/src/motores/*.rs; do
-    [ "$(basename "$f")" = "mod.rs" ] && continue
+    case "$(basename "$f")" in
+        # mod.rs es la puerta del modulo; registro.rs es la FUENTE DE VERDAD
+        # que CONSTRUYE la lista de motores (Hallazgo 0 de la FASE 4): no es un
+        # motor, no implementa el contrato, y es el sitio donde se nombran todos.
+        mod.rs | registro.rs) continue ;;
+    esac
     if ! grep -qE 'impl (aegis_motor::)?Motor<' "$f"; then
         fallo "${f#"$AGENTE"/} no implementa aegis_motor::Motor"
         REG_FALLOS=$((REG_FALLOS + 1))
     fi
     while read -r tipo; do
-        if ! grep -qw "$tipo" "$AGENTE/src/main.rs"; then
+        # Los motores se registran desde registro::construir (la UNICA lista),
+        # que main invoca; antes se nombraban en main.rs. Vale cualquiera de los dos.
+        if ! grep -qw "$tipo" "$AGENTE/src/main.rs" "$AGENTE/src/motores/registro.rs"; then
             fallo "$tipo implementa el contrato pero el agente no lo registra"
             REG_FALLOS=$((REG_FALLOS + 1))
         fi

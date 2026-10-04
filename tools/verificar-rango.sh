@@ -27,10 +27,13 @@ VERDE=$'\033[32m'; GRIS=$'\033[90m'; ROJO=$'\033[31m'; FIN=$'\033[0m'
 echo "==> AegisRange: el catalogo, el rango y la medida de cobertura"
 if (cd server && cargo test -q -p aegis-rango) >/tmp/aegis-rango.log 2>&1; then
     echo "    ${VERDE}OK${FIN} (al menos una tecnica por cada una de las 14 tacticas de ATT&CK"
-    echo "    ${VERDE}  ${FIN} Enterprise, incluidas las 14 del motor conductual; se ejecutan, se"
-    echo "    ${VERDE}  ${FIN} miden contra el arbitro REAL, se revierten y no dejan residuo; los"
-    echo "    ${VERDE}  ${FIN} huecos —el conductual y el forense de memoria, que hoy no entregan"
-    echo "    ${VERDE}  ${FIN} señal— salen nombrados; y la cifra es reproducible entre ejecuciones)"
+    echo "    ${VERDE}  ${FIN} Enterprise, incluidas las 14 del conductual; se ejecutan, se"
+    echo "    ${VERDE}  ${FIN} revierten y no dejan residuo. La cobertura se mide contra la FUENTE"
+    echo "    ${VERDE}  ${FIN} DE VERDAD del agente (docs/generado/motores.txt, que genera"
+    echo "    ${VERDE}  ${FIN} 'aegis-agent --motores'): es la que PERMITIRIAN los motores"
+    echo "    ${VERDE}  ${FIN} registrados, SIN ejecutar ataques. La medida real, con ataques y"
+    echo "    ${VERDE}  ${FIN} telemetria del agente en marcha, la da la prueba de matriz"
+    echo "    ${VERDE}  ${FIN} 'rango-en-vivo' de la matriz de kernels)"
 else
     echo "    ${ROJO}FALLO${FIN}"
     sed 's/^/    | /' /tmp/aegis-rango.log | tail -30

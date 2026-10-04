@@ -6,6 +6,8 @@
 #  leen:
 #
 #    · tools/ci/artifacts.sh y tools/ci/hermetico.sh   qué se construye y publica
+#    · tools/ci/codigo_nativo.py                        de qué grafo sale el código
+#                                                       nativo que se revisa
 #    · cargo xtask matriz                               qué cuenta como «Producto»
 #    · cargo xtask docs                                 el diagrama C4 del README
 #
