@@ -1,0 +1,416 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:cargo/libc@0.2.189",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "libc",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/libc@0.2.189",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.189"
+    },
+    {
+      "bom-ref": "pkg:cargo/proc-macro2@1.0.107",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "proc-macro2",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/proc-macro2@1.0.107",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.107"
+    },
+    {
+      "bom-ref": "pkg:cargo/quote@1.0.47",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "quote",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/quote@1.0.47",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.47"
+    },
+    {
+      "bom-ref": "pkg:cargo/syn@3.0.5",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "syn",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/syn@3.0.5",
+      "scope": "excluded",
+      "type": "library",
+      "version": "3.0.5"
+    },
+    {
+      "bom-ref": "pkg:cargo/thiserror-impl@2.0.20",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "thiserror-impl",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/thiserror-impl@2.0.20",
+      "scope": "excluded",
+      "type": "library",
+      "version": "2.0.20"
+    },
+    {
+      "bom-ref": "pkg:cargo/thiserror@2.0.20",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "thiserror",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/thiserror@2.0.20",
+      "scope": "required",
+      "type": "library",
+      "version": "2.0.20"
+    },
+    {
+      "bom-ref": "pkg:cargo/unicode-ident@1.0.24",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "(MIT OR Apache-2.0) AND Unicode-3.0"
+        }
+      ],
+      "name": "unicode-ident",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/unicode-ident@1.0.24",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.24"
+    },
+    {
+      "bom-ref": "repo:aegis-presupuesto@0.1.0",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aegis-presupuesto",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "repositorio"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "0.1.0"
+    },
+    {
+      "bom-ref": "sistema:rust-std",
+      "description": "Biblioteca estándar de Rust (std, core, alloc) del toolchain que compila.",
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rust-std",
+      "properties": [
+        {
+          "name": "aegis:version-de",
+          "value": "rustc"
+        },
+        {
+          "name": "aegis:version",
+          "value": "no fijada en el repositorio: la registra el SBOM del build"
+        }
+      ],
+      "scope": "required",
+      "type": "library"
+    },
+    {
+      "bom-ref": "sistema:musl",
+      "description": "libc enlazada estáticamente; sale del paquete musl-dev del constructor (tools/toolchain/preparar_musl.sh).",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "musl",
+      "properties": [
+        {
+          "name": "aegis:version-de",
+          "value": "dpkg:musl-dev"
+        },
+        {
+          "name": "aegis:version",
+          "value": "no fijada en el repositorio: la registra el SBOM del build"
+        }
+      ],
+      "scope": "required",
+      "type": "library"
+    },
+    {
+      "bom-ref": "sistema:libunwind",
+      "description": "Desenrollador de LLVM que el toolchain de Rust distribuye para musl; lo copia al sysroot tools/toolchain/preparar_musl.sh.",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception"
+        }
+      ],
+      "name": "libunwind",
+      "properties": [
+        {
+          "name": "aegis:version-de",
+          "value": "rustc"
+        },
+        {
+          "name": "aegis:version",
+          "value": "no fijada en el repositorio: la registra el SBOM del build"
+        }
+      ],
+      "scope": "required",
+      "type": "library"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [
+        "pkg:cargo/libc@0.2.189",
+        "pkg:cargo/thiserror@2.0.20",
+        "repo:aegis-presupuesto@0.1.0",
+        "sistema:libunwind",
+        "sistema:musl",
+        "sistema:rust-std"
+      ],
+      "ref": "repo:aegis-watchdog@0.1.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/libc@0.2.189"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/unicode-ident@1.0.24"
+      ],
+      "ref": "pkg:cargo/proc-macro2@1.0.107"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107"
+      ],
+      "ref": "pkg:cargo/quote@1.0.47"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/unicode-ident@1.0.24"
+      ],
+      "ref": "pkg:cargo/syn@3.0.5"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@3.0.5"
+      ],
+      "ref": "pkg:cargo/thiserror-impl@2.0.20"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/thiserror-impl@2.0.20"
+      ],
+      "ref": "pkg:cargo/thiserror@2.0.20"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/unicode-ident@1.0.24"
+    },
+    {
+      "dependsOn": [],
+      "ref": "repo:aegis-presupuesto@0.1.0"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "repo:aegis-watchdog@0.1.0",
+      "description": "Supervisor: reinicia el agente ante caída, cuelgue o exceso de memoria.",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aegis-watchdog",
+      "properties": [
+        {
+          "name": "aegis:paquete",
+          "value": "aegis-watchdog"
+        },
+        {
+          "name": "aegis:workspace",
+          "value": "agente"
+        },
+        {
+          "name": "aegis:lado",
+          "value": "endpoint"
+        },
+        {
+          "name": "aegis:caracteristicas",
+          "value": "(ninguna)"
+        },
+        {
+          "name": "aegis:objetivo",
+          "value": "x86_64-unknown-linux-musl"
+        }
+      ],
+      "type": "application",
+      "version": "0.1.0"
+    },
+    "properties": [
+      {
+        "name": "aegis:fuente",
+        "value": "Cargo.lock del workspace agente + cargo tree --locked -e normal,build --target x86_64-unknown-linux-musl"
+      },
+      {
+        "name": "aegis:alcance",
+        "value": "solo la arquitectura del objetivo indicado"
+      }
+    ],
+    "tools": {
+      "components": [
+        {
+          "name": "cargo xtask sbom",
+          "type": "application",
+          "version": "0.1.0"
+        }
+      ]
+    }
+  },
+  "specVersion": "1.5",
+  "version": 1
+}

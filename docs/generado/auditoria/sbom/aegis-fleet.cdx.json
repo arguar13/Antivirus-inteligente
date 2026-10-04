@@ -1,0 +1,3386 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "pkg:cargo/aead@0.5.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d122413f284cf2d62fb1b7db97e02edb8cda96d769b16e443a4f6195e35662b0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "aead",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/aead@0.5.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.5.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/aes-gcm@0.10.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "831010a0f742e1209b3bcea8fab6a8e149051ba6099432c8cb2cc117dec3ead1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "name": "aes-gcm",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/aes-gcm@0.10.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.10.3"
+    },
+    {
+      "bom-ref": "pkg:cargo/aes@0.8.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "aes",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/aes@0.8.4",
+      "scope": "required",
+      "type": "library",
+      "version": "0.8.4"
+    },
+    {
+      "bom-ref": "pkg:cargo/asn1-rs-derive@0.5.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "965c2d33e53cb6b267e148a4cb0760bc01f4904c1cd4bb4002a085bb016d1490"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "asn1-rs-derive",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/asn1-rs-derive@0.5.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.5.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/asn1-rs-impl@0.2.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "asn1-rs-impl",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/asn1-rs-impl@0.2.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.2.0"
+    },
+    {
+      "bom-ref": "pkg:cargo/asn1-rs@0.6.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5493c3bedbacf7fd7382c6346bbd66687d12bbaad3a89a2d2c303ee6cf20b048"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "asn1-rs",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/asn1-rs@0.6.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.6.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/autocfg@1.5.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "name": "autocfg",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "build.rs"
+        }
+      ],
+      "purl": "pkg:cargo/autocfg@1.5.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.5.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/base64@0.22.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "base64",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/base64@0.22.1",
+      "scope": "required",
+      "type": "library",
+      "version": "0.22.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/block-buffer@0.10.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "block-buffer",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/block-buffer@0.10.4",
+      "scope": "required",
+      "type": "library",
+      "version": "0.10.4"
+    },
+    {
+      "bom-ref": "pkg:cargo/cc@1.4.5",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "005ec2760ca554fae18df7a11195552ec576cd665632a881bc011d5bb2fd4d80"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "cc",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "build.rs"
+        }
+      ],
+      "purl": "pkg:cargo/cc@1.4.5",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.4.5"
+    },
+    {
+      "bom-ref": "pkg:cargo/cfg-if@1.0.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "cfg-if",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/cfg-if@1.0.4",
+      "scope": "required",
+      "type": "library",
+      "version": "1.0.4"
+    },
+    {
+      "bom-ref": "pkg:cargo/cipher@0.4.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "cipher",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/cipher@0.4.4",
+      "scope": "required",
+      "type": "library",
+      "version": "0.4.4"
+    },
+    {
+      "bom-ref": "pkg:cargo/cpufeatures@0.2.17",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "cpufeatures",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/cpufeatures@0.2.17",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.17"
+    },
+    {
+      "bom-ref": "pkg:cargo/crypto-common@0.1.7",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "78c8292055d1c1df0cce5d180393dc8cce0abec0a7102adb6c7b1eef6016d60a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "crypto-common",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/crypto-common@0.1.7",
+      "scope": "required",
+      "type": "library",
+      "version": "0.1.7"
+    },
+    {
+      "bom-ref": "pkg:cargo/ctr@0.9.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "ctr",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/ctr@0.9.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.9.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/curve25519-dalek-derive@0.1.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "curve25519-dalek-derive",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/curve25519-dalek-derive@0.1.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.1.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/curve25519-dalek@4.1.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "curve25519-dalek",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/curve25519-dalek@4.1.3",
+      "scope": "required",
+      "type": "library",
+      "version": "4.1.3"
+    },
+    {
+      "bom-ref": "pkg:cargo/data-encoding@2.11.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "data-encoding",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/data-encoding@2.11.1",
+      "scope": "required",
+      "type": "library",
+      "version": "2.11.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/der-parser@9.0.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5cd0a5c643689626bec213c4d8bd4d96acc8ffdb4ad4bb6bc16abf27d5f4b553"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "der-parser",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/der-parser@9.0.0",
+      "scope": "required",
+      "type": "library",
+      "version": "9.0.0"
+    },
+    {
+      "bom-ref": "pkg:cargo/deranged@0.5.8",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "deranged",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/deranged@0.5.8",
+      "scope": "required",
+      "type": "library",
+      "version": "0.5.8"
+    },
+    {
+      "bom-ref": "pkg:cargo/digest@0.10.7",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "digest",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/digest@0.10.7",
+      "scope": "required",
+      "type": "library",
+      "version": "0.10.7"
+    },
+    {
+      "bom-ref": "pkg:cargo/displaydoc@0.2.7",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c6232dd377dcc64799954cbd3a9bb882e9cdc1308ccd87b1c098f1fb2eaf82a8"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "displaydoc",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/displaydoc@0.2.7",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.2.7"
+    },
+    {
+      "bom-ref": "pkg:cargo/find-msvc-tools@0.1.12",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "find-msvc-tools",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "build.rs"
+        }
+      ],
+      "purl": "pkg:cargo/find-msvc-tools@0.1.12",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.1.12"
+    },
+    {
+      "bom-ref": "pkg:cargo/generic-array@0.14.7",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "generic-array",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/generic-array@0.14.7",
+      "scope": "required",
+      "type": "library",
+      "version": "0.14.7"
+    },
+    {
+      "bom-ref": "pkg:cargo/getrandom@0.2.17",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "getrandom",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/getrandom@0.2.17",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.17"
+    },
+    {
+      "bom-ref": "pkg:cargo/ghash@0.5.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "name": "ghash",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/ghash@0.5.1",
+      "scope": "required",
+      "type": "library",
+      "version": "0.5.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/hax-lib-macros@0.3.7",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "28da835a5f153e9f3d0cc1f42ee605a1cfa9093c93348193793d60a1b0908b51"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "hax-lib-macros",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/hax-lib-macros@0.3.7",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.3.7"
+    },
+    {
+      "bom-ref": "pkg:cargo/hax-lib@0.3.7",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "01a33cb227f97ee5c419064c31d7c55a7d895f28d8019ccdadc311cc036500c4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "hax-lib",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/hax-lib@0.3.7",
+      "scope": "required",
+      "type": "library",
+      "version": "0.3.7"
+    },
+    {
+      "bom-ref": "pkg:cargo/hkdf@0.12.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "hkdf",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/hkdf@0.12.4",
+      "scope": "required",
+      "type": "library",
+      "version": "0.12.4"
+    },
+    {
+      "bom-ref": "pkg:cargo/hmac@0.12.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "hmac",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/hmac@0.12.1",
+      "scope": "required",
+      "type": "library",
+      "version": "0.12.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/inout@0.1.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "inout",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/inout@0.1.4",
+      "scope": "required",
+      "type": "library",
+      "version": "0.1.4"
+    },
+    {
+      "bom-ref": "pkg:cargo/lazy_static@1.5.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "lazy_static",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/lazy_static@1.5.0",
+      "scope": "required",
+      "type": "library",
+      "version": "1.5.0"
+    },
+    {
+      "bom-ref": "pkg:cargo/libc@0.2.189",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "libc",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/libc@0.2.189",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.189"
+    },
+    {
+      "bom-ref": "pkg:cargo/libcrux-intrinsics@0.0.8",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "98a0c574d4eb81d0814bc2b91e4a433d7e0b35851b1d62eb5dd95c064f1f76d0"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "libcrux-intrinsics",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/libcrux-intrinsics@0.0.8",
+      "scope": "required",
+      "type": "library",
+      "version": "0.0.8"
+    },
+    {
+      "bom-ref": "pkg:cargo/libcrux-ml-kem@0.0.10",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1d8160f7d64fd2716b4fd05cc886a042f8dcda18d9206c0d506e2c67bdf97daa"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "libcrux-ml-kem",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/libcrux-ml-kem@0.0.10",
+      "scope": "required",
+      "type": "library",
+      "version": "0.0.10"
+    },
+    {
+      "bom-ref": "pkg:cargo/libcrux-platform@0.0.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1d9e21d7ed31a92ac539bd69a8c970b183ee883872d2d19ce27036e24cb8ecc4"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "libcrux-platform",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/libcrux-platform@0.0.3",
+      "scope": "required",
+      "type": "library",
+      "version": "0.0.3"
+    },
+    {
+      "bom-ref": "pkg:cargo/libcrux-secrets@0.0.6",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "79054fc9037cb70d6a546cf094cea7d7df06af5e49d230ba24103d27ccc886f1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "libcrux-secrets",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/libcrux-secrets@0.0.6",
+      "scope": "required",
+      "type": "library",
+      "version": "0.0.6"
+    },
+    {
+      "bom-ref": "pkg:cargo/libcrux-sha3@0.0.10",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c09f5c39afae0528e1f70a3c1e3c6ee649ec1f19dda26fc9b6ea91108fb879ef"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "libcrux-sha3",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/libcrux-sha3@0.0.10",
+      "scope": "required",
+      "type": "library",
+      "version": "0.0.10"
+    },
+    {
+      "bom-ref": "pkg:cargo/libcrux-traits@0.0.8",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3fa7a21e8c2e8baa8b40f0b176740f2ca4baadd79d1b00e48d6b1e363c42085a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "libcrux-traits",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/libcrux-traits@0.0.8",
+      "scope": "required",
+      "type": "library",
+      "version": "0.0.8"
+    },
+    {
+      "bom-ref": "pkg:cargo/log@0.4.34",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "log",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/log@0.4.34",
+      "scope": "required",
+      "type": "library",
+      "version": "0.4.34"
+    },
+    {
+      "bom-ref": "pkg:cargo/memchr@2.8.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Unlicense OR MIT"
+        }
+      ],
+      "name": "memchr",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/memchr@2.8.3",
+      "scope": "required",
+      "type": "library",
+      "version": "2.8.3"
+    },
+    {
+      "bom-ref": "pkg:cargo/minimal-lexical@0.2.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "minimal-lexical",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/minimal-lexical@0.2.1",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/nom@7.1.3",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "nom",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/nom@7.1.3",
+      "scope": "required",
+      "type": "library",
+      "version": "7.1.3"
+    },
+    {
+      "bom-ref": "pkg:cargo/num-bigint@0.4.8",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "num-bigint",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/num-bigint@0.4.8",
+      "scope": "required",
+      "type": "library",
+      "version": "0.4.8"
+    },
+    {
+      "bom-ref": "pkg:cargo/num-conv@0.2.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "521739c6d2bac4aa25192232afe6841231376b2b26d4d9fae5ecf8ca5772e441"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "num-conv",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/num-conv@0.2.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/num-integer@0.1.47",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "num-integer",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/num-integer@0.1.47",
+      "scope": "required",
+      "type": "library",
+      "version": "0.1.47"
+    },
+    {
+      "bom-ref": "pkg:cargo/num-traits@0.2.19",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "num-traits",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/num-traits@0.2.19",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.19"
+    },
+    {
+      "bom-ref": "pkg:cargo/oid-registry@0.7.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a8d8034d9489cdaf79228eb9f6a3b8d7bb32ba00d6645ebd48eef4077ceb5bd9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "oid-registry",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/oid-registry@0.7.1",
+      "scope": "required",
+      "type": "library",
+      "version": "0.7.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/once_cell@1.21.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "once_cell",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/once_cell@1.21.4",
+      "scope": "required",
+      "type": "library",
+      "version": "1.21.4"
+    },
+    {
+      "bom-ref": "pkg:cargo/opaque-debug@0.3.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "opaque-debug",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/opaque-debug@0.3.1",
+      "scope": "required",
+      "type": "library",
+      "version": "0.3.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/pem@3.0.6",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1d30c53c26bc5b31a98cd02d20f25a7c8567146caf63ed593a9d87b2775291be"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "pem",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/pem@3.0.6",
+      "scope": "required",
+      "type": "library",
+      "version": "3.0.6"
+    },
+    {
+      "bom-ref": "pkg:cargo/polyval@0.6.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9d1fe60d06143b2430aa532c94cfe9e29783047f06c0d7fd359a9a51b729fa25"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "name": "polyval",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/polyval@0.6.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.6.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/powerfmt@0.2.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "powerfmt",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/powerfmt@0.2.0",
+      "scope": "required",
+      "type": "library",
+      "version": "0.2.0"
+    },
+    {
+      "bom-ref": "pkg:cargo/proc-macro2@1.0.107",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "proc-macro2",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/proc-macro2@1.0.107",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.107"
+    },
+    {
+      "bom-ref": "pkg:cargo/quote@1.0.47",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "quote",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/quote@1.0.47",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.47"
+    },
+    {
+      "bom-ref": "pkg:cargo/rand@0.10.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c7f5fa3a058cd35567ef9bfa5e75732bee0f9e4c55fa90477bef2dfcdbc4be80"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rand",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/rand@0.10.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.10.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/rand_core@0.10.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rand_core",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/rand_core@0.10.1",
+      "scope": "required",
+      "type": "library",
+      "version": "0.10.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/rand_core@0.6.4",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rand_core",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/rand_core@0.6.4",
+      "scope": "required",
+      "type": "library",
+      "version": "0.6.4"
+    },
+    {
+      "bom-ref": "pkg:cargo/rcgen@0.13.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "75e669e5202259b5314d1ea5397316ad400819437857b90861765f24c4cf80a2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rcgen",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/rcgen@0.13.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.13.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/ring@0.17.14",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a4689e6c2294d81e88dc6261c768b63bc4fcdb852be6d1352498b114f61383b7"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 AND ISC"
+        }
+      ],
+      "name": "ring",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/ring@0.17.14",
+      "scope": "required",
+      "type": "library",
+      "version": "0.17.14"
+    },
+    {
+      "bom-ref": "pkg:cargo/rustc_version@0.4.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rustc_version",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "build.rs"
+        }
+      ],
+      "purl": "pkg:cargo/rustc_version@0.4.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.4.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/rusticata-macros@4.1.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "faf0c4a6ece9950b9abdb62b1cfcf2a68b3b67a10ba445b3bb85be2a293d0632"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rusticata-macros",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/rusticata-macros@4.1.0",
+      "scope": "required",
+      "type": "library",
+      "version": "4.1.0"
+    },
+    {
+      "bom-ref": "pkg:cargo/rustls-pki-types@1.15.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "2f4925028c7eb5d1fcdaf196971378ed9d2c1c4efc7dc5d011256f76c99c0a96"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rustls-pki-types",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/rustls-pki-types@1.15.1",
+      "scope": "required",
+      "type": "library",
+      "version": "1.15.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/rustls-webpki@0.103.15",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ],
+      "name": "rustls-webpki",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/rustls-webpki@0.103.15",
+      "scope": "required",
+      "type": "library",
+      "version": "0.103.15"
+    },
+    {
+      "bom-ref": "pkg:cargo/rustls@0.23.45",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR ISC OR MIT"
+        }
+      ],
+      "name": "rustls",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/rustls@0.23.45",
+      "scope": "required",
+      "type": "library",
+      "version": "0.23.45"
+    },
+    {
+      "bom-ref": "pkg:cargo/semver@1.0.28",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "semver",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "build.rs"
+        }
+      ],
+      "purl": "pkg:cargo/semver@1.0.28",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.28"
+    },
+    {
+      "bom-ref": "pkg:cargo/sha2@0.10.9",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "sha2",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/sha2@0.10.9",
+      "scope": "required",
+      "type": "library",
+      "version": "0.10.9"
+    },
+    {
+      "bom-ref": "pkg:cargo/shlex@2.0.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "shlex",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "build.rs"
+        }
+      ],
+      "purl": "pkg:cargo/shlex@2.0.1",
+      "scope": "excluded",
+      "type": "library",
+      "version": "2.0.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/subtle@2.6.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "subtle",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/subtle@2.6.1",
+      "scope": "required",
+      "type": "library",
+      "version": "2.6.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/syn@2.0.119",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "syn",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/syn@2.0.119",
+      "scope": "excluded",
+      "type": "library",
+      "version": "2.0.119"
+    },
+    {
+      "bom-ref": "pkg:cargo/syn@3.0.5",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "12df2e0110f65b775f769bb17ef989067a1d931b2eb822bd4346631eeada89f9"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "syn",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/syn@3.0.5",
+      "scope": "excluded",
+      "type": "library",
+      "version": "3.0.5"
+    },
+    {
+      "bom-ref": "pkg:cargo/synstructure@0.13.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "synstructure",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/synstructure@0.13.2",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.13.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/thiserror-impl@1.0.69",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "thiserror-impl",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/thiserror-impl@1.0.69",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.69"
+    },
+    {
+      "bom-ref": "pkg:cargo/thiserror-impl@2.0.20",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "thiserror-impl",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/thiserror-impl@2.0.20",
+      "scope": "excluded",
+      "type": "library",
+      "version": "2.0.20"
+    },
+    {
+      "bom-ref": "pkg:cargo/thiserror@1.0.69",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "thiserror",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/thiserror@1.0.69",
+      "scope": "required",
+      "type": "library",
+      "version": "1.0.69"
+    },
+    {
+      "bom-ref": "pkg:cargo/thiserror@2.0.20",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "thiserror",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/thiserror@2.0.20",
+      "scope": "required",
+      "type": "library",
+      "version": "2.0.20"
+    },
+    {
+      "bom-ref": "pkg:cargo/time-core@0.1.9",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "time-core",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/time-core@0.1.9",
+      "scope": "required",
+      "type": "library",
+      "version": "0.1.9"
+    },
+    {
+      "bom-ref": "pkg:cargo/time-macros@0.2.32",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7e689342a48d2ea927c87ea50cabf8594854bf940e9310208848d680d668ed85"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "time-macros",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/time-macros@0.2.32",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.2.32"
+    },
+    {
+      "bom-ref": "pkg:cargo/time@0.3.55",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "cdb87b95ec50ddfa440816d227a17b2ccbdda963a316a727fda0fc4334f7d134"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "time",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/time@0.3.55",
+      "scope": "required",
+      "type": "library",
+      "version": "0.3.55"
+    },
+    {
+      "bom-ref": "pkg:cargo/typenum@1.20.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "typenum",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/typenum@1.20.1",
+      "scope": "required",
+      "type": "library",
+      "version": "1.20.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/unicode-ident@1.0.24",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "(MIT OR Apache-2.0) AND Unicode-3.0"
+        }
+      ],
+      "name": "unicode-ident",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        }
+      ],
+      "purl": "pkg:cargo/unicode-ident@1.0.24",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.0.24"
+    },
+    {
+      "bom-ref": "pkg:cargo/universal-hash@0.5.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fc1de2c688dc15305988b563c3854064043356019f97a4b46276fe734c4f07ea"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "universal-hash",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/universal-hash@0.5.1",
+      "scope": "required",
+      "type": "library",
+      "version": "0.5.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/untrusted@0.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "ISC"
+        }
+      ],
+      "name": "untrusted",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/untrusted@0.9.0",
+      "scope": "required",
+      "type": "library",
+      "version": "0.9.0"
+    },
+    {
+      "bom-ref": "pkg:cargo/version_check@0.9.5",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "version_check",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "build.rs"
+        }
+      ],
+      "purl": "pkg:cargo/version_check@0.9.5",
+      "scope": "excluded",
+      "type": "library",
+      "version": "0.9.5"
+    },
+    {
+      "bom-ref": "pkg:cargo/x25519-dalek@2.0.1",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "c7e468321c81fb07fa7f4c636c3972b9100f0346e5b6a9f2bd0603a52f7ed277"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "BSD-3-Clause"
+        }
+      ],
+      "name": "x25519-dalek",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/x25519-dalek@2.0.1",
+      "scope": "required",
+      "type": "library",
+      "version": "2.0.1"
+    },
+    {
+      "bom-ref": "pkg:cargo/x509-parser@0.16.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "fcbc162f30700d6f3f82a24bf7cc62ffe7caea42c0b2cba8bf7f3ae50cf51f69"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "x509-parser",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/x509-parser@0.16.0",
+      "scope": "required",
+      "type": "library",
+      "version": "0.16.0"
+    },
+    {
+      "bom-ref": "pkg:cargo/yasna@0.5.2",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e17bb3549cc1321ae1296b9cdc2698e2b6cb1992adfa19a8c72e5b7a738f44cd"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "yasna",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/yasna@0.5.2",
+      "scope": "required",
+      "type": "library",
+      "version": "0.5.2"
+    },
+    {
+      "bom-ref": "pkg:cargo/zeroize@1.9.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "name": "zeroize",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "purl": "pkg:cargo/zeroize@1.9.0",
+      "scope": "required",
+      "type": "library",
+      "version": "1.9.0"
+    },
+    {
+      "bom-ref": "pkg:cargo/zeroize_derive@1.5.0",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "3c50655cbb0fe3fc43170059e702f1ce5e19b84cec58dc87b037a09935c2f328"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0 OR MIT"
+        }
+      ],
+      "name": "zeroize_derive",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "crates.io"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "macro procedural"
+        },
+        {
+          "name": "aegis:proc-macro",
+          "value": "si"
+        }
+      ],
+      "purl": "pkg:cargo/zeroize_derive@1.5.0",
+      "scope": "excluded",
+      "type": "library",
+      "version": "1.5.0"
+    },
+    {
+      "bom-ref": "repo:aegis-pqc@0.1.0",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aegis-pqc",
+      "properties": [
+        {
+          "name": "aegis:origen",
+          "value": "repositorio"
+        },
+        {
+          "name": "aegis:uso",
+          "value": "ejecucion"
+        }
+      ],
+      "scope": "required",
+      "type": "library",
+      "version": "0.1.0"
+    },
+    {
+      "bom-ref": "sistema:rust-std",
+      "description": "Biblioteca estándar de Rust (std, core, alloc) del toolchain que compila.",
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "name": "rust-std",
+      "properties": [
+        {
+          "name": "aegis:version-de",
+          "value": "rustc"
+        },
+        {
+          "name": "aegis:version",
+          "value": "no fijada en el repositorio: la registra el SBOM del build"
+        }
+      ],
+      "scope": "required",
+      "type": "library"
+    },
+    {
+      "bom-ref": "sistema:musl",
+      "description": "libc enlazada estáticamente; sale del paquete musl-dev del constructor (tools/toolchain/preparar_musl.sh).",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "name": "musl",
+      "properties": [
+        {
+          "name": "aegis:version-de",
+          "value": "dpkg:musl-dev"
+        },
+        {
+          "name": "aegis:version",
+          "value": "no fijada en el repositorio: la registra el SBOM del build"
+        }
+      ],
+      "scope": "required",
+      "type": "library"
+    },
+    {
+      "bom-ref": "sistema:libunwind",
+      "description": "Desenrollador de LLVM que el toolchain de Rust distribuye para musl; lo copia al sysroot tools/toolchain/preparar_musl.sh.",
+      "licenses": [
+        {
+          "expression": "Apache-2.0 WITH LLVM-exception"
+        }
+      ],
+      "name": "libunwind",
+      "properties": [
+        {
+          "name": "aegis:version-de",
+          "value": "rustc"
+        },
+        {
+          "name": "aegis:version",
+          "value": "no fijada en el repositorio: la registra el SBOM del build"
+        }
+      ],
+      "scope": "required",
+      "type": "library"
+    }
+  ],
+  "dependencies": [
+    {
+      "dependsOn": [
+        "pkg:cargo/pem@3.0.6",
+        "pkg:cargo/rcgen@0.13.2",
+        "pkg:cargo/rustls-pki-types@1.15.1",
+        "pkg:cargo/rustls@0.23.45",
+        "pkg:cargo/sha2@0.10.9",
+        "pkg:cargo/thiserror@2.0.20",
+        "pkg:cargo/time@0.3.55",
+        "pkg:cargo/zeroize@1.9.0",
+        "repo:aegis-pqc@0.1.0",
+        "sistema:libunwind",
+        "sistema:musl",
+        "sistema:rust-std"
+      ],
+      "ref": "repo:aegis-fleet@0.1.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/crypto-common@0.1.7",
+        "pkg:cargo/generic-array@0.14.7"
+      ],
+      "ref": "pkg:cargo/aead@0.5.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/aead@0.5.2",
+        "pkg:cargo/aes@0.8.4",
+        "pkg:cargo/cipher@0.4.4",
+        "pkg:cargo/ctr@0.9.2",
+        "pkg:cargo/ghash@0.5.1",
+        "pkg:cargo/subtle@2.6.1"
+      ],
+      "ref": "pkg:cargo/aes-gcm@0.10.3"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4",
+        "pkg:cargo/cipher@0.4.4",
+        "pkg:cargo/cpufeatures@0.2.17"
+      ],
+      "ref": "pkg:cargo/aes@0.8.4"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@2.0.119",
+        "pkg:cargo/synstructure@0.13.2"
+      ],
+      "ref": "pkg:cargo/asn1-rs-derive@0.5.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@2.0.119"
+      ],
+      "ref": "pkg:cargo/asn1-rs-impl@0.2.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/asn1-rs-derive@0.5.1",
+        "pkg:cargo/asn1-rs-impl@0.2.0",
+        "pkg:cargo/displaydoc@0.2.7",
+        "pkg:cargo/nom@7.1.3",
+        "pkg:cargo/num-traits@0.2.19",
+        "pkg:cargo/rusticata-macros@4.1.0",
+        "pkg:cargo/thiserror@1.0.69",
+        "pkg:cargo/time@0.3.55"
+      ],
+      "ref": "pkg:cargo/asn1-rs@0.6.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/autocfg@1.5.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/base64@0.22.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/generic-array@0.14.7"
+      ],
+      "ref": "pkg:cargo/block-buffer@0.10.4"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/find-msvc-tools@0.1.12",
+        "pkg:cargo/shlex@2.0.1"
+      ],
+      "ref": "pkg:cargo/cc@1.4.5"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/cfg-if@1.0.4"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/crypto-common@0.1.7",
+        "pkg:cargo/inout@0.1.4"
+      ],
+      "ref": "pkg:cargo/cipher@0.4.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/cpufeatures@0.2.17"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/generic-array@0.14.7",
+        "pkg:cargo/typenum@1.20.1"
+      ],
+      "ref": "pkg:cargo/crypto-common@0.1.7"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/cipher@0.4.4"
+      ],
+      "ref": "pkg:cargo/ctr@0.9.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@2.0.119"
+      ],
+      "ref": "pkg:cargo/curve25519-dalek-derive@0.1.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4",
+        "pkg:cargo/cpufeatures@0.2.17",
+        "pkg:cargo/curve25519-dalek-derive@0.1.1",
+        "pkg:cargo/rustc_version@0.4.1",
+        "pkg:cargo/subtle@2.6.1",
+        "pkg:cargo/zeroize@1.9.0"
+      ],
+      "ref": "pkg:cargo/curve25519-dalek@4.1.3"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/data-encoding@2.11.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/asn1-rs@0.6.2",
+        "pkg:cargo/displaydoc@0.2.7",
+        "pkg:cargo/nom@7.1.3",
+        "pkg:cargo/num-bigint@0.4.8",
+        "pkg:cargo/num-traits@0.2.19",
+        "pkg:cargo/rusticata-macros@4.1.0"
+      ],
+      "ref": "pkg:cargo/der-parser@9.0.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/deranged@0.5.8"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/block-buffer@0.10.4",
+        "pkg:cargo/crypto-common@0.1.7",
+        "pkg:cargo/subtle@2.6.1"
+      ],
+      "ref": "pkg:cargo/digest@0.10.7"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@3.0.5"
+      ],
+      "ref": "pkg:cargo/displaydoc@0.2.7"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/find-msvc-tools@0.1.12"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/typenum@1.20.1",
+        "pkg:cargo/version_check@0.9.5"
+      ],
+      "ref": "pkg:cargo/generic-array@0.14.7"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4",
+        "pkg:cargo/libc@0.2.189"
+      ],
+      "ref": "pkg:cargo/getrandom@0.2.17"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/opaque-debug@0.3.1",
+        "pkg:cargo/polyval@0.6.2"
+      ],
+      "ref": "pkg:cargo/ghash@0.5.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@2.0.119"
+      ],
+      "ref": "pkg:cargo/hax-lib-macros@0.3.7"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/hax-lib-macros@0.3.7"
+      ],
+      "ref": "pkg:cargo/hax-lib@0.3.7"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/hmac@0.12.1"
+      ],
+      "ref": "pkg:cargo/hkdf@0.12.4"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/digest@0.10.7"
+      ],
+      "ref": "pkg:cargo/hmac@0.12.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/generic-array@0.14.7"
+      ],
+      "ref": "pkg:cargo/inout@0.1.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/lazy_static@1.5.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/libc@0.2.189"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/hax-lib@0.3.7"
+      ],
+      "ref": "pkg:cargo/libcrux-intrinsics@0.0.8"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/hax-lib@0.3.7",
+        "pkg:cargo/libcrux-intrinsics@0.0.8",
+        "pkg:cargo/libcrux-platform@0.0.3",
+        "pkg:cargo/libcrux-secrets@0.0.6",
+        "pkg:cargo/libcrux-sha3@0.0.10",
+        "pkg:cargo/libcrux-traits@0.0.8"
+      ],
+      "ref": "pkg:cargo/libcrux-ml-kem@0.0.10"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/libc@0.2.189"
+      ],
+      "ref": "pkg:cargo/libcrux-platform@0.0.3"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/hax-lib@0.3.7"
+      ],
+      "ref": "pkg:cargo/libcrux-secrets@0.0.6"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/hax-lib@0.3.7",
+        "pkg:cargo/libcrux-intrinsics@0.0.8",
+        "pkg:cargo/libcrux-platform@0.0.3",
+        "pkg:cargo/libcrux-traits@0.0.8"
+      ],
+      "ref": "pkg:cargo/libcrux-sha3@0.0.10"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/libcrux-secrets@0.0.6",
+        "pkg:cargo/rand@0.10.2"
+      ],
+      "ref": "pkg:cargo/libcrux-traits@0.0.8"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/log@0.4.34"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/memchr@2.8.3"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/minimal-lexical@0.2.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/memchr@2.8.3",
+        "pkg:cargo/minimal-lexical@0.2.1"
+      ],
+      "ref": "pkg:cargo/nom@7.1.3"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/num-integer@0.1.47",
+        "pkg:cargo/num-traits@0.2.19"
+      ],
+      "ref": "pkg:cargo/num-bigint@0.4.8"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/num-conv@0.2.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/num-traits@0.2.19"
+      ],
+      "ref": "pkg:cargo/num-integer@0.1.47"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/autocfg@1.5.1"
+      ],
+      "ref": "pkg:cargo/num-traits@0.2.19"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/asn1-rs@0.6.2"
+      ],
+      "ref": "pkg:cargo/oid-registry@0.7.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/once_cell@1.21.4"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/opaque-debug@0.3.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/base64@0.22.1"
+      ],
+      "ref": "pkg:cargo/pem@3.0.6"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4",
+        "pkg:cargo/cpufeatures@0.2.17",
+        "pkg:cargo/opaque-debug@0.3.1",
+        "pkg:cargo/universal-hash@0.5.1"
+      ],
+      "ref": "pkg:cargo/polyval@0.6.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/powerfmt@0.2.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/unicode-ident@1.0.24"
+      ],
+      "ref": "pkg:cargo/proc-macro2@1.0.107"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107"
+      ],
+      "ref": "pkg:cargo/quote@1.0.47"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/rand_core@0.10.1"
+      ],
+      "ref": "pkg:cargo/rand@0.10.2"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/rand_core@0.10.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/rand_core@0.6.4"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/pem@3.0.6",
+        "pkg:cargo/ring@0.17.14",
+        "pkg:cargo/rustls-pki-types@1.15.1",
+        "pkg:cargo/time@0.3.55",
+        "pkg:cargo/x509-parser@0.16.0",
+        "pkg:cargo/yasna@0.5.2"
+      ],
+      "ref": "pkg:cargo/rcgen@0.13.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/cc@1.4.5",
+        "pkg:cargo/cfg-if@1.0.4",
+        "pkg:cargo/getrandom@0.2.17",
+        "pkg:cargo/untrusted@0.9.0"
+      ],
+      "ref": "pkg:cargo/ring@0.17.14"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/semver@1.0.28"
+      ],
+      "ref": "pkg:cargo/rustc_version@0.4.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/nom@7.1.3"
+      ],
+      "ref": "pkg:cargo/rusticata-macros@4.1.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/zeroize@1.9.0"
+      ],
+      "ref": "pkg:cargo/rustls-pki-types@1.15.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/ring@0.17.14",
+        "pkg:cargo/rustls-pki-types@1.15.1",
+        "pkg:cargo/untrusted@0.9.0"
+      ],
+      "ref": "pkg:cargo/rustls-webpki@0.103.15"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/log@0.4.34",
+        "pkg:cargo/once_cell@1.21.4",
+        "pkg:cargo/ring@0.17.14",
+        "pkg:cargo/rustls-pki-types@1.15.1",
+        "pkg:cargo/rustls-webpki@0.103.15",
+        "pkg:cargo/subtle@2.6.1",
+        "pkg:cargo/zeroize@1.9.0"
+      ],
+      "ref": "pkg:cargo/rustls@0.23.45"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/semver@1.0.28"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/cfg-if@1.0.4",
+        "pkg:cargo/cpufeatures@0.2.17",
+        "pkg:cargo/digest@0.10.7"
+      ],
+      "ref": "pkg:cargo/sha2@0.10.9"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/shlex@2.0.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/subtle@2.6.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/unicode-ident@1.0.24"
+      ],
+      "ref": "pkg:cargo/syn@2.0.119"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/unicode-ident@1.0.24"
+      ],
+      "ref": "pkg:cargo/syn@3.0.5"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@2.0.119"
+      ],
+      "ref": "pkg:cargo/synstructure@0.13.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@2.0.119"
+      ],
+      "ref": "pkg:cargo/thiserror-impl@1.0.69"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@3.0.5"
+      ],
+      "ref": "pkg:cargo/thiserror-impl@2.0.20"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/thiserror-impl@1.0.69"
+      ],
+      "ref": "pkg:cargo/thiserror@1.0.69"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/thiserror-impl@2.0.20"
+      ],
+      "ref": "pkg:cargo/thiserror@2.0.20"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/time-core@0.1.9"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/num-conv@0.2.2",
+        "pkg:cargo/time-core@0.1.9"
+      ],
+      "ref": "pkg:cargo/time-macros@0.2.32"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/deranged@0.5.8",
+        "pkg:cargo/num-conv@0.2.2",
+        "pkg:cargo/powerfmt@0.2.0",
+        "pkg:cargo/time-core@0.1.9",
+        "pkg:cargo/time-macros@0.2.32"
+      ],
+      "ref": "pkg:cargo/time@0.3.55"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/typenum@1.20.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/unicode-ident@1.0.24"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/crypto-common@0.1.7",
+        "pkg:cargo/subtle@2.6.1"
+      ],
+      "ref": "pkg:cargo/universal-hash@0.5.1"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/untrusted@0.9.0"
+    },
+    {
+      "dependsOn": [],
+      "ref": "pkg:cargo/version_check@0.9.5"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/curve25519-dalek@4.1.3",
+        "pkg:cargo/rand_core@0.6.4",
+        "pkg:cargo/zeroize@1.9.0"
+      ],
+      "ref": "pkg:cargo/x25519-dalek@2.0.1"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/asn1-rs@0.6.2",
+        "pkg:cargo/data-encoding@2.11.1",
+        "pkg:cargo/der-parser@9.0.0",
+        "pkg:cargo/lazy_static@1.5.0",
+        "pkg:cargo/nom@7.1.3",
+        "pkg:cargo/oid-registry@0.7.1",
+        "pkg:cargo/ring@0.17.14",
+        "pkg:cargo/rusticata-macros@4.1.0",
+        "pkg:cargo/thiserror@1.0.69",
+        "pkg:cargo/time@0.3.55"
+      ],
+      "ref": "pkg:cargo/x509-parser@0.16.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/time@0.3.55"
+      ],
+      "ref": "pkg:cargo/yasna@0.5.2"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/zeroize_derive@1.5.0"
+      ],
+      "ref": "pkg:cargo/zeroize@1.9.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/proc-macro2@1.0.107",
+        "pkg:cargo/quote@1.0.47",
+        "pkg:cargo/syn@2.0.119"
+      ],
+      "ref": "pkg:cargo/zeroize_derive@1.5.0"
+    },
+    {
+      "dependsOn": [
+        "pkg:cargo/aes-gcm@0.10.3",
+        "pkg:cargo/getrandom@0.2.17",
+        "pkg:cargo/hkdf@0.12.4",
+        "pkg:cargo/libcrux-ml-kem@0.0.10",
+        "pkg:cargo/sha2@0.10.9",
+        "pkg:cargo/thiserror@2.0.20",
+        "pkg:cargo/x25519-dalek@2.0.1",
+        "pkg:cargo/zeroize@1.9.0"
+      ],
+      "ref": "repo:aegis-pqc@0.1.0"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "repo:aegis-fleet@0.1.0",
+      "description": "Demostración autocontenida del canal de flota (gRPC sobre mTLS): hoy no se conecta al servidor real.",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "name": "aegis-fleet",
+      "properties": [
+        {
+          "name": "aegis:paquete",
+          "value": "aegis-fleet"
+        },
+        {
+          "name": "aegis:workspace",
+          "value": "agente"
+        },
+        {
+          "name": "aegis:lado",
+          "value": "endpoint"
+        },
+        {
+          "name": "aegis:caracteristicas",
+          "value": "(ninguna)"
+        },
+        {
+          "name": "aegis:objetivo",
+          "value": "x86_64-unknown-linux-musl"
+        }
+      ],
+      "type": "application",
+      "version": "0.1.0"
+    },
+    "properties": [
+      {
+        "name": "aegis:fuente",
+        "value": "Cargo.lock del workspace agente + cargo tree --locked -e normal,build --target x86_64-unknown-linux-musl"
+      },
+      {
+        "name": "aegis:alcance",
+        "value": "solo la arquitectura del objetivo indicado"
+      }
+    ],
+    "tools": {
+      "components": [
+        {
+          "name": "cargo xtask sbom",
+          "type": "application",
+          "version": "0.1.0"
+        }
+      ]
+    }
+  },
+  "specVersion": "1.5",
+  "version": 1
+}
