@@ -50,6 +50,34 @@ cd "$(dirname "$0")/.."
 VERDE=$'\033[32m'; GRIS=$'\033[90m'; ROJO=$'\033[31m'; FIN=$'\033[0m'
 FALLOS=0
 
+# Las pruebas que comprueban QUE encuentra un analisis usan Plazo::determinista
+# (solo tope de trabajo). Con el reloj de pared de Plazo::default (500 ms) su
+# resultado dependia de la carga de la maquina: con la CI cargada, tres bytes
+# salian «cortados por plazo». La cota de tiempo se prueba aparte, en plazo.rs.
+echo "==> AegisDisasm: ninguna prueba depende del reloj de pared"
+reloj="$(python3 - <<'PY'
+import pathlib, re, subprocess
+ficheros = subprocess.run(
+    ["git", "grep", "-l", "Plazo::default()", "--", "crates", "server/crates"],
+    capture_output=True, text=True).stdout.split()
+for f in ficheros:
+    lineas = pathlib.Path(f).read_text(encoding="utf-8").split("\n")
+    en_pruebas = "/tests/" in f
+    for i, l in enumerate(lineas):
+        if l.strip() == "#[cfg(test)]":
+            en_pruebas = True
+        if en_pruebas and "Plazo::default()" in l:
+            print(f"{f}:{i + 1}")
+PY
+)"
+if [ -z "$reloj" ]; then
+    echo "    ${VERDE}OK${FIN}"
+else
+    echo "    ${ROJO}FALLO${FIN}: pruebas con Plazo::default(); usa Plazo::determinista()"
+    printf '%s\n' "$reloj" | sed 's/^/    | /'
+    FALLOS=$((FALLOS + 1))
+fi
+
 echo "==> AegisDisasm: el modelo, los decodificadores y los grafos"
 if cargo test -q -p aegis-disasm --lib > /tmp/aegis-disasm-lib.log 2>&1; then
     echo "    ${VERDE}OK${FIN} ($(grep -h '^test result' /tmp/aegis-disasm-lib.log | head -1))"

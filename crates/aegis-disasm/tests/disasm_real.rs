@@ -246,7 +246,7 @@ fn el_analisis_de_un_binario_real_termina_dentro_de_su_plazo() {
             continue;
         };
         let t = x86::Tramo::nuevo(&c.bytes, c.base, Arquitectura::X86_64).unwrap();
-        let mut plazo = Plazo::default();
+        let mut plazo = Plazo::determinista();
         let reloj = Instant::now();
         let cfg = Cfg::construir(&t, &SinDatos, &c.entradas, &mut plazo);
         let g = GrafoDeLlamadas::construir(&cfg);
@@ -386,7 +386,7 @@ fn sobre_un_elf_ensamblado_de_verdad_si_se_resuelve_la_llamada_indirecta() {
 
     let c = texto_de(&objeto).expect("el objeto ensamblado tiene que tener .text");
     let t = x86::Tramo::nuevo(&c.bytes, c.base, Arquitectura::X86_64).unwrap();
-    let mut plazo = Plazo::default();
+    let mut plazo = Plazo::determinista();
     let cfg = Cfg::construir(&t, &SinDatos, &[0], &mut plazo);
     let g = GrafoDeLlamadas::construir(&cfg);
 
@@ -431,7 +431,7 @@ fn ningun_fichero_hostil_cuelga_ni_agota_la_memoria() {
         }
         let reloj = Instant::now();
         let t = x86::Tramo::nuevo(&bytes, 0x40_0000, Arquitectura::X86_64).unwrap();
-        let mut plazo = Plazo::default();
+        let mut plazo = Plazo::determinista();
         let cfg = Cfg::construir(&t, &SinDatos, &[0x40_0000], &mut plazo);
         let g = GrafoDeLlamadas::construir(&cfg);
         let tardado = reloj.elapsed();
@@ -452,7 +452,7 @@ fn sobre_un_tramo_vacio_no_se_afirma_nada() {
     // El caso negativo de la cobertura: con cero bytes no hay ni un «no hay
     // nada», hay un «no habia nada que mirar», y son frases distintas.
     let t = x86::Tramo::nuevo(&[], 0x1000, Arquitectura::X86_64).unwrap();
-    let mut plazo = Plazo::default();
+    let mut plazo = Plazo::determinista();
     let cfg = Cfg::construir(&t, &SinDatos, &[0x1000], &mut plazo);
     let g = GrafoDeLlamadas::construir(&cfg);
     assert_eq!(cfg.cuantos_bloques(), 0);

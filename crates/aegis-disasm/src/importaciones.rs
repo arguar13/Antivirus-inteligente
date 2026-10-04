@@ -340,7 +340,7 @@ mod pruebas {
     /// Analiza un tramo de x86-64 y busca resoluciones.
     fn buscar(bytes: &[u8], tabla: &dyn Importadas) -> Importaciones {
         let t = x86::Tramo::nuevo(bytes, 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let cfg = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         Importaciones::buscar(&cfg, tabla, Arquitectura::X86_64)
     }

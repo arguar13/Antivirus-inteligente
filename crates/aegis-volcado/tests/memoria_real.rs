@@ -129,7 +129,7 @@ fn el_analisis_del_mapa_de_un_proceso_real_no_produce_ruido() {
     // Sin bytes: lo que se ejercita es el analisis del MAPA, que es la parte que
     // mas dice por byte leido y la que corre siempre.
     let m = EnMemoria::nueva(Vec::new(), regiones);
-    let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+    let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
     eprintln!("mapa de {total} regiones: {}", i.frase());
     let por_clase: BTreeSet<Clase> = i.hallazgos().iter().map(|h| h.clase).collect();
     assert!(
@@ -174,7 +174,7 @@ fn un_mapa_hostil_no_cuelga_ni_agota_la_memoria() {
         let reloj = std::time::Instant::now();
         let (regiones, _) = leer_mapa(texto);
         let m = EnMemoria::nueva(Vec::new(), regiones);
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         assert!(
             reloj.elapsed() < std::time::Duration::from_secs(5),
             "el caso hostil {n} tardo {:?}",
@@ -196,7 +196,7 @@ fn una_region_anonima_construida_a_mano_si_se_senala() {
     assert_eq!(regiones.len(), 1);
     assert_eq!(regiones[0].respaldo, Respaldo::Anonima);
     let m = EnMemoria::nueva(Vec::new(), regiones);
-    let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+    let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
     assert!(
         i.hallazgos()
             .iter()

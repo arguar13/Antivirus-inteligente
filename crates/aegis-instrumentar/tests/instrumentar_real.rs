@@ -230,7 +230,7 @@ fn sobre_bytes_arbitrarios_el_plan_no_crece_sin_limite() {
         }
         let entradas = [0x1000u64];
         let e = Entrada::minima(&bytes, 0x1000, Arquitectura::X86_64, &entradas);
-        let a = analizar(&e, &mut Plazo::default());
+        let a = analizar(&e, &mut Plazo::determinista());
         let plan = plan_desde(&a);
         assert!(
             plan.cuantos() <= MAX_PUNTOS,

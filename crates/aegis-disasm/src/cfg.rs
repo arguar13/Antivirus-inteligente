@@ -564,7 +564,7 @@ mod pruebas {
     fn un_bloque_recto_termina_en_el_retorno() {
         // xor eax,eax ; ret
         let t = Tramo::nuevo(&[0x31, 0xC0, 0xC3], 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         assert_eq!(g.cuantos_bloques(), 1);
         let b = g.bloque(0x1000).unwrap();
@@ -581,7 +581,7 @@ mod pruebas {
         // 0x1004: ret
         let bytes = [0x75, 0x02, 0x90, 0xC3, 0xC3];
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
 
         let b = g.bloque(0x1000).unwrap();
@@ -611,7 +611,7 @@ mod pruebas {
         bytes[6] = 0xC3;
         bytes[0x10] = 0xC3;
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         let b = g.bloque(0x1000).unwrap();
         assert_eq!(b.longitud(), 3, "call, nop y ret en un solo bloque");
@@ -631,7 +631,7 @@ mod pruebas {
         bytes[6] = 0xC3;
         bytes[0x10] = 0xC3;
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         assert!(g.bloque(0x1010).is_some(), "el llamado se desensamblo");
         assert_eq!(g.raices, vec![0x1010]);
@@ -656,7 +656,7 @@ mod pruebas {
             0xC3, // 0x1008 ret
         ];
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         let caido = g.bloque(0x1005).unwrap();
         assert_eq!(caido.fin, 0x1008, "se trunca donde empieza el otro");
@@ -680,7 +680,7 @@ mod pruebas {
         // `jmp rax`: el destino se calcula en ejecucion. El grafo lo declara en
         // vez de inventarse una arista.
         let t = Tramo::nuevo(&[0xFF, 0xE0], 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         assert_eq!(g.indirectos, vec![0x1000]);
         assert!(g.bloque(0x1000).unwrap().sucesores.is_empty());
@@ -692,7 +692,7 @@ mod pruebas {
         // `jmp .-2`: un bucle infinito. El grafo tiene que cerrarse sobre si
         // mismo, no recorrerlo para siempre.
         let t = Tramo::nuevo(&[0xEB, 0xFE], 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         assert_eq!(g.cuantos_bloques(), 1);
         assert_eq!(g.bloque(0x1000).unwrap().sucesores, vec![0x1000]);
@@ -709,7 +709,7 @@ mod pruebas {
         bytes.resize(0x100, 0xC3); // relleno de `ret`, que es codigo valido
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
         let tabla = Mapa([(0x2000u64, 0x1020u64), (0x2008, 0x1030), (0x2010, 0x1040)].into());
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &tabla, &[0x1000], &mut p);
 
         assert_eq!(g.tablas.len(), 1, "la tabla se resolvio: {:?}", g.tablas);
@@ -728,7 +728,7 @@ mod pruebas {
         // se lee nada aunque el lector de datos tenga punteros preparados.
         let t = Tramo::nuevo(&[0xFF, 0xE0], 0x1000, Arquitectura::X86_64).unwrap();
         let tabla = Mapa([(0x2000u64, 0x1000u64)].into());
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &tabla, &[0x1000], &mut p);
         assert!(g.tablas.is_empty());
         assert_eq!(g.indirectos.len(), 1);
@@ -744,7 +744,7 @@ mod pruebas {
         ];
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
         let tabla = Mapa([(0x2000u64, 0x1000u64)].into());
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &tabla, &[0x1000], &mut p);
         assert!(
             g.tablas.is_empty(),
@@ -759,7 +759,7 @@ mod pruebas {
         // esten es como se introducen discrepancias entre dos analisis del mismo
         // binario.
         let t = Tramo::nuevo(&[0x31, 0xC0, 0xC3], 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         let v: Vec<_> = g.instrucciones().collect();
         assert_eq!(v.len(), 2);
@@ -769,7 +769,7 @@ mod pruebas {
     #[test]
     fn se_encuentra_el_bloque_que_contiene_una_direccion_del_medio() {
         let t = Tramo::nuevo(&[0x31, 0xC0, 0xC3], 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000], &mut p);
         assert_eq!(g.bloque_que_contiene(0x1001).unwrap().inicio, 0x1000);
         assert_eq!(g.bloque_que_contiene(0x1002).unwrap().inicio, 0x1000);
@@ -797,7 +797,7 @@ mod pruebas {
     fn dos_entradas_producen_dos_arboles_en_el_mismo_grafo() {
         // 0x1000: ret ; 0x1001: ret — dos funciones de una instruccion.
         let t = Tramo::nuevo(&[0xC3, 0xC3], 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let g = Cfg::construir(&t, &SinDatos, &[0x1000, 0x1001], &mut p);
         assert_eq!(g.cuantos_bloques(), 2);
         assert_eq!(g.cobertura.funciones, 2);

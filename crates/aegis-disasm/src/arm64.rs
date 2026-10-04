@@ -885,7 +885,7 @@ mod pruebas {
             bytes.extend_from_slice(&0xD503_201Fu32.to_le_bytes());
         }
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::Arm64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let v = t.lineal(0x1000, &mut p);
         assert_eq!(v.len(), 16);
         assert!(v.iter().all(|i| i.clase == Clase::Nop));

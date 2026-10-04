@@ -122,8 +122,8 @@ mod pruebas {
     fn una_funcion_recta_se_decompila_y_es_determinista() {
         // mov eax, 5 ; ret  =>  B8 05 00 00 00 C3
         let bytes = &[0xB8, 0x05, 0x00, 0x00, 0x00, 0xC3];
-        let a = decompilar_x86_64(bytes, 0x1000, &[0x1000], &mut Plazo::default());
-        let b = decompilar_x86_64(bytes, 0x1000, &[0x1000], &mut Plazo::default());
+        let a = decompilar_x86_64(bytes, 0x1000, &[0x1000], &mut Plazo::determinista());
+        let b = decompilar_x86_64(bytes, 0x1000, &[0x1000], &mut Plazo::determinista());
         assert_eq!(
             a.pseudo_c, b.pseudo_c,
             "la decompilacion tiene que ser determinista"
@@ -144,7 +144,7 @@ mod pruebas {
                 x ^= x << 17;
                 bytes.push(x as u8);
             }
-            let d = decompilar_x86_64(&bytes, 0x1000, &[0x1000], &mut Plazo::default());
+            let d = decompilar_x86_64(&bytes, 0x1000, &[0x1000], &mut Plazo::determinista());
             // No se afirma nada del resultado: solo que termino y produjo texto.
             let _ = d.pseudo_c.len();
         }

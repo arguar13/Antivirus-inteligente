@@ -362,7 +362,7 @@ mod pruebas {
                 0,
             )],
         );
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         assert!(i.hallazgos().is_empty(), "{}", i.frase());
     }
 
@@ -372,7 +372,7 @@ mod pruebas {
             vec![0x90; 64],
             vec![region(0x1000, 0x1040, "r-xp", Respaldo::Anonima, 0)],
         );
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         let h = i
             .hallazgos()
             .iter()
@@ -401,7 +401,7 @@ mod pruebas {
                 0,
             )],
         );
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         assert!(i
             .hallazgos()
             .iter()
@@ -418,7 +418,7 @@ mod pruebas {
             bytes,
             vec![region(0x1000, 0x1040, "r-xp", Respaldo::Anonima, 0)],
         );
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         assert!(i
             .hallazgos()
             .iter()
@@ -454,7 +454,7 @@ mod pruebas {
             bytes,
             vec![region(0x1000, 0x1040, "rwxp", Respaldo::Anonima, 0)],
         );
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         assert!(
             !i.capacidades.is_empty(),
             "el codigo de la region tiene una capacidad: {}",
@@ -481,7 +481,7 @@ mod pruebas {
                 0,
             )],
         );
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         assert!(i.hallazgos().is_empty());
         assert!(i.la_ausencia_significa_algo());
         assert!(i.frase().contains("no se encontro nada"), "{}", i.frase());
@@ -524,7 +524,7 @@ mod pruebas {
         }
         let total = regiones.len();
         let m = EnMemoria::nueva(vec![0x90; total * 0x40], regiones);
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         assert_eq!(i.regiones_totales, total);
         assert!(i.regiones_miradas < total, "no se miraron todas");
         assert!(!i.la_ausencia_significa_algo());
@@ -543,7 +543,7 @@ mod pruebas {
                 desplazamiento_en_volcado: 0,
             }],
         );
-        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default());
+        let i = analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista());
         assert!(i.hallazgos().is_empty());
     }
 }

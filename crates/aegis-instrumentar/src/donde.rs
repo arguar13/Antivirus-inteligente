@@ -116,7 +116,7 @@ mod pruebas {
     fn analisis(bytes: &[u8]) -> Analisis {
         let entradas = [0x1000u64];
         let e = Entrada::minima(bytes, 0x1000, Arquitectura::X86_64, &entradas);
-        analizar(&e, &mut Plazo::default())
+        analizar(&e, &mut Plazo::determinista())
     }
 
     #[test]

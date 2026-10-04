@@ -693,7 +693,7 @@ mod pruebas {
     /// Construye el grafo de llamadas de un tramo de x86-64.
     fn grafo_x86(bytes: &[u8], base: u64) -> GrafoDeLlamadas {
         let t = x86::Tramo::nuevo(bytes, base, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let cfg = Cfg::construir(&t, &SinDatos, &[base], &mut p);
         GrafoDeLlamadas::construir(&cfg)
     }
@@ -705,7 +705,7 @@ mod pruebas {
             bytes.extend_from_slice(&w.to_le_bytes());
         }
         let t = arm64::Tramo::nuevo(&bytes, base, Arquitectura::Arm64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let cfg = Cfg::construir(&t, &SinDatos, &[base], &mut p);
         GrafoDeLlamadas::construir(&cfg)
     }

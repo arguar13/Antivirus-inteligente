@@ -786,7 +786,7 @@ mod pruebas {
         bytes.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]); // basura
         bytes.extend_from_slice(&[0x90, 0xC3]); // nop; ret
         let t = Tramo::nuevo(&bytes, 0x1000, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let (v, _fallos) = t.lineal(0x1000, &mut p);
         assert!(
             v.iter().any(|i| i.clase == Clase::Nop),

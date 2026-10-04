@@ -154,7 +154,7 @@ mod pruebas {
         // y `ret` no son nada, y un motor que encontrara algo aqui encontraria
         // algo en todas partes.
         let e = Entrada::minima(&[0x31, 0xC0, 0xC3], 0x1000, Arquitectura::X86_64, &[0x1000]);
-        let a = analizar(&e, &mut Plazo::default());
+        let a = analizar(&e, &mut Plazo::determinista());
         assert!(a.informe.capacidades().is_empty(), "{}", a.informe.frase());
         assert!(
             a.informe.la_ausencia_significa_algo(),
@@ -168,7 +168,7 @@ mod pruebas {
         // existe: no tiene lectura alternativa.
         let bytes = &[0x66, 0x0F, 0x38, 0xDC, 0xC1, 0xC3];
         let e = Entrada::minima(bytes, 0x1000, Arquitectura::X86_64, &[0x1000]);
-        let a = analizar(&e, &mut Plazo::default());
+        let a = analizar(&e, &mut Plazo::determinista());
         let c = a
             .informe
             .capacidades()
@@ -199,7 +199,7 @@ mod pruebas {
                 bytes.push(x as u8);
             }
             let e = Entrada::minima(&bytes, 0x1000, Arquitectura::X86_64, &[0x1000]);
-            let a = analizar(&e, &mut Plazo::default());
+            let a = analizar(&e, &mut Plazo::determinista());
             for c in a.informe.capacidades() {
                 assert!(!c.evidencias().is_empty(), "capacidad sin evidencia");
                 for ev in c.evidencias() {
@@ -220,7 +220,7 @@ mod pruebas {
         // resultado es un analisis vacio y honesto, no un panico ni una
         // afirmacion.
         let e = Entrada::minima(&[0x01, 0x02, 0x03], 0x1001, Arquitectura::Arm64, &[0x1001]);
-        let a = analizar(&e, &mut Plazo::default());
+        let a = analizar(&e, &mut Plazo::determinista());
         assert!(a.informe.capacidades().is_empty());
     }
 
@@ -232,8 +232,8 @@ mod pruebas {
             0x66, 0x0F, 0x38, 0xDC, 0xC1, 0xE8, 0x00, 0x00, 0x00, 0x00, 0xC3,
         ];
         let e = Entrada::minima(bytes, 0x1000, Arquitectura::X86_64, &[0x1000]);
-        let a = analizar(&e, &mut Plazo::default());
-        let b = analizar(&e, &mut Plazo::default());
+        let a = analizar(&e, &mut Plazo::determinista());
+        let b = analizar(&e, &mut Plazo::determinista());
         assert_eq!(a.informe.frase(), b.informe.frase());
         assert_eq!(a.llamadas.frase(), b.llamadas.frase());
         assert_eq!(a.informe.capacidades().len(), b.informe.capacidades().len());
@@ -243,7 +243,7 @@ mod pruebas {
     fn la_cobertura_cuenta_los_bytes_que_se_le_dieron() {
         let bytes = vec![0x90u8; 256];
         let e = Entrada::minima(&bytes, 0x1000, Arquitectura::X86_64, &[0x1000]);
-        let a = analizar(&e, &mut Plazo::default());
+        let a = analizar(&e, &mut Plazo::determinista());
         assert_eq!(a.informe.cobertura.bytes_totales, 256);
         assert_eq!(a.informe.cobertura.fraccion_cubierta(), Some(100));
     }

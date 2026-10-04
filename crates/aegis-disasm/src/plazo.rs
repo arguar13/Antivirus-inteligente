@@ -101,6 +101,19 @@ impl Plazo {
         self.gastadas <= self.tope_instrucciones && self.inicio.elapsed() < self.limite
     }
 
+    /// Un plazo acotado SOLO por trabajo ([`TOPE_POR_DEFECTO`]), sin reloj: el
+    /// mismo fichero da siempre el mismo resultado.
+    ///
+    /// Es el de las pruebas que comprueban QUE encuentra el analisis. Con el
+    /// reloj de pared ([`PLAZO_POR_DEFECTO`]) el resultado dependia de la carga
+    /// de la maquina: con decenas de pruebas en paralelo en la CI, tres bytes
+    /// salian «cortados por plazo» y hasta la prueba de determinismo fallaba. El
+    /// tope sigue garantizando que el analisis termina. La cota de tiempo se
+    /// prueba aparte, y el camino de produccion la usa siempre.
+    pub fn determinista() -> Plazo {
+        Plazo::nuevo(Duration::MAX, TOPE_POR_DEFECTO)
+    }
+
     /// Un plazo sin cota: solo para herramientas y pruebas que analizan un
     /// fichero de confianza. El camino de produccion usa siempre un tope.
     pub fn sin_cota() -> Plazo {

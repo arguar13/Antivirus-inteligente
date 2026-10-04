@@ -100,7 +100,7 @@ mod pruebas {
 
     fn analizar(bytes: Vec<u8>, r: Region) -> Informe {
         let m = EnMemoria::nueva(bytes, vec![r]);
-        analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::default())
+        analizar_memoria(&m, Arquitectura::X86_64, &mut Plazo::determinista())
     }
 
     #[test]

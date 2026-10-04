@@ -201,7 +201,7 @@ const BASE: u64 = 0x1000;
 /// Analiza una muestra y evalua una regla sobre ella.
 fn dispara(r: &Regla, m: &Muestra) -> bool {
     let t = x86::Tramo::nuevo(&m.codigo, BASE, Arquitectura::X86_64).unwrap();
-    let mut p = Plazo::default();
+    let mut p = Plazo::determinista();
     let cfg = Cfg::construir(&t, &SinDatos, &[BASE], &mut p);
     let llamadas = GrafoDeLlamadas::construir(&cfg);
     let importaciones = Importaciones::buscar(&cfg, &m.tabla, Arquitectura::X86_64);
@@ -283,7 +283,7 @@ fn toda_capacidad_encontrada_trae_evidencia_dentro_del_codigo_analizado() {
     for r in CATALOGO {
         let m = Muestra::con(r.senales);
         let t = x86::Tramo::nuevo(&m.codigo, BASE, Arquitectura::X86_64).unwrap();
-        let mut p = Plazo::default();
+        let mut p = Plazo::determinista();
         let cfg = Cfg::construir(&t, &SinDatos, &[BASE], &mut p);
         let llamadas = GrafoDeLlamadas::construir(&cfg);
         let importaciones = Importaciones::buscar(&cfg, &m.tabla, Arquitectura::X86_64);

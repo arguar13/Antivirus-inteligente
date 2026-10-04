@@ -169,7 +169,7 @@ fn redondeo_semantico_del_corpus() {
         };
 
         // 3. Decompilar.
-        let d = decompilar_x86_64(&bytes, dir_fn, &[dir_fn], &mut Plazo::default());
+        let d = decompilar_x86_64(&bytes, dir_fn, &[dir_fn], &mut Plazo::determinista());
         let Some(func) = d.funciones.iter().find(|f| f.entrada == dir_fn) else {
             no_emitibles.push(caso.nombre);
             continue;
