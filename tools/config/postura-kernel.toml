@@ -25,6 +25,13 @@
 #    mac                               0 sin MAC · 1 disponible sin imponer
 #                                      (SELinux permisivo, AppArmor sin perfiles
 #                                      en enforce) · 2 impone
+#    kernel.randomize_va_space         rango = valor (0..2)
+#    vm.mmap_min_addr                  0 por debajo de una pagina · 1 >= 4096
+#    fs.suid_dumpable                  0 valor 1 · 1 valor 2 (solo root) · 2 valor 0
+#    fs.protected_links                1 si protected_symlinks=1 y
+#                                      protected_hardlinks=1, si no 0
+#    kernel.io_uring_disabled          rango = valor (0..2); sin el sysctl
+#                                      (kernel < 6.6) 0: abierto y sin interruptor
 #
 #  `nivel`:
 #    base         por debajo es una brecha: señal de severidad Baja
@@ -37,6 +44,8 @@
 #      bpf_probe_read_kernel y tracefs y deja ciega la telemetria del agente.
 #    - ptrace_scope pide 1, no 3: con 3 ni root lee memoria ajena y el motor de
 #      memoria del agente queda DEGRADADO.
+#    - io_uring es recomendado, no base: algunas bases de datos y servidores de
+#      E/S lo usan, y con 1 se conserva para el grupo kernel.io_uring_group.
 
 [linea_base]
 "lockdown" = { minimo = 1, nivel = "recomendado" }
@@ -49,3 +58,8 @@
 "kernel.kexec_load_disabled" = { minimo = 1, nivel = "recomendado" }
 "kernel.modules_disabled" = { minimo = 1, nivel = "recomendado" }
 "mac" = { minimo = 2, nivel = "base" }
+"kernel.randomize_va_space" = { minimo = 2, nivel = "base" }
+"vm.mmap_min_addr" = { minimo = 1, nivel = "base" }
+"fs.suid_dumpable" = { minimo = 1, nivel = "base" }
+"fs.protected_links" = { minimo = 1, nivel = "base" }
+"kernel.io_uring_disabled" = { minimo = 1, nivel = "recomendado" }

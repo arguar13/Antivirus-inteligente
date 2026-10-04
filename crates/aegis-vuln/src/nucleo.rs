@@ -58,9 +58,19 @@ pub enum Ajuste {
     ModulosDeshabilitados,
     /// Control de acceso obligatorio: SELinux o AppArmor.
     Mac,
+    /// `kernel.randomize_va_space` (ASLR).
+    Aslr,
+    /// `vm.mmap_min_addr`.
+    MmapMinimo,
+    /// `fs.suid_dumpable`.
+    VolcadoSuid,
+    /// `fs.protected_symlinks` y `fs.protected_hardlinks`.
+    EnlacesProtegidos,
+    /// `kernel.io_uring_disabled`.
+    IoUringDeshabilitado,
 }
 
-const TODOS: [Ajuste; 10] = [
+const TODOS: [Ajuste; 15] = [
     Ajuste::Lockdown,
     Ajuste::KptrRestrict,
     Ajuste::DmesgRestrict,
@@ -71,6 +81,11 @@ const TODOS: [Ajuste; 10] = [
     Ajuste::KexecDeshabilitado,
     Ajuste::ModulosDeshabilitados,
     Ajuste::Mac,
+    Ajuste::Aslr,
+    Ajuste::MmapMinimo,
+    Ajuste::VolcadoSuid,
+    Ajuste::EnlacesProtegidos,
+    Ajuste::IoUringDeshabilitado,
 ];
 
 const USERNS_MAX: &str = "/proc/sys/user/max_user_namespaces";
@@ -79,6 +94,8 @@ const USERNS_APPARMOR: &str = "/proc/sys/kernel/apparmor_restrict_unprivileged_u
 const SELINUX_ENFORCE: &str = "/sys/fs/selinux/enforce";
 const APPARMOR_ACTIVO: &str = "/sys/module/apparmor/parameters/enabled";
 const APPARMOR_PERFILES: &str = "/sys/kernel/security/apparmor/profiles";
+const ENLACES_SIMBOLICOS: &str = "/proc/sys/fs/protected_symlinks";
+const ENLACES_DUROS: &str = "/proc/sys/fs/protected_hardlinks";
 
 impl Ajuste {
     /// Todos los ajustes, en orden estable.
@@ -101,6 +118,11 @@ impl Ajuste {
             Ajuste::KexecDeshabilitado => "kernel.kexec_load_disabled",
             Ajuste::ModulosDeshabilitados => "kernel.modules_disabled",
             Ajuste::Mac => "mac",
+            Ajuste::Aslr => "kernel.randomize_va_space",
+            Ajuste::MmapMinimo => "vm.mmap_min_addr",
+            Ajuste::VolcadoSuid => "fs.suid_dumpable",
+            Ajuste::EnlacesProtegidos => "fs.protected_links",
+            Ajuste::IoUringDeshabilitado => "kernel.io_uring_disabled",
         }
     }
 
@@ -124,6 +146,11 @@ impl Ajuste {
             Ajuste::KexecDeshabilitado => "/proc/sys/kernel/kexec_load_disabled",
             Ajuste::ModulosDeshabilitados => "/proc/sys/kernel/modules_disabled",
             Ajuste::Mac => "/sys/kernel/security/lsm",
+            Ajuste::Aslr => "/proc/sys/kernel/randomize_va_space",
+            Ajuste::MmapMinimo => "/proc/sys/vm/mmap_min_addr",
+            Ajuste::VolcadoSuid => "/proc/sys/fs/suid_dumpable",
+            Ajuste::EnlacesProtegidos => ENLACES_SIMBOLICOS,
+            Ajuste::IoUringDeshabilitado => "/proc/sys/kernel/io_uring_disabled",
         }
     }
 
@@ -147,6 +174,11 @@ impl Ajuste {
                 "/sys/kernel/security/apparmor/.replace",
                 "/sys/kernel/security/apparmor/.load",
             ],
+            Ajuste::Aslr => &["/proc/sys/kernel/randomize_va_space"],
+            Ajuste::MmapMinimo => &["/proc/sys/vm/mmap_min_addr"],
+            Ajuste::VolcadoSuid => &["/proc/sys/fs/suid_dumpable"],
+            Ajuste::EnlacesProtegidos => &[ENLACES_SIMBOLICOS, ENLACES_DUROS],
+            Ajuste::IoUringDeshabilitado => &["/proc/sys/kernel/io_uring_disabled"],
         }
     }
 
@@ -154,12 +186,19 @@ impl Ajuste {
     #[must_use]
     pub fn rango_maximo(self) -> u8 {
         match self {
-            Ajuste::DmesgRestrict | Ajuste::KexecDeshabilitado | Ajuste::ModulosDeshabilitados => 1,
+            Ajuste::DmesgRestrict
+            | Ajuste::KexecDeshabilitado
+            | Ajuste::ModulosDeshabilitados
+            | Ajuste::MmapMinimo
+            | Ajuste::EnlacesProtegidos => 1,
             Ajuste::Lockdown
             | Ajuste::KptrRestrict
             | Ajuste::BpfSinPrivilegios
             | Ajuste::UsernsSinPrivilegios
-            | Ajuste::Mac => 2,
+            | Ajuste::Mac
+            | Ajuste::Aslr
+            | Ajuste::VolcadoSuid
+            | Ajuste::IoUringDeshabilitado => 2,
             Ajuste::PtraceYama | Ajuste::PerfParanoid => 3,
         }
     }
@@ -180,7 +219,12 @@ impl Ajuste {
             | Ajuste::DmesgRestrict
             | Ajuste::UsernsSinPrivilegios
             | Ajuste::PerfParanoid
-            | Ajuste::Mac => false,
+            | Ajuste::Mac
+            | Ajuste::Aslr
+            | Ajuste::MmapMinimo
+            | Ajuste::VolcadoSuid
+            | Ajuste::EnlacesProtegidos
+            | Ajuste::IoUringDeshabilitado => false,
         }
     }
 
@@ -227,6 +271,27 @@ impl Ajuste {
                 "sin un MAC que IMPONGA, un servicio comprometido tiene todo lo que tiene su \
                  usuario; cargado en permisivo esta disponible, no aplicado"
             }
+            Ajuste::Aslr => {
+                "sin aleatorizacion de direcciones, la pila, el monton y las bibliotecas estan \
+                 siempre en el mismo sitio y un fallo de memoria es mucho mas facil de aprovechar"
+            }
+            Ajuste::MmapMinimo => {
+                "con 0, un proceso puede mapear la pagina cero y un puntero nulo en el kernel \
+                 deja de ser un cuelgue para convertirse en una escalada"
+            }
+            Ajuste::VolcadoSuid => {
+                "con 1, un programa setuid vuelca su memoria en un core legible por el usuario \
+                 que lo lanzo: secretos de root en un fichero ajeno"
+            }
+            Ajuste::EnlacesProtegidos => {
+                "sin ellos, un enlace plantado en /tmp o un enlace duro a un fichero ajeno \
+                 desvia lo que escribe un proceso privilegiado (carreras TOCTOU clasicas)"
+            }
+            Ajuste::IoUringDeshabilitado => {
+                "io_uring abierto a todos es una superficie grande del kernel con un historial \
+                 largo de fallos, y sus operaciones no pasan por las llamadas al sistema que \
+                 ve la telemetria clasica"
+            }
         }
     }
 
@@ -268,6 +333,24 @@ impl Ajuste {
                  /etc/selinux/config) o perfiles AppArmor en enforce (aa-enforce) para los \
                  servicios expuestos"
                 .to_string(),
+            Ajuste::Aslr => "sysctl -w kernel.randomize_va_space=2 y persistirlo en \
+                 /etc/sysctl.d/"
+                .to_string(),
+            Ajuste::MmapMinimo => "sysctl -w vm.mmap_min_addr=65536 y persistirlo en \
+                 /etc/sysctl.d/"
+                .to_string(),
+            Ajuste::VolcadoSuid => "sysctl -w fs.suid_dumpable=0 (o 2, que solo deja volcar \
+                 a root) y persistirlo en /etc/sysctl.d/"
+                .to_string(),
+            Ajuste::EnlacesProtegidos => "sysctl -w fs.protected_symlinks=1 \
+                 fs.protected_hardlinks=1 y persistirlo en /etc/sysctl.d/"
+                .to_string(),
+            Ajuste::IoUringDeshabilitado => format!(
+                "sysctl -w kernel.io_uring_disabled={} y persistirlo, si ningun servicio lo usa \
+                 (algunas bases de datos y servidores de E/S lo usan; con 1 solo lo conserva el \
+                 grupo kernel.io_uring_group)",
+                minimo.clamp(1, 2)
+            ),
         }
     }
 }
@@ -462,6 +545,49 @@ fn leer_valor(raiz: &Path, a: Ajuste) -> Result<(String, u8), String> {
             }
             Ok(("sin MAC: ni SELinux ni AppArmor activos".to_string(), 0))
         }
+        Ajuste::Aslr => match entero(raiz, a.ruta())? {
+            Some(v) => Ok((format!("{nombre}={v}"), sujetar(v, 2))),
+            None => Err(format!("{}: no existe", a.ruta())),
+        },
+        Ajuste::MmapMinimo => match entero(raiz, a.ruta())? {
+            // Por debajo de una pagina no protege la pagina cero.
+            Some(v) => Ok((format!("{nombre}={v}"), u8::from(v >= 4096))),
+            None => Err(format!("{}: no existe", a.ruta())),
+        },
+        Ajuste::VolcadoSuid => match entero(raiz, a.ruta())? {
+            Some(v) => {
+                let rango = match v {
+                    1 => 0,
+                    2 => 1,
+                    0 => 2,
+                    otro => return Err(format!("{}: valor desconocido {otro}", a.ruta())),
+                };
+                Ok((format!("{nombre}={v}"), rango))
+            }
+            None => Err(format!("{}: no existe", a.ruta())),
+        },
+        Ajuste::EnlacesProtegidos => {
+            let simbolicos = entero(raiz, ENLACES_SIMBOLICOS)?;
+            let duros = entero(raiz, ENLACES_DUROS)?;
+            let rango = u8::from(simbolicos == Some(1) && duros == Some(1));
+            Ok((
+                format!(
+                    "protected_symlinks={} protected_hardlinks={}",
+                    opcional(simbolicos),
+                    opcional(duros)
+                ),
+                rango,
+            ))
+        }
+        Ajuste::IoUringDeshabilitado => match entero(raiz, a.ruta())? {
+            Some(v) => Ok((format!("{nombre}={v}"), sujetar(v, 2))),
+            // El interruptor llego en 6.6: sin el, io_uring (si el kernel lo
+            // trae) queda abierto a todos y no se puede cerrar en marcha.
+            None => Ok((
+                "sin el interruptor io_uring_disabled (kernel anterior a 6.6)".to_string(),
+                0,
+            )),
+        },
     }
 }
 
@@ -751,6 +877,33 @@ mod pruebas {
             "none [integrity] confidentiality\n",
         );
         assert_eq!(rango(&r, Ajuste::Lockdown), 1);
+        // suid_dumpable: el 0 protege mas que el 2, y el 1 es lo peor.
+        poner(&r, "/proc/sys/fs/suid_dumpable", "1\n");
+        assert_eq!(rango(&r, Ajuste::VolcadoSuid), 0);
+        poner(&r, "/proc/sys/fs/suid_dumpable", "2\n");
+        assert_eq!(rango(&r, Ajuste::VolcadoSuid), 1);
+        poner(&r, "/proc/sys/fs/suid_dumpable", "0\n");
+        assert_eq!(rango(&r, Ajuste::VolcadoSuid), 2);
+        poner(&r, "/proc/sys/fs/suid_dumpable", "3\n");
+        assert!(matches!(
+            leer(&r, Ajuste::VolcadoSuid),
+            Lectura::Ilegible(_)
+        ));
+        // mmap_min_addr: por debajo de una pagina no protege la pagina cero.
+        poner(&r, "/proc/sys/vm/mmap_min_addr", "0\n");
+        assert_eq!(rango(&r, Ajuste::MmapMinimo), 0);
+        poner(&r, "/proc/sys/vm/mmap_min_addr", "65536\n");
+        assert_eq!(rango(&r, Ajuste::MmapMinimo), 1);
+        // Los dos enlaces protegidos, o ninguno cuenta.
+        poner(&r, "/proc/sys/fs/protected_symlinks", "1\n");
+        poner(&r, "/proc/sys/fs/protected_hardlinks", "0\n");
+        assert_eq!(rango(&r, Ajuste::EnlacesProtegidos), 0);
+        poner(&r, "/proc/sys/fs/protected_hardlinks", "1\n");
+        assert_eq!(rango(&r, Ajuste::EnlacesProtegidos), 1);
+        poner(&r, "/proc/sys/kernel/io_uring_disabled", "2\n");
+        assert_eq!(rango(&r, Ajuste::IoUringDeshabilitado), 2);
+        poner(&r, "/proc/sys/kernel/randomize_va_space", "1\n");
+        assert_eq!(rango(&r, Ajuste::Aslr), 1);
         let _ = std::fs::remove_dir_all(&r);
     }
 
@@ -763,6 +916,12 @@ mod pruebas {
         assert_eq!(rango(&r, Ajuste::ModulosDeshabilitados), 1);
         assert_eq!(rango(&r, Ajuste::UsernsSinPrivilegios), 2);
         assert_eq!(rango(&r, Ajuste::Mac), 0);
+        // Sin el interruptor (kernel < 6.6) io_uring queda abierto.
+        assert_eq!(rango(&r, Ajuste::IoUringDeshabilitado), 0);
+        assert_eq!(rango(&r, Ajuste::EnlacesProtegidos), 0);
+        // ASLR y mmap_min_addr existen en todo kernel: que falten no es un valor.
+        assert!(matches!(leer(&r, Ajuste::Aslr), Lectura::Ilegible(_)));
+        assert!(matches!(leer(&r, Ajuste::MmapMinimo), Lectura::Ilegible(_)));
         // kptr_restrict existe en todo kernel moderno: que falte no es un valor.
         assert!(matches!(
             leer(&r, Ajuste::KptrRestrict),

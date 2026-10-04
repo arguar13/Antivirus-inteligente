@@ -415,6 +415,13 @@ mod pruebas {
         poner(r, "/proc/sys/kernel/kexec_load_disabled", "0\n");
         poner(r, "/proc/sys/kernel/modules_disabled", "0\n");
         poner(r, "/sys/fs/selinux/enforce", "0\n");
+        // Lo que los kernels de distribucion ya traen bien de serie.
+        poner(r, "/proc/sys/kernel/randomize_va_space", "2\n");
+        poner(r, "/proc/sys/vm/mmap_min_addr", "65536\n");
+        poner(r, "/proc/sys/fs/suid_dumpable", "0\n");
+        poner(r, "/proc/sys/fs/protected_symlinks", "1\n");
+        poner(r, "/proc/sys/fs/protected_hardlinks", "1\n");
+        poner(r, "/proc/sys/kernel/io_uring_disabled", "1\n");
     }
 
     fn motor(r: &Path) -> (MotorPostura, Arc<Mutex<Vec<String>>>) {
@@ -468,7 +475,8 @@ mod pruebas {
         let d = m.mantener(S);
         let s = senales(&d);
         // lockdown, userns, kexec y modulos (recomendado: Info); kptr y mac
-        // (base: Baja). dmesg, bpf, yama y perf estan en la linea base.
+        // (base: Baja). dmesg, bpf, yama, perf, aslr, mmap_min_addr,
+        // suid_dumpable, los enlaces e io_uring estan en la linea base.
         assert_eq!(s.len(), 6, "{s:#?}");
         let id = Identidad::fija("m");
         let kptr = s
