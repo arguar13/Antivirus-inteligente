@@ -1,0 +1,21 @@
+# De donde sale el contenido Sigma del agente. Lo lee tools/sigma/importar.sh
+# (y tools/verificar-sigma.sh, que exige que lo importado venga de aqui).
+#
+# Una linea CLAVE=valor por dato; nada de esto se ejecuta como shell.
+#
+# SIGMA_*: el catalogo publico SigmaHQ (https://github.com/SigmaHQ/sigma),
+# fijado al commit de la ultima release publicada al fijarlo. La etiqueta es
+# anotada: este es el commit al que apunta (la etiqueta en si es el objeto
+# 19aee0af973becc96465791d9401272ca2841bf1). importar.sh comprueba que la
+# etiqueta sigue apuntando a ese commit y que el checkout es exactamente el.
+SIGMA_COMMIT=552f3fee420ef232a8e5790c4fae591847e32347
+SIGMA_ETIQUETA=r2026-07-01
+SIGMA_FECHA=2026-07-09
+#
+# DRL_*: el texto de la Detection Rule License 1.1, bajo la que SigmaHQ publica
+# sus reglas. En el commit de arriba el LICENSE de SigmaHQ solo la ENLAZA
+# (https://github.com/SigmaHQ/Detection-Rule-License); el texto, que la propia
+# licencia pide incluir al redistribuir, sale de ese repositorio fijado aqui
+# (fichero LICENSE.Detection.Rules.md, rama main).
+DRL_COMMIT=bcbdc605172d00390572cd774ba395ec9e975dfc
+DRL_FECHA=2024-12-27

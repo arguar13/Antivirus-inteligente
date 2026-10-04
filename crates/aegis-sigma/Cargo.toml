@@ -1,0 +1,27 @@
+[package]
+name = "aegis-sigma"
+description = "Reglas Sigma: lector del subconjunto de YAML, compilador de la condicion y evaluador sin retroceso con coste acotado por regla, compartido por la fabrica de contenido y el agente"
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+# SIN DEPENDENCIAS, a proposito.
+#
+# Este crate vivia dentro de aegis-ruleforge (workspace server/), y el agente no
+# podia alcanzarlo sin arrastrar el workspace del plano de control. Se saca aqui
+# para que la fabrica y el agente lean y evaluen EXACTAMENTE la misma regla: dos
+# evaluadores que hay que mantener sincronizados acaban divergiendo, y el dia que
+# divergen la fabrica aprueba una regla que el endpoint evalua de otra forma.
+#
+# Lo que entra por aqui es contenido de terceros (el catalogo Sigma), que si el
+# feed se compromete lo escribe el atacante: por eso el lector de YAML es propio
+# y del subconjunto que Sigma usa, y no una biblioteca generica. El validador de
+# expresiones regulares se queda en ruleforge (lo comparte con Suricata) y entra
+# aqui como funcion: el agente no evalua expresiones regulares.
+[dependencies]

@@ -75,8 +75,8 @@ if (cd server && cargo test -p aegis-ruleforge --quiet --lib) \
     echo "    ${GRIS}ClamAV: en .mdb el tamano va PRIMERO y en .hdb va despues.${FIN}"
     echo "    ${GRIS}YARA: orden por dependencias con deteccion de ciclos, y 'pe.number_of_${FIN}"
     echo "    ${GRIS}sections' NO es una dependencia — hay que consumir el acceso entero.${FIN}"
-    echo "    ${GRIS}YAML propio con PROGRESO ESTRICTO: todo bucle avanza o para, porque un${FIN}"
-    echo "    ${GRIS}analizador de entrada hostil que puede no consumir nada es un cuelgue.${FIN}"
+    echo "    ${GRIS}Sigma y su YAML propio viven en aegis-sigma, compartidos con el agente:${FIN}"
+    echo "    ${GRIS}sus pruebas corren en tools/verificar-sigma.sh, no aqui.${FIN}"
 else
     echo "    ${ROJO}FALLO${FIN} (ver /tmp/aegis-ruleforge-lib.log)"
     tail -20 /tmp/aegis-ruleforge-lib.log | sed 's/^/    | /'

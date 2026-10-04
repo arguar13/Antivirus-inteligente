@@ -21,6 +21,7 @@ aegis-scal = { path = "../crates/aegis-scal" }
 aegis-parser = { path = "../crates/aegis-parser" }
 aegis-trabajador = { path = "../crates/aegis-trabajador" }
 aegis-entidad = { path = "../crates/aegis-entidad" }
+aegis-sigma = { path = "../crates/aegis-sigma" }
 
 # Cada objetivo comprueba una invariante: el parser NUNCA entra en panico ante
 # entrada arbitraria. Un panico ante un mensaje de red malformado es una via de
@@ -130,6 +131,14 @@ bench = false
 [[bin]]
 name = "aegisql_coste"
 path = "fuzz_targets/aegisql_coste.rs"
+test = false
+doc = false
+bench = false
+
+# Compilador, atado, generador y evaluador Sigma (FASE 4 del MP-16).
+[[bin]]
+name = "sigma_regla"
+path = "fuzz_targets/sigma_regla.rs"
 test = false
 doc = false
 bench = false

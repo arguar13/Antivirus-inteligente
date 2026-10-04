@@ -46,6 +46,10 @@ aegis-ips = { path = "../../../crates/aegis-ips", default-features = false }
 # cuota de residencia en vez de llevar una constante propia: una constante en
 # cada consumidor es como un presupuesto repartido deja de estar repartido.
 aegis-presupuesto = { path = "../../../crates/aegis-presupuesto" }
+# El lector YAML, el compilador y el evaluador Sigma, compartidos con el
+# agente (FASE 4 del MP-16): lo que la fabrica aprueba es lo que el endpoint
+# evalua, con el mismo codigo. Sin dependencias.
+aegis-sigma = { path = "../../../crates/aegis-sigma" }
 sha2 = "0.10"
 
 [dev-dependencies]

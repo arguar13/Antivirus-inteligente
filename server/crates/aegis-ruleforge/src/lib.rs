@@ -83,11 +83,11 @@ pub mod presupuesto;
 pub mod regex_segura;
 pub mod sigma;
 pub mod suricata;
-pub mod yaml;
 pub mod yara_feed;
 
 use aegis_sync::Ioc;
 
+pub use aegis_sigma::yaml;
 pub use canario::{Canario, Veredicto};
 pub use clamav::Firma;
 pub use corpus::{Corpus, Manifiesto};
