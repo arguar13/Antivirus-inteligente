@@ -1,0 +1,10 @@
+# Todo nace en auditoria (regla 4 del MP-16). Imponer exige
+# muestras_benignas >= 100000 y como mucho 10 falsos positivos por millon.
+modo = auditoria
+activa = si
+# Solo literales sensibles a mayusculas: la cota es 1 paso por byte.
+pasos_por_byte = 1
+# Escanear 64 KiB con la regla sola, compilacion optimizada.
+micros_por_64k = 2000
+muestras_benignas = 0
+falsos_positivos = 0

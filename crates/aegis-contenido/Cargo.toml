@@ -1,0 +1,26 @@
+[package]
+name = "aegis-contenido"
+description = "Canal de contenido firmado separado del binario: paquetes de reglas y modelos con firma hibrida, epoca monotona, anillos de despliegue, modo por regla, apagado individual, rollback y la puerta de publicacion que impide que un paquete que rompe un motor llegue a la flota"
+version.workspace = true
+publish.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Ninguna dependencia de terceros nueva: todas estan ya en el arbol del agente
+# (tools/lineabase-agente.txt).
+#
+# La firma hibrida Ed25519 + ML-DSA-65 y su separacion de dominio. Se reutiliza
+# la verificacion del canal de actualizaciones en vez de escribir otra: dos
+# verificadores de firma son dos sitios donde equivocarse.
+aegis-update = { path = "../aegis-update" }
+# El motor de patrones propio: la puerta compila cada regla YARA con el MISMO
+# compilador que la usara, y mide su coste con el MISMO motor.
+aegis-patron = { path = "../aegis-patron" }
+sha2 = "0.10"
+thiserror = "2"

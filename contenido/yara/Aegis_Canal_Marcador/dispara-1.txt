@@ -1,0 +1,3 @@
+Fichero de prueba del operador.
+AEGISCORE-CANAL-CONTENIDO-MARCADOR-DE-PRUEBA
+Fin.

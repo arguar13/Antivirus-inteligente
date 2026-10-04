@@ -1,0 +1,9 @@
+# Contenido del canal firmado (FASE 4.5 del MP-16).
+#
+# Lo que hay bajo este directorio es lo que se PUBLICARIA. `make ci`
+# (tools/verificar-contenido.sh) lo pasa entero por la puerta de publicacion de
+# aegis-contenido: si una regla no compila, no dispara con sus muestras,
+# dispara con las benignas o se pasa de su presupuesto de coste, falla.
+#
+# Formato: crates/aegis-contenido/src/fuente.rs.
+canal = estable
