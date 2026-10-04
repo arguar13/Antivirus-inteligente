@@ -70,6 +70,10 @@ tools/toolchain/imagen/ca/*.crt
 # matriz de kernels (tools/matriz-kernels/construir-cruzado.sh).
 dist-hermetico/
 dist-hermetico-aarch64/
+# Paquetes .deb/.rpm (tools/empaquetar.sh), FASE 3 del MP-16. Fuera de git: la
+# huella del arbol no puede cambiar porque el grupo `kernels` los construya.
+dist-paquetes/
+dist-paquetes-aarch64/
 drivers/linux/aegis-bpf/out-aarch64/
 
 # Artefactos de compilacion del transporte del enjambre (workspace aparte).

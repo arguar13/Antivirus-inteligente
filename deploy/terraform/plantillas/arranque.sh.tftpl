@@ -66,7 +66,7 @@ systemctl enable --now aegis-server
 # El balanceador usa /salud, que comprueba PostgreSQL y Redis de verdad. Esperar
 # aqui evita que la instancia entre en servicio y empiece a perder telemetria.
 for _ in $(seq 1 60); do
-  if curl -fsS http://127.0.0.1:8080/salud | grep -q '"estado":"listo"'; then
+  if curl -fsS http://127.0.0.1:8080/salud | grep >/dev/null '"estado":"listo"'; then
     registrar "plano de control listo"
     exit 0
   fi

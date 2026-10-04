@@ -11,12 +11,31 @@ use aegis_watchdog::watchdog::{now_ns, Target, Watchdog};
 
 fn main() -> std::process::ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // El techo de memoria del servicio para ESTE host, como drop-in de systemd.
+    // Lo escribe el paquete al instalar: el numero sale de aegis-presupuesto,
+    // el mismo codigo con el que este watchdog vigila, y nunca de una plantilla
+    // (el despliegue anterior fijaba 64 MiB a mano, por debajo del minimo que
+    // calcula el propio presupuesto; FASE 3 del MP-16).
+    if args.first().map(String::as_str) == Some("--unidad") {
+        if args.len() != 1 {
+            eprintln!("--unidad no admite mas argumentos");
+            return std::process::ExitCode::from(2);
+        }
+        print!(
+            "{}",
+            aegis_presupuesto::dropin(&aegis_presupuesto::efectivo())
+        );
+        return std::process::ExitCode::SUCCESS;
+    }
+
     if args.is_empty() || args.iter().any(|a| a == "-h" || a == "--help") {
         eprintln!(
             "aegis-watchdog - supervisor de alta disponibilidad\n\
              \n\
              USO: aegis-watchdog --program RUTA [--arg A]... \\\n\
              \x20                  [--heartbeat RUTA] [--marker RUTA] [--max-age-ms N]\n\
+             \x20      aegis-watchdog --unidad   (drop-in de memoria de este host)\n\
              \n\
              Lanza el programa y lo reinicia si muere o se cuelga, salvo que\n\
              exista la marca de apagado autorizado."
@@ -82,6 +101,14 @@ fn main() -> std::process::ExitCode {
         aegis_presupuesto::resumen(&presupuesto).trim_end()
     );
 
+    // Con la unidad del paquete (Delegate=yes), bajarse a la hoja
+    // `supervision` del subarbol delegado ANTES de lanzar al agente: el agente
+    // la hereda, y el cgroup del servicio queda sin procesos propios para poder
+    // repartir controladores al cgroup del trabajador confinado.
+    if let Some(aviso) = bajar_a_la_hoja() {
+        eprintln!("aegis-watchdog: {aviso}");
+    }
+
     let target = Target {
         program,
         args: prog_args,
@@ -115,5 +142,36 @@ fn main() -> std::process::ExitCode {
             Ok(_) => {}
             Err(e) => eprintln!("aegis-watchdog: error supervisando: {e}"),
         }
+    }
+}
+
+/// Mueve este proceso a `<servicio>/supervision` si la unidad le delega su
+/// cgroup (`AEGIS_CGROUP_DELEGADO`). Devuelve lo que haya que avisar; `None` si
+/// no hay delegacion o si ya esta abajo.
+fn bajar_a_la_hoja() -> Option<String> {
+    std::env::var_os("AEGIS_CGROUP_DELEGADO")?;
+    if !std::path::Path::new("/sys/fs/cgroup/cgroup.controllers").is_file() {
+        return Some("sin cgroup v2 unificado: el trabajador no colgara del servicio".into());
+    }
+    let propio = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let ruta = propio
+        .lines()
+        .find_map(|l| l.strip_prefix("0::"))?
+        .trim()
+        .to_string();
+    if ruta.ends_with("/supervision") {
+        return None;
+    }
+    let hoja = PathBuf::from("/sys/fs/cgroup")
+        .join(ruta.trim_start_matches('/'))
+        .join("supervision");
+    if let Err(e) = std::fs::create_dir(&hoja) {
+        if e.kind() != std::io::ErrorKind::AlreadyExists {
+            return Some(format!("no se pudo crear {}: {e}", hoja.display()));
+        }
+    }
+    match std::fs::write(hoja.join("cgroup.procs"), std::process::id().to_string()) {
+        Ok(()) => None,
+        Err(e) => Some(format!("no se pudo bajar a {}: {e}", hoja.display())),
     }
 }

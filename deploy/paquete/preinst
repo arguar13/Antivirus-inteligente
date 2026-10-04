@@ -1,0 +1,44 @@
+#!/bin/sh
+# Antes de desempaquetar: en una ACTUALIZACION se guarda una copia de los
+# binarios EN USO, fuera de lo que gestiona el paquete, para poder volver a
+# ellos si la version nueva no late (postinst). El gestor de paquetes
+# sustituye los ficheros al desempaquetar; esta copia es la unica que
+# sobrevive.
+#
+# Sirve a dpkg (`install` | `upgrade <vieja>` | `abort-upgrade`) y a rpm
+# (`%pre`: 1 = instalar, >= 2 = actualizar). @VERSION@ lo sustituye
+# tools/empaquetar.sh por la version de ESTE paquete.
+set -eu
+
+BIN=/usr/libexec/aegis
+ANTERIOR=/var/lib/aegiscore/anterior
+
+case "${1:-}" in
+    upgrade | [2-9]*) ;;
+    *) exit 0 ;;
+esac
+
+[ -f "$BIN/aegis-agent" ] || exit 0
+# Una copia a medias de un intento anterior no vale: se rehace entera.
+rm -rf "$ANTERIOR.nueva"
+mkdir -p "$ANTERIOR.nueva"
+chmod 0700 "$ANTERIOR.nueva"
+for b in aegis-agent aegis-watchdog; do
+    [ -f "$BIN/$b" ] || { echo "aegis-agent: falta $BIN/$b; sin vuelta atras posible" >&2; rm -rf "$ANTERIOR.nueva"; exit 0; }
+    cp -p "$BIN/$b" "$ANTERIOR.nueva/$b"
+done
+# La version en uso la dice el propio paquete (VERSION, que instala), no el
+# agente: el agente no tiene --version y lo rechazaria como opcion desconocida.
+if [ -f "$BIN/VERSION" ]; then
+    cp -p "$BIN/VERSION" "$ANTERIOR.nueva/VERSION"
+else
+    echo desconocida > "$ANTERIOR.nueva/VERSION"
+fi
+# Y la HUELLA: lo que dice el disco tiene que ser lo que corre tras volver.
+if [ -f "$BIN/HUELLA" ]; then
+    cp -p "$BIN/HUELLA" "$ANTERIOR.nueva/HUELLA"
+fi
+# Se cambia de golpe: nunca queda una copia a medias con el nombre bueno.
+rm -rf "$ANTERIOR"
+mv "$ANTERIOR.nueva" "$ANTERIOR"
+exit 0

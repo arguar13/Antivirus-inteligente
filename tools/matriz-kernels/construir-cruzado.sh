@@ -97,7 +97,7 @@ aarch64() {
     mkdir -p dist-hermetico-aarch64
     for b in aegis-agent aegis-watchdog; do
         cp "$dir_target/aarch64-unknown-linux-gnu/release/$b" "dist-hermetico-aarch64/$b"
-        if readelf -l "dist-hermetico-aarch64/$b" | grep -q INTERP; then
+        if readelf -l "dist-hermetico-aarch64/$b" | grep >/dev/null INTERP; then
             echo "FALLO: $b de arm64 no es estatico (tiene PT_INTERP)" >&2
             exit 1
         fi

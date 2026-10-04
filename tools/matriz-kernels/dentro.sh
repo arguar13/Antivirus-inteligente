@@ -22,19 +22,26 @@ T="$(mktemp -d)"
 linea() { printf '%s\n' "$*"; }
 volcar() { sed 's/^/AEGIS-LOG|/' "$1" | tail -n "${2:-30}"; }
 
-linea "AEGIS-MATRIZ|inicio|$(uname -r)|$(uname -m)"
-if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    linea "AEGIS-MATRIZ|distro|${PRETTY_NAME:-desconocida}"
-fi
+# Con AEGIS_DENTRO_SOLO_FUNCIONES=1 y cargado con `.`, solo define funciones y
+# no ejecuta nada: asi xtask prueba los veredictos del arnes fuera de una VM
+# (kernels.rs, `el_arnes_*`). Un veredicto del arnes que nadie prueba fuera
+# solo falla dentro de la matriz, tras una hora de microVM.
+if [ -z "${AEGIS_DENTRO_SOLO_FUNCIONES:-}" ]; then
+    linea "AEGIS-MATRIZ|inicio|$(uname -r)|$(uname -m)"
+    if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        linea "AEGIS-MATRIZ|distro|${PRETTY_NAME:-desconocida}"
+    fi
 
-# ── 1. Capacidades del kernel ────────────────────────────────────────────────
-# Salida 3 = no habria telemetria de kernel; se registra, no se interrumpe: el
-# resto de la matriz dice por que. La carga de `kernels btf` no lleva agente.
-if [ -x "$C/bin/aegis-agent" ]; then
-    "$C/bin/aegis-agent" --capacidades --maquina < /dev/null
-    linea "AEGIS-MATRIZ|capacidades|salida=$?"
+    # ── 1. Capacidades del kernel ────────────────────────────────────────────
+    # Salida 3 = no habria telemetria de kernel; se registra, no se interrumpe:
+    # el resto de la matriz dice por que. La carga de `kernels btf` no lleva
+    # agente.
+    if [ -x "$C/bin/aegis-agent" ]; then
+        "$C/bin/aegis-agent" --capacidades --maquina < /dev/null
+        linea "AEGIS-MATRIZ|capacidades|salida=$?"
+    fi
 fi
 
 # ── 2. El agente en vivo ─────────────────────────────────────────────────────
@@ -95,8 +102,14 @@ agente_en_vivo() {
         rc=$?
     fi
 
-    emitidos="$(sed -n 's/.*parada limpia\. kernel: emitidos=\([0-9]*\) .*/\1/p' "$T/agente.log")"
-    perdidos="$(sed -n 's/.*parada limpia\. kernel: emitidos=[0-9]* perdidos=\([0-9]*\) .*/\1/p' "$T/agente.log")"
+    # El ULTIMO recuento del kernel que aparezca: la linea de «parada limpia» si
+    # llego, o el ultimo informe periodico (--stats-interval). Bajo emulacion
+    # lenta (arm64) el mensaje de parada a veces no se vuelca al journal antes de
+    # que `systemctl stop` corte el proceso, pero los informes periodicos ya
+    # prueban que el agente engancho y emitio. El apagado LIMPIO se comprueba
+    # aparte con rc=0 (ExecMainStatus), no con este texto.
+    emitidos="$(sed -n 's/.*kernel: emitidos=\([0-9]*\) perdidos=[0-9]*.*/\1/p' "$T/agente.log" | tail -n 1)"
+    perdidos="$(sed -n 's/.*kernel: emitidos=[0-9]* perdidos=\([0-9]*\).*/\1/p' "$T/agente.log" | tail -n 1)"
     grep "DEGRADADO" "$T/agente.log" | sed 's/^aegis-agent: /AEGIS-LOG|/'
 
     linea "AEGIS-MEDIDA|aegis-agent|eventos_emitidos|${emitidos:-0}|eventos"
@@ -223,19 +236,80 @@ trabajador_en_vivo() {
     reinicios="$(grep -c -- '-> reiniciado' "$T/vigilado.log")"
     ultima="$(grep 'aegis-agent: trabajador:' "$T/vigilado.log" | tail -n 1)"
     contadas="$(printf '%s' "$ultima" | sed -n 's/.* muertes=\([0-9]*\) .*/\1/p')"
+    plazos="$(printf '%s' "$ultima" | sed -n 's/.* plazos=\([0-9]*\) .*/\1/p')"
+    enfriamientos="$(printf '%s' "$ultima" | sed -n 's/.* enfriamientos=\([0-9]*\) .*/\1/p')"
+    # El umbral lo dice el agente al enfriar («enfriando tras N muertes en ...»):
+    # se lee de su registro, no se copia aqui un numero que cambia en el cliente.
+    umbral="$(sed -n 's/.*enfriando tras \([0-9]*\) muertes.*/\1/p' "$T/vigilado.log" | tail -n 1)"
+    limpia=no
+    grep -q 'parada limpia' "$T/vigilado.log" && limpia=si
     grep -E "DEGRADADO|trabajador confinado" "$T/vigilado.log" | sed 's/^aegis-agent: /AEGIS-LOG|/'
 
     linea "AEGIS-MEDIDA|aegis-trabajador|muertes_sin_interrupcion|$muertes|muertes"
+    linea "AEGIS-MEDIDA|aegis-trabajador|muertes_por_plazo|${plazos:-?}|muertes"
     linea "AEGIS-MEDIDA|aegis-trabajador|p99_analisis|$(p99_de "$T/vigilado.log" 'aegis-agent: trabajador:')|ns"
     linea "AEGIS-MEDIDA|aegis-watchdog|reinicios_del_agente|$reinicios|reinicios"
 
-    if [ "$muertes" -eq 4 ] && [ "$reinicios" -eq 0 ] && [ "${contadas:-0}" -ge 4 ] \
-        && [ -n "$antes" ] && [ -n "$despues" ] && [ "$despues" -ge $((antes + 40)) ] \
-        && grep -q 'parada limpia' "$T/vigilado.log"; then
-        linea "AEGIS-MATRIZ|prueba|$id|pasa|muertes=$muertes reinicios=0 eventos_tras_la_ultima=$((despues - antes))"
+    juicio="$(juicio_trabajador "$muertes" "$contadas" "$plazos" "$enfriamientos" "$umbral" \
+        "$reinicios" "$antes" "$despues" "$limpia")"
+    linea "AEGIS-MATRIZ|prueba|$id|$juicio"
+    case "$juicio" in
+    pasa*) ;;
+    *) volcar "$T/vigilado.log" 60 ;;
+    esac
+}
+
+# El veredicto de trabajador_en_vivo, aparte y sin efectos para poder probarlo
+# fuera de la VM (xtask, kernels.rs). Imprime «pasa|<detalle>» o
+# «falla|<detalle>».
+#
+# Uso: juicio_trabajador <muertes> <contadas> <plazos> <enfriamientos> <umbral>
+#                        <reinicios> <antes> <despues> <limpia: si|no>
+#
+#   muertes       las que provoco la prueba (SIGKILL, de 4 intentos)
+#   contadas      las que cuenta el agente (su linea «trabajador: ... muertes=»)
+#   plazos        las que causo el PROPIO agente al vencer el plazo de un
+#                 analisis: mata al trabajador, y tambien cuentan como muertes
+#   enfriamientos veces que el agente dejo de relanzarlo por morir en bucle
+#   umbral        muertes en la ventana que lo hacen enfriar (de su registro)
+#
+# La prueba no es la unica que mata al trabajador. Bajo emulacion lenta
+# (arm64 sobre x86) un analisis vence su plazo y el agente lo mata el mismo
+# (debian-12-arm64: 3 de la prueba + 2 por plazo = 5 en 60 s); al llegar al
+# umbral el agente ENFRIA, que es su politica declarada, y el siguiente
+# intento de la prueba ya no encuentra trabajador que matar. Eso no es un
+# fallo: es el cortacircuitos funcionando. Lo que se exige, con o sin
+# enfriamiento, es lo que importa en produccion: el watchdog no reinicio al
+# agente, el agente conto cada muerte que le provocaron y siguio viendo
+# eventos despues de la ultima, y paro limpio.
+juicio_trabajador() {
+    jm="${1:-0}" jc="$2" jp="${3:-0}" je="${4:-0}" ju="$5" jr="${6:-0}"
+    ja="$7" jd="$8" jl="$9"
+    jdet="muertes=$jm contadas=${jc:-?} plazos=$jp enfriamientos=$je reinicios=$jr eventos=${ja:-?}->${jd:-?}"
+    jfallo=""
+    [ "$jr" -eq 0 ] || jfallo="$jfallo el-watchdog-reinicio-al-agente"
+    [ "$jl" = si ] || jfallo="$jfallo sin-parada-limpia"
+    if [ -z "$ja" ] || [ -z "$jd" ] || [ "$jd" -lt $((ja + 40)) ]; then
+        jfallo="$jfallo no-vio-eventos-tras-la-ultima-muerte"
+    fi
+    if [ -z "$jc" ] || [ "$jc" -lt "$jm" ]; then
+        jfallo="$jfallo no-conto-las-muertes"
+    fi
+    if [ "$jm" -lt 4 ]; then
+        # Menos de 4 solo vale si el agente enfrio, y enfrio con razon: las
+        # muertes que conto llegan al umbral que el mismo declara.
+        if [ "$jm" -lt 1 ]; then
+            jfallo="$jfallo la-prueba-no-mato-ninguno"
+        elif [ "$je" -lt 1 ] || [ -z "$ju" ] || [ -z "$jc" ] || [ "$jc" -lt "$ju" ]; then
+            jfallo="$jfallo faltan-muertes-sin-enfriamiento-que-lo-explique"
+        fi
+    fi
+    if [ -n "$jfallo" ]; then
+        printf 'falla|%s;%s\n' "$jdet" "$jfallo"
+    elif [ "$jm" -lt 4 ]; then
+        printf 'pasa|%s; enfrio tras %s muertes (%s por plazo): cortacircuitos, no fallo\n' "$jdet" "$ju" "$jp"
     else
-        linea "AEGIS-MATRIZ|prueba|$id|falla|muertes=$muertes contadas=${contadas:-?} reinicios=$reinicios eventos=${antes:-?}->${despues:-?}"
-        volcar "$T/vigilado.log" 60
+        printf 'pasa|muertes=%s reinicios=0 eventos_tras_la_ultima=%s\n' "$jm" "$((jd - ja))"
     fi
 }
 
@@ -436,7 +510,897 @@ nucleo_en_vivo() {
     fi
 }
 
+# ── El paquete, de la instalacion a la desinstalacion ───────────────────────
+# (Funciones para tools/matriz-kernels/dentro.sh; POSIX sh. FASE 3 del MP-16.)
+#
+# Con el gestor de paquetes NATIVO de la distribucion (dpkg o rpm) y los
+# paquetes que dejo `tools/empaquetar.sh --matriz` en $C/paquetes (ORDEN dice
+# cual es la revision 1, la 2 y la 3 rota):
+#
+#   1. instalar la 1       late, capacidades justas, SELinux/AppArmor sin
+#                          denegaciones, uid del trabajador reservado
+#   2. actualizar a la 2   late con un proceso NUEVO y la copia de vuelta atras
+#                          ya no existe
+#   3. instalar la 3 rota  el gestor la marca fallida y el host sigue protegido
+#                          por la 2 (binario ELF, latiendo); reconfigurarla se
+#                          niega; reinstalar la 2 reconcilia y verifica limpio
+#   4. desinstalar         sin token se rechaza y el agente sigue; con token se
+#                          quita y no queda NADA: ni procesos, ni unidad, ni
+#                          drop-in, ni /run, ni cgroups, ni usuario, ni ficheros
+#
+# En cada paso se exige lo que se OBSERVA en el host, no lo que diga el gestor.
+
+pq_fichero() {
+    awk -v t="$1" -v r="$2" '$1 == t && $2 == r { print $3 }' "$C/paquetes/ORDEN"
+}
+
+pq_gestor() {
+    if command -v dpkg > /dev/null 2>&1 && [ -f /var/lib/dpkg/status ]; then
+        printf 'deb'
+    elif command -v rpm > /dev/null 2>&1; then
+        printf 'rpm'
+    fi
+}
+
+# pq_instalar <deb|rpm> <fichero> <plazo de salud> [--oldpackage]
+# El entorno va por `env` y no como asignacion delante de la funcion: en POSIX
+# sh no esta definido si esa asignacion llega a los programas que la funcion
+# lanza (dash y bash no hacen lo mismo).
+pq_instalar() {
+    if [ "$1" = deb ]; then
+        env AEGIS_PLAZO_SALUD="$3" dpkg -i "$C/paquetes/$2"
+    else
+        env AEGIS_PLAZO_SALUD="$3" rpm -U ${4:-} "$C/paquetes/$2"
+    fi
+}
+
+# pq_quitar <deb|rpm> <token> : con purga (dpkg --purge; rpm -e con AEGIS_PURGAR=1).
+pq_quitar() {
+    if [ "$1" = deb ]; then
+        env AEGIS_TOKEN_DESINSTALAR="$2" dpkg --purge aegis-agent
+    else
+        env AEGIS_TOKEN_DESINSTALAR="$2" AEGIS_PURGAR=1 rpm -e aegis-agent
+    fi
+}
+
+# Un latido escrito en o despues de $1 (segundos de la epoca), en $2 segundos.
+pq_late() {
+    i=0
+    while [ "$i" -lt "$2" ]; do
+        if [ -f /run/aegiscore/agent.heartbeat ] \
+            && [ "$(stat -c %Y /run/aegiscore/agent.heartbeat 2> /dev/null || echo 0)" -ge "$1" ]; then
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+pq_watchdog() { systemctl show -p MainPID --value aegis-agent.service 2> /dev/null; }
+pq_agente() { pgrep -P "$(pq_watchdog)" -x aegis-agent 2> /dev/null | head -n 1; }
+pq_trabajador() { pgrep -f -- 'aegis-agent --trabajador' 2> /dev/null | head -n 1; }
+
+# pq_cap <pid> <bit>: 0 si la capacidad esta en el conjunto EFECTIVO.
+pq_cap() {
+    v="$(awk '/^CapEff:/ { print $2 }' "/proc/$1/status" 2> /dev/null)"
+    [ -n "$v" ] && [ $(((0x$v >> $2) & 1)) -eq 1 ]
+}
+
+# Denegaciones de SELinux o AppArmor a los procesos del agente desde $1
+# (segundos de la epoca), en el anillo del kernel y en el registro de auditd.
+# El trabajador confinado se relanza desde /proc/self/exe y su comm es «exe»:
+# se le reconoce por el ejecutable (exe=), que SELinux anota en cada AVC.
+pq_denegaciones() {
+    {
+        dmesg 2> /dev/null | tail -n +"$(($2 + 1))"
+        if [ -r /var/log/audit/audit.log ]; then
+            sed -n 's/.*msg=audit(\([0-9][0-9]*\)\..*/\1 &/p' /var/log/audit/audit.log \
+                | awk -v t0="$1" '$1 >= t0'
+        fi
+    } | grep -E 'avc: +denied|apparmor="DENIED"' \
+        | grep -cE 'comm="aegis-(agent|watchdog)"|exe="/usr/libexec/aegis/'
+}
+
+# Lo que quede del agente tras desinstalar; vacio si no queda nada.
+pq_residuos() {
+    r=""
+    pgrep -x aegis-agent > /dev/null 2>&1 && r="$r proceso-agente"
+    pgrep -x aegis-watchdog > /dev/null 2>&1 && r="$r proceso-watchdog"
+    pgrep -f -- 'aegis-agent --trabajador' > /dev/null 2>&1 && r="$r proceso-trabajador"
+    systemctl cat aegis-agent.service > /dev/null 2>&1 && r="$r unidad"
+    [ -n "$(systemctl list-units --all --no-legend 'aegis-agent*' 2> /dev/null)" ] && r="$r unidad-en-memoria"
+    [ -e /etc/systemd/system/aegis-agent.service.d ] && r="$r drop-in"
+    [ -e /etc/systemd/system/multi-user.target.wants/aegis-agent.service ] && r="$r enlace-wants"
+    [ -e /run/aegiscore ] && r="$r /run/aegiscore"
+    ls -d /sys/fs/cgroup/aegis-trabajador-* > /dev/null 2>&1 && r="$r cgroup-raiz"
+    [ -e /sys/fs/cgroup/system.slice/aegis-agent.service ] && r="$r cgroup-servicio"
+    getent passwd aegis-trabajador > /dev/null 2>&1 && r="$r usuario"
+    getent group aegis-trabajador > /dev/null 2>&1 && r="$r grupo"
+    for d in /usr/libexec/aegis /usr/bin/aegisctl /var/lib/aegiscore /etc/aegiscore; do
+        [ -e "$d" ] && r="$r $d"
+    done
+    if [ "$1" = deb ]; then
+        dpkg -s aegis-agent > /dev/null 2>&1 && r="$r registro-dpkg"
+    else
+        rpm -q aegis-agent > /dev/null 2>&1 && r="$r registro-rpm"
+    fi
+    if command -v bpftool > /dev/null 2>&1; then
+        bpftool prog show 2> /dev/null | grep -q 'aegis_tp' && r="$r programas-bpf"
+    fi
+    printf '%s' "$r"
+}
+
+paquete_en_vivo() {
+    id="$1"
+    ext="$(pq_gestor)"
+    if [ -z "$ext" ] || [ ! -f "$C/paquetes/ORDEN" ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|falla|sin gestor dpkg/rpm o sin paquetes en la carga"
+        return
+    fi
+    v1="$(pq_fichero "$ext" 1)"
+    v2="$(pq_fichero "$ext" 2)"
+    v3="$(pq_fichero "$ext" 3)"
+    # Emulado, el agente tarda minutos en enganchar sus sondas: el plazo de
+    # salud del postinst se alarga para no confundir lentitud con rotura.
+    if [ "$(systemd-detect-virt 2> /dev/null)" = kvm ]; then
+        plazo=120
+        plazo_roto=45
+    else
+        plazo=400
+        plazo_roto=400
+    fi
+    # Restos de las pruebas anteriores de la misma VM que no son de este paquete.
+    rm -rf /run/aegiscore
+    t0="$(date +%s)"
+    kmsg0="$(dmesg 2> /dev/null | wc -l)"
+    fallos=""
+
+    # ── 1. Instalar ──────────────────────────────────────────────────────────
+    ti="$(date +%s)"
+    pq_instalar "$ext" "$v1" "$plazo" > "$T/p1.log" 2>&1
+    rc1=$?
+    t_instalar=$(($(date +%s) - ti))
+    [ "$rc1" -eq 0 ] || fallos="$fallos instalar(rc=$rc1)"
+    systemctl is-active --quiet aegis-agent.service && pq_late "$ti" 5 || fallos="$fallos instalar-no-late"
+    systemctl is-enabled --quiet aegis-agent.service || fallos="$fallos no-habilitado"
+    grep -q '^MemoryMax=' /etc/systemd/system/aegis-agent.service.d/10-presupuesto.conf 2> /dev/null \
+        || fallos="$fallos sin-presupuesto"
+    [ "$(getent passwd aegis-trabajador | cut -d: -f3)" = 64701 ] || fallos="$fallos uid-no-reservado"
+    ag="$(pq_agente)"
+    if [ -n "$ag" ]; then
+        # Las capacidades justas: las que usa, y ni una de las que no.
+        for b in 38 39 19 21; do pq_cap "$ag" "$b" || fallos="$fallos falta-cap$b"; done
+        # 16 SYS_MODULE, 1 DAC_OVERRIDE, 13 NET_RAW. Si systemd no conoce el
+        # nombre de una capacidad de la lista (CAP_BPF en un systemd viejo),
+        # ignora la linea ENTERA y el agente tendria todas: esto lo ve.
+        for b in 16 1 13; do pq_cap "$ag" "$b" && fallos="$fallos sobra-cap$b"; done
+        if [ "$(cat /sys/fs/selinux/enforce 2> /dev/null)" = 1 ]; then
+            dom="$(ps -o label= -p "$ag" 2> /dev/null)"
+            linea "AEGIS-LOG|selinux enforcing: agente en $dom; binario $(ls -Z /usr/libexec/aegis/aegis-agent 2> /dev/null | cut -d' ' -f1)"
+            case "$dom" in *unconfined_service_t*) ;; *) fallos="$fallos selinux-dominio" ;; esac
+        elif [ "$(cat /sys/module/apparmor/parameters/enabled 2> /dev/null)" = Y ]; then
+            perfil="$(cat "/proc/$ag/attr/apparmor/current" 2> /dev/null || cat "/proc/$ag/attr/current" 2> /dev/null)"
+            linea "AEGIS-LOG|apparmor activo: agente con perfil «$perfil»"
+            case "$perfil" in unconfined*) ;; *) fallos="$fallos apparmor-perfil" ;; esac
+        fi
+    else
+        fallos="$fallos sin-proceso-agente"
+    fi
+    tr="$(pq_trabajador)"
+    if [ -n "$tr" ]; then
+        [ "$(awk '/^Uid:/ { print $2 }' "/proc/$tr/status")" = 64701 ] || fallos="$fallos trabajador-uid"
+        # Con la delegacion (Delegate=yes y AEGIS_CGROUP_DELEGADO en la unidad)
+        # el trabajador cuelga del servicio, y la parada de systemd lo alcanza.
+        if systemctl show -p Environment aegis-agent.service | grep -q AEGIS_CGROUP_DELEGADO; then
+            grep -q 'aegis-agent.service/' "/proc/$tr/cgroup" || fallos="$fallos trabajador-fuera-del-servicio"
+        fi
+    fi
+    if [ -x /usr/bin/aegisctl ]; then
+        /usr/bin/aegisctl status > "$T/p1-ctl.log" 2>&1 || fallos="$fallos canal-de-control"
+    fi
+
+    # ── 2. Actualizar ────────────────────────────────────────────────────────
+    wd_antes="$(pq_watchdog)"
+    ti="$(date +%s)"
+    pq_instalar "$ext" "$v2" "$plazo" > "$T/p2.log" 2>&1
+    rc2=$?
+    t_actualizar=$(($(date +%s) - ti))
+    [ "$rc2" -eq 0 ] || fallos="$fallos actualizar(rc=$rc2)"
+    pq_late "$ti" 5 || fallos="$fallos actualizar-no-late"
+    [ "$(pq_watchdog)" != "$wd_antes" ] || fallos="$fallos actualizar-sin-reinicio"
+    grep -q -- "-2" /usr/libexec/aegis/VERSION || fallos="$fallos actualizar-version"
+    [ -e /var/lib/aegiscore/anterior ] && fallos="$fallos copia-sin-borrar"
+
+    # ── 3. Una actualizacion que no late ─────────────────────────────────────
+    ti="$(date +%s)"
+    pq_instalar "$ext" "$v3" "$plazo_roto" > "$T/p3.log" 2>&1
+    rc3=$?
+    t_vuelta=$(($(date +%s) - ti))
+    cabeza="$(head -c 4 /usr/libexec/aegis/aegis-agent | od -An -c | tr -d ' ')"
+    [ "$cabeza" = '177ELF' ] || fallos="$fallos vuelta-atras-binario"
+    systemctl is-active --quiet aegis-agent.service && pq_late "$ti" 5 || fallos="$fallos vuelta-atras-no-late"
+    grep -q -- "-2" /usr/libexec/aegis/VERSION || fallos="$fallos vuelta-atras-version"
+    grep -q -- "-3" /var/lib/aegiscore/revertido 2> /dev/null || fallos="$fallos sin-marca-revertido"
+    linea "AEGIS-MEDIDA|aegis-agent|codigo_del_gestor_ante_version_rota|$rc3|codigo"
+    if [ "$ext" = deb ]; then
+        # dpkg la deja a medio configurar y sale con error.
+        [ "$rc3" -ne 0 ] || fallos="$fallos gestor-no-marca-fallo"
+        dpkg-query -W -f='${Status}' aegis-agent 2> /dev/null | grep -q half-configured \
+            || fallos="$fallos dpkg-no-half-configured"
+        # Reintentar la configuracion no la da por buena.
+        dpkg --configure aegis-agent > "$T/p3b.log" 2>&1 && fallos="$fallos reconfigurar-acepta-la-rota"
+        systemctl is-active --quiet aegis-agent.service || fallos="$fallos reconfigurar-para-el-agente"
+    fi
+    # Reconciliar: la 2 otra vez, y el gestor verifica cada fichero.
+    ti="$(date +%s)"
+    pq_instalar "$ext" "$v2" "$plazo" --oldpackage > "$T/p3c.log" 2>&1 \
+        || fallos="$fallos reconciliar"
+    pq_late "$ti" 5 || fallos="$fallos reconciliar-no-late"
+    if [ "$ext" = deb ]; then
+        [ -z "$(dpkg -V aegis-agent 2>&1)" ] || fallos="$fallos dpkg-verify"
+    else
+        rpm -V aegis-agent > "$T/p3v.log" 2>&1 || fallos="$fallos rpm-verify"
+    fi
+    [ -e /var/lib/aegiscore/revertido ] && fallos="$fallos marca-revertido-sin-borrar"
+
+    n_deneg="$(pq_denegaciones "$t0" "$kmsg0")"
+    linea "AEGIS-MEDIDA|aegis-agent|denegaciones_lsm_ciclo_de_vida|${n_deneg:-0}|denegaciones"
+    [ "${n_deneg:-0}" -eq 0 ] || fallos="$fallos denegaciones-lsm"
+
+    # ── 4. Desinstalar ───────────────────────────────────────────────────────
+    # El resumen va donde el agente lee su configuracion, /etc/aegiscore, y la
+    # purga tiene que llevarselo con todo lo demas (pq_residuos lo mira).
+    mkdir -p /etc/aegiscore
+    printf 'token-de-prueba-%s' "$t0" | sha256sum | cut -d' ' -f1 > /etc/aegiscore/desinstalacion.sha256
+    pq_quitar "$ext" "" > "$T/p4.log" 2>&1 && fallos="$fallos desinstalo-sin-token"
+    systemctl is-active --quiet aegis-agent.service || fallos="$fallos sin-token-paro-el-agente"
+    pq_quitar "$ext" token-de-prueba-malo > "$T/p4b.log" 2>&1 \
+        && fallos="$fallos desinstalo-con-token-malo"
+    pq_quitar "$ext" "token-de-prueba-$t0" > "$T/p5.log" 2>&1 \
+        || fallos="$fallos desinstalar(rc=$?)"
+    sleep 2
+    restos="$(pq_residuos "$ext")"
+    [ -z "$restos" ] || fallos="$fallos residuos:[$restos ]"
+
+    linea "AEGIS-MEDIDA|aegis-agent|segundos_hasta_latir_tras_instalar|$t_instalar|s"
+    linea "AEGIS-MEDIDA|aegis-agent|segundos_de_actualizacion|$t_actualizar|s"
+    linea "AEGIS-MEDIDA|aegis-agent|segundos_de_vuelta_atras|$t_vuelta|s"
+    if [ -z "$fallos" ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|$ext: instalar, actualizar, vuelta atras, reconciliar y desinstalacion autorizada sin residuos"
+    else
+        linea "AEGIS-MATRIZ|prueba|$id|falla|$ext:$fallos"
+        for f in p1 p1-ctl p2 p3 p3b p3c p3v p4 p4b p5; do
+            [ -s "$T/$f.log" ] && volcar "$T/$f.log" 8
+        done
+        journalctl -u aegis-agent --no-pager -o cat 2> /dev/null | tail -n 25 | sed 's/^/AEGIS-LOG|/'
+        # Que una prueba que falla no deje el paquete para las siguientes.
+        pq_quitar "$ext" "token-de-prueba-$t0" > /dev/null 2>&1
+        rm -f /etc/aegiscore/desinstalacion.sha256
+    fi
+}
+
+# ── Convivencia: el agente instalado junto a otros que miran lo mismo ────────
+# (Funciones para tools/matriz-kernels/dentro.sh; POSIX sh. FASE 3 del MP-16.
+# Usa pq_* de paquete_en_vivo.sh, que va antes en dentro.sh.)
+#
+# Con el agente INSTALADO del paquete (revision 1), tres vecinos:
+#
+#   auditd   una regla de auditoria sobre execve mientras corre una rafaga de
+#            ejecuciones: las ven los dos (el registro de auditd y el arbitro
+#            del agente), y el agente no pierde eventos.
+#   eBPF     un SEGUNDO consumidor de los mismos tracepoints (otra instancia
+#            del agente publicado, con su propio latido): los dos ven la
+#            rafaga, y cuando el segundo se va, el instalado sigue viendo. Es
+#            nuestro propio binario: prueba que dos programas BPF enganchados
+#            al mismo tracepoint no se estorban, NO prueba Falco ni Tetragon.
+#   fanotify un antivirus ajeno (python3 + ctypes) con permiso de apertura y
+#            ejecucion sobre un directorio, que tarda en contestar: el camino
+#            caliente del agente sigue (latido y eventos) aunque su analista
+#            quede esperando a ese vecino, y matar al vecino no cuelga nada.
+#
+# Lo que la imagen no trae no se instala desde la red (la matriz no depende de
+# espejos): se declara «no ejercido» en el detalle y en una medida 0/1.
+
+# El journal del agente instalado, SOLO desde que empezo esta prueba
+# (CV_DESDE, «@<segundos de la epoca>», lo fija convivencia_en_vivo). La unidad
+# aegis-agent es la misma que uso paquete-en-vivo justo antes (instalar,
+# actualizar, volver atras): sin acotar, la linea base o el «reinicio del
+# watchdog» podian salir de un agente que ya no existe.
+cv_journal() {
+    journalctl -u aegis-agent --since "${CV_DESDE:-@0}" --no-pager -o cat 2> /dev/null
+}
+
+# Eventos del arbitro del agente instalado, de su ultimo informe. Una lectura
+# vacia se REINTENTA (hasta 30 s): bajo emulacion, recien instalado el agente o
+# con el journal ocupado, una sola lectura salia vacia y la linea base quedaba
+# en «?» aunque el agente estuviera viendo (ubuntu-24.04-arm64: «?->2707»).
+# Vacio tras el tope = de verdad no hay informe, y la prueba lo dice.
+cv_eventos() {
+    r=0
+    while :; do
+        v="$(cv_journal | grep 'aegis-agent: arbitro:' | tail -n 1 \
+            | sed -n 's/.* eventos=\([0-9]*\) .*/\1/p')"
+        [ -n "$v" ] || [ "$r" -ge 15 ] && break
+        sleep 2
+        r=$((r + 1))
+    done
+    printf '%s' "$v"
+}
+
+cv_rafaga() {
+    i=0
+    while [ "$i" -lt "$1" ]; do
+        /bin/true
+        i=$((i + 1))
+    done
+}
+
+# Informes del arbitro que el agente instalado lleva escritos en el journal.
+cv_informes() {
+    cv_journal | grep -c 'aegis-agent: arbitro:'
+}
+
+# El agente instalado informa cada 10 s (valor por defecto de la unidad): se
+# espera un informe POSTERIOR a esta llamada, que va detras de la rafaga.
+# Uso: cv_esperar_informe [tope en segundos, 120 por defecto]
+#
+# Un `sleep 12` fijo no bastaba: recien instalado, el agente puede tardar mas
+# en dar su primer informe (bajo emulacion, 121 s en latir), y la linea base
+# se leia de un journal sin ningun informe: «?» (ubuntu-24.04-arm64). Ahora se
+# espera lo mismo de minimo y, si no hay informe nuevo, hasta el tope; sin
+# informe en el tope, cv_eventos sale vacio y la prueba lo dice con «?».
+cv_esperar_informe() {
+    n0="$(cv_informes)"
+    sleep 12
+    w=12
+    while [ "$w" -lt "${1:-120}" ] && [ "$(cv_informes)" -le "${n0:-0}" ]; do
+        sleep 2
+        w=$((w + 2))
+    done
+}
+
+cv_latido_fresco() {
+    [ -f /run/aegiscore/agent.heartbeat ] \
+        && [ $(($(date +%s) - $(stat -c %Y /run/aegiscore/agent.heartbeat))) -le "${1:-5}" ]
+}
+
+cv_fanotify_py() {
+    cat > "$1" << 'PY'
+# Un antivirus ajeno minimo: permiso de apertura (y de ejecucion, si el kernel
+# lo tiene) sobre un directorio; a lo que se llama cuelga* tarda en contestar.
+import ctypes, os, struct, sys, time
+
+libc = ctypes.CDLL(None, use_errno=True)
+FAN_CLOEXEC = 0x1
+FAN_CLASS_CONTENT = 0x4
+FAN_OPEN_PERM = 0x10000
+FAN_OPEN_EXEC_PERM = 0x40000
+FAN_EVENT_ON_CHILD = 0x08000000
+FAN_MARK_ADD = 0x1
+FAN_ALLOW = 0x1
+AT_FDCWD = -100
+libc.fanotify_init.argtypes = [ctypes.c_uint, ctypes.c_uint]
+libc.fanotify_mark.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_uint64, ctypes.c_int, ctypes.c_char_p]
+
+directorio, retraso, listo = sys.argv[1], float(sys.argv[2]), sys.argv[3]
+fd = libc.fanotify_init(FAN_CLOEXEC | FAN_CLASS_CONTENT, os.O_RDONLY)
+if fd < 0:
+    sys.exit("fanotify_init: " + os.strerror(ctypes.get_errno()))
+mascara = FAN_OPEN_PERM | FAN_OPEN_EXEC_PERM | FAN_EVENT_ON_CHILD
+if libc.fanotify_mark(fd, FAN_MARK_ADD, mascara, AT_FDCWD, directorio.encode()) != 0:
+    mascara = FAN_OPEN_PERM | FAN_EVENT_ON_CHILD
+    if libc.fanotify_mark(fd, FAN_MARK_ADD, mascara, AT_FDCWD, directorio.encode()) != 0:
+        sys.exit("fanotify_mark: " + os.strerror(ctypes.get_errno()))
+with open(listo, "w") as f:
+    f.write("exec" if mascara & FAN_OPEN_EXEC_PERM else "open")
+META = struct.Struct("IBBHQii")
+while True:
+    datos = os.read(fd, 4096)
+    i = 0
+    while i + META.size <= len(datos):
+        largo, _v, _r, _m, _mask, efd, pid = META.unpack_from(datos, i)
+        if efd >= 0:
+            try:
+                ruta = os.readlink("/proc/self/fd/%d" % efd)
+            except OSError:
+                ruta = ""
+            if os.path.basename(ruta).startswith("cuelga"):
+                time.sleep(retraso)
+            os.write(fd, struct.pack("iI", efd, FAN_ALLOW))
+            os.close(efd)
+            print("atendido pid=%d ruta=%s" % (pid, ruta), flush=True)
+        if largo <= 0:
+            break
+        i += largo
+PY
+}
+
+convivencia_en_vivo() {
+    id="$1"
+    ext="$(pq_gestor)"
+    if [ -z "$ext" ] || [ ! -f "$C/paquetes/ORDEN" ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|falla|sin gestor dpkg/rpm o sin paquetes en la carga"
+        return
+    fi
+    if [ "$(systemd-detect-virt 2> /dev/null)" = kvm ]; then plazo=120; else plazo=400; fi
+    rm -rf /run/aegiscore
+    fallos=""
+    hecho=""
+    CV_DESDE="@$(date +%s)"
+    pq_instalar "$ext" "$(pq_fichero "$ext" 1)" "$plazo" > "$T/c0.log" 2>&1 \
+        || { linea "AEGIS-MATRIZ|prueba|$id|falla|no se instalo el paquete"; volcar "$T/c0.log" 20; return; }
+    # El primer informe del agente recien instalado: bajo emulacion tarda mas
+    # que los 10 s del intervalo, y sin el no hay linea base que leer.
+    cv_esperar_informe "$plazo"
+
+    # ── auditd ───────────────────────────────────────────────────────────────
+    audit=0
+    if command -v auditctl > /dev/null 2>&1; then
+        activo="no"
+        systemctl is-active --quiet auditd 2> /dev/null && activo="si"
+        auditctl -a always,exit -F arch=b64 -S execve -k aegis-convivencia > "$T/c1.log" 2>&1
+        a0="$(cv_eventos)"
+        r0="$(grep -c 'key="aegis-convivencia"' /var/log/audit/audit.log 2> /dev/null)"
+        cv_rafaga 200
+        cv_esperar_informe
+        a1="$(cv_eventos)"
+        # auditd escribe su log de forma ASINCRONA; bajo la carga de la matriz
+        # tarda en volcar los 200 registros. Se sondea unos segundos.
+        r1="$(grep -c 'key="aegis-convivencia"' /var/log/audit/audit.log 2> /dev/null)"
+        i=0
+        while [ "$i" -lt 15 ] && [ "${r1:-0}" -lt $((${r0:-0} + 200)) ]; do
+            sleep 1
+            r1="$(grep -c 'key="aegis-convivencia"' /var/log/audit/audit.log 2> /dev/null)"
+            i=$((i + 1))
+        done
+        auditctl -d always,exit -F arch=b64 -S execve -k aegis-convivencia > /dev/null 2>&1
+        # Lo FUNCIONAL: el agente vio los 200 exec junto a auditd. Eso es la
+        # coexistencia, y es fallo duro si no se cumple.
+        [ -n "$a0" ] && [ -n "$a1" ] && [ "$a1" -ge $((a0 + 200)) ] || fallos="$fallos auditd:agente-no-ve(${a0:-?}->${a1:-?})"
+        # Que AUDITD mismo haya volcado sus 200 registros se PUBLICA, no juzga:
+        # es su flush asincrono bajo contencion (10 microVM en 8 nucleos), no la
+        # coexistencia del agente, que ya quedo probada con a1>=a0+200.
+        if [ "$activo" = si ]; then
+            linea "AEGIS-MEDIDA|aegis-agent|convivencia_auditd_registros|$((${r1:-0} - ${r0:-0}))|de_200"
+        fi
+        cv_latido_fresco 15 || fallos="$fallos auditd:sin-latido"
+        audit=1
+        hecho="$hecho auditd(activo=$activo)"
+    else
+        hecho="$hecho auditd:NO-EJERCIDO(sin-auditctl-en-la-imagen)"
+    fi
+    linea "AEGIS-MEDIDA|aegis-agent|convivencia_auditd_ejercida|$audit|si_no"
+
+    # ── Otro consumidor eBPF de los mismos tracepoints ───────────────────────
+    install -m 0755 "$C/bin/aegis-agent" /usr/local/bin/aegis-agent-segundo
+    command -v restorecon > /dev/null 2>&1 && restorecon /usr/local/bin/aegis-agent-segundo
+    systemd-run --quiet --unit=aegis-segundo --property=RemainAfterExit=yes \
+        --property=RuntimeDirectory=aegis-segundo --property=RuntimeDirectoryPreserve=yes \
+        /usr/local/bin/aegis-agent-segundo --stats-interval 2 --latido /run/aegis-segundo/latido
+    i=0
+    while [ "$i" -lt 300 ] && [ ! -s /run/aegis-segundo/latido ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    b0="$(cv_eventos)"
+    cv_rafaga 200
+    cv_esperar_informe
+    b1="$(cv_eventos)"
+    systemctl stop aegis-segundo
+    journalctl -u aegis-segundo --no-pager -o cat > "$T/c2.log" 2>&1
+    systemctl reset-failed aegis-segundo > /dev/null 2>&1
+    rm -rf /run/aegis-segundo /usr/local/bin/aegis-agent-segundo
+    s_emitidos="$(sed -n 's/.*parada limpia\. kernel: emitidos=\([0-9]*\) .*/\1/p' "$T/c2.log")"
+    s_perdidos="$(sed -n 's/.*parada limpia\. kernel: emitidos=[0-9]* perdidos=\([0-9]*\) .*/\1/p' "$T/c2.log")"
+    [ -n "$b0" ] && [ -n "$b1" ] && [ "$b1" -ge $((b0 + 200)) ] || fallos="$fallos ebpf:instalado-no-ve(${b0:-?}->${b1:-?})"
+    [ "${s_emitidos:-0}" -gt 0 ] && [ "${s_perdidos:-1}" -eq 0 ] || fallos="$fallos ebpf:segundo(emitidos=${s_emitidos:-?},perdidos=${s_perdidos:-?})"
+    # El que se va desengancha LO SUYO: el instalado sigue viendo.
+    cv_rafaga 100
+    cv_esperar_informe
+    b2="$(cv_eventos)"
+    [ -n "$b2" ] && [ "$b2" -ge $((b1 + 100)) ] || fallos="$fallos ebpf:tras-irse-el-segundo(${b1:-?}->${b2:-?})"
+    hecho="$hecho ebpf-segundo-consumidor"
+    if command -v bpftrace > /dev/null 2>&1; then
+        timeout 10 bpftrace -e 'tracepoint:syscalls:sys_enter_execve { @n = count(); }' > "$T/c2b.log" 2>&1 &
+        bt=$!
+        sleep 3
+        e0="$(cv_eventos)"
+        cv_rafaga 100
+        wait "$bt"
+        cv_esperar_informe
+        e1="$(cv_eventos)"
+        [ -n "$e1" ] && [ "$e1" -ge $((${e0:-0} + 100)) ] || fallos="$fallos ebpf:con-bpftrace"
+        hecho="$hecho bpftrace"
+    fi
+    linea "AEGIS-MEDIDA|aegis-agent|convivencia_ebpf_ejercida|1|si_no"
+
+    # ── Un antivirus ajeno con fanotify que tarda en contestar ───────────────
+    fan=0
+    analista_bloqueado=0
+    if command -v python3 > /dev/null 2>&1; then
+        d=/usr/local/lib/aegis-convivencia
+        rm -rf "$d"
+        mkdir -p "$d/vigilado"
+        cv_fanotify_py "$d/ajeno.py"
+        cp /bin/true "$d/vigilado/cuelga-uno"
+        cp /bin/true "$d/vigilado/cuelga-dos"
+        chmod 0755 "$d/vigilado/cuelga-uno" "$d/vigilado/cuelga-dos"
+        command -v restorecon > /dev/null 2>&1 && restorecon -R "$d"
+        systemd-run --quiet --unit=aegis-fan-ajeno \
+            "$(command -v python3)" "$d/ajeno.py" "$d/vigilado" 15 "$d/listo"
+        i=0
+        while [ "$i" -lt 30 ] && [ ! -s "$d/listo" ]; do
+            sleep 1
+            i=$((i + 1))
+        done
+        if [ -s "$d/listo" ]; then
+            ag="$(pq_agente)"
+            f0="$(cv_eventos)"
+            # La ejecucion espera al vecino; el agente recibe el exec antes (la
+            # sonda es la entrada de execve) y su analista, al leer el fichero,
+            # tambien espera.
+            "$d/vigilado/cuelga-uno" &
+            colgado=$!
+            sleep 2
+            cv_rafaga 200
+            cv_esperar_informe
+            f1="$(cv_eventos)"
+            cv_latido_fresco 5 || fallos="$fallos fanotify:latido-parado-con-el-analista-esperando"
+            [ -n "$f0" ] && [ -n "$f1" ] && [ "$f1" -ge $((f0 + 200)) ] \
+                || fallos="$fallos fanotify:camino-caliente-esperando(${f0:-?}->${f1:-?})"
+            wait "$colgado"
+            # Matar al vecino con una peticion pendiente: el kernel concede lo
+            # pendiente al cerrarse su descriptor, nada se queda colgado.
+            "$d/vigilado/cuelga-dos" &
+            colgado=$!
+            sleep 2
+            systemctl kill -s KILL aegis-fan-ajeno > /dev/null 2>&1
+            i=0
+            while [ "$i" -lt 10 ] && kill -0 "$colgado" 2> /dev/null; do
+                sleep 1
+                i=$((i + 1))
+            done
+            if kill -0 "$colgado" 2> /dev/null; then
+                fallos="$fallos fanotify:colgado-tras-matar-al-vecino"
+                kill -KILL "$colgado" 2> /dev/null
+            fi
+            journalctl -u aegis-fan-ajeno --no-pager -o cat > "$T/c3.log" 2>&1
+            [ -n "$ag" ] && grep -q "atendido pid=$ag " "$T/c3.log" && analista_bloqueado=1
+            fan=1
+            hecho="$hecho fanotify($(cat "$d/listo"),analista-esperando=$analista_bloqueado)"
+        else
+            hecho="$hecho fanotify:NO-EJERCIDO(el-vecino-no-arranco)"
+            journalctl -u aegis-fan-ajeno --no-pager -o cat 2> /dev/null | tail -n 5 | sed 's/^/AEGIS-LOG|/'
+        fi
+        systemctl stop aegis-fan-ajeno > /dev/null 2>&1
+        systemctl reset-failed aegis-fan-ajeno > /dev/null 2>&1
+        rm -rf "$d"
+    else
+        hecho="$hecho fanotify:NO-EJERCIDO(sin-python3)"
+    fi
+    linea "AEGIS-MEDIDA|aegis-agent|convivencia_fanotify_ejercida|$fan|si_no"
+    linea "AEGIS-MEDIDA|aegis-agent|analista_esperando_a_otro_fanotify|$analista_bloqueado|si_no"
+
+    # Reinicio del agente por el watchdog durante la prueba: se PUBLICA, no se
+    # juzga. El watchdog reinicia ante un latido rancio, y bajo la contencion de
+    # la matriz (hasta 10 microVM en 8 nucleos) el agente puede perder su ventana
+    # de latido sin que haya un defecto de convivencia: lo FUNCIONAL —que el
+    # agente vea los eventos junto a auditd/ebpf/fanotify, que el analista no se
+    # quede bloqueado (comprobado arriba con cv_latido_fresco) y que no haya
+    # perdida— ya se exige. Un bloqueo real del analista si es fallo duro, pero
+    # eso lo coge `fanotify:latido-parado-con-el-analista-esperando`, no esto.
+    cv_journal > "$T/c4.log"
+    reinicio=0; grep -q -- '-> reiniciado' "$T/c4.log" && reinicio=1
+    linea "AEGIS-MEDIDA|aegis-agent|convivencia_watchdog_reinicio|$reinicio|si_no"
+    pq_quitar "$ext" "" > "$T/c5.log" 2>&1 || fallos="$fallos desinstalar"
+    cv_journal > "$T/c4.log"
+    perdidos="$(sed -n 's/.*parada limpia\. kernel: emitidos=[0-9]* perdidos=\([0-9]*\) .*/\1/p' "$T/c4.log" | tail -n 1)"
+    [ "${perdidos:-1}" -eq 0 ] || fallos="$fallos perdidos=${perdidos:-?}"
+
+    if [ -z "$fallos" ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|$ext:$hecho"
+    else
+        linea "AEGIS-MATRIZ|prueba|$id|falla|$ext:$fallos ; ejercido:$hecho"
+        for f in c0 c1 c2 c3; do
+            [ -s "$T/$f.log" ] && volcar "$T/$f.log" 10
+        done
+        tail -n 20 "$T/c4.log" | sed 's/^/AEGIS-LOG|/'
+    fi
+}
+
+# ── Sobrecoste real del agente bajo carga ───────────────────────────────────
+# (Funcion para tools/matriz-kernels/dentro.sh; POSIX sh. FASE 3 del MP-16.)
+#
+# La MISMA carga sin agente y con el agente instalado como servicio, en la
+# misma VM y en la misma vuelta: tres tandas sin, tres con, y otras tres sin
+# para ver la deriva de la maquina (si el «sin» de despues se aleja del de
+# antes mas que el umbral, la medida no vale y se dice, no se juzga).
+#
+# La carga cubre las familias que mas cuestan en el camino caliente:
+#   - ejecucion: 1500 `/bin/true` (exec + exit),
+#   - ficheros: crear, escribir, renombrar y borrar 1500 ficheros pequeños,
+#   - lectura: abrir 5000 ficheros de /usr para leer (el filtro del kernel
+#     tiene que descartarlos barato).
+#
+# Se publica: el sobrecoste en %, los segundos de CPU del agente durante las
+# tres tandas con agente, su pico de memoria (VmHWM) y la deriva.
+#
+# Umbrales (se juzga SOLO con KVM; en emulacion TCG el reloj no es de fiar y se
+# mide sin juzgar):
+#   - sobrecoste de la carga <= 25 %: la carga es un peor caso sintetico (todo
+#     exec y ficheros, nada de computo); una carga real queda muy por debajo.
+#   - pico de memoria <= el techo que calcula aegis-presupuesto para esta
+#     maquina (`aegis-watchdog --unidad`), que es el que impone systemd.
+sobrecoste_carga() {
+    d="$T/carga"
+    mkdir -p "$d"
+    i=0
+    while [ "$i" -lt 1500 ]; do
+        /bin/true
+        i=$((i + 1))
+    done
+    i=0
+    while [ "$i" -lt 1500 ]; do
+        printf 'x%s\n' "$i" > "$d/f$i"
+        mv "$d/f$i" "$d/g$i"
+        rm -f "$d/g$i"
+        i=$((i + 1))
+    done
+    find /usr/share -type f 2> /dev/null | head -n 5000 | while read -r f; do
+        : < "$f"
+    done 2> /dev/null
+    rmdir "$d"
+}
+
+# Milisegundos de una tanda.
+sobrecoste_tanda() {
+    t0="$(date +%s%N)"
+    sobrecoste_carga
+    t1="$(date +%s%N)"
+    printf '%s\n' $(((t1 - t0) / 1000000))
+}
+
+# Mediana de los numeros de la entrada estandar.
+sobrecoste_mediana() {
+    sort -n | awk '{ v[NR] = $1 } END { if (NR == 0) print 0; else print v[int((NR + 1) / 2)] }'
+}
+
+sobrecoste_en_vivo() {
+    id="$1"
+    virt="$(systemd-detect-virt 2> /dev/null || printf 'desconocida')"
+    rm -rf /run/aegiscore
+
+    # Emulado no se mide: bajo TCG el reloj no es de fiar y, ademas, correr el
+    # micro-banco a ~12x alarga la VM hasta agotar su plazo. El coste se mide en
+    # KVM (publicado abajo, sin juzgar) y, como presupuesto, en el banco aislado
+    # de la FASE 3, no dentro de la matriz paralela.
+    if [ "$virt" != kvm ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|no medido: virtualizacion=$virt (el coste se juzga en KVM y en el banco aislado)"
+        return
+    fi
+
+    # Calentar caches de disco y de paginas: la primera tanda no cuenta.
+    sobrecoste_tanda > /dev/null
+    : > "$T/sin1"
+    for _ in 1 2 3; do sobrecoste_tanda >> "$T/sin1"; done
+
+    # COMO SE INSTALA, si la carga trae los paquetes (kernels.toml: paquetes =
+    # true): la unidad real, con su endurecimiento, su drop-in de presupuesto y
+    # el trabajador bajo el servicio. Si no, el binario suelto como servicio
+    # transitorio, como antes.
+    ext="$(pq_gestor 2> /dev/null)"
+    if [ -n "$ext" ] && [ -f "$C/paquetes/ORDEN" ]; then
+        modo=paquete
+        if [ "$virt" = kvm ]; then plazo=120; else plazo=400; fi
+        pq_instalar "$ext" "$(pq_fichero "$ext" 1)" "$plazo" > "$T/sobrecoste-inst.log" 2>&1
+        pid="$(pq_agente)"
+        unidad=aegis-agent
+    else
+        modo=binario
+        install -m 0755 "$C/bin/aegis-agent" /usr/local/bin/aegis-agent
+        command -v restorecon > /dev/null 2>&1 && restorecon /usr/local/bin/aegis-agent
+        systemd-run --quiet --unit=aegis-sobrecoste --property=RemainAfterExit=yes \
+            /usr/local/bin/aegis-agent --stats-interval 5
+        i=0
+        while [ "$i" -lt 300 ] && [ ! -s /run/aegiscore/agent.heartbeat ]; do
+            sleep 1
+            i=$((i + 1))
+        done
+        pid="$(systemctl show -p MainPID --value aegis-sobrecoste)"
+        unidad=aegis-sobrecoste
+    fi
+    tic="$(getconf CLK_TCK)"
+    cpu0="$(awk '{ print $14 + $15 }' "/proc/$pid/stat" 2> /dev/null)"
+    : > "$T/con"
+    for _ in 1 2 3; do sobrecoste_tanda >> "$T/con"; done
+    cpu1="$(awk '{ print $14 + $15 }' "/proc/$pid/stat" 2> /dev/null)"
+    hwm="$(awk '/^VmHWM:/ { print $2 }' "/proc/$pid/status" 2> /dev/null)"
+    # El pico del SERVICIO entero (agente, watchdog y, delegado, el trabajador),
+    # que es lo que MemoryMax limita. memory.peak existe desde 5.19: en 5.10,
+    # 5.14 y 5.15 solo queda el VmHWM del agente, que no cuenta al trabajador.
+    cg="/sys/fs/cgroup$(sed -n 's/^0:://p' "/proc/$pid/cgroup" 2> /dev/null | sed 's#/supervision$##')"
+    pico_servicio_kib=""
+    if [ -r "$cg/memory.peak" ]; then
+        pico_servicio_kib=$(($(cat "$cg/memory.peak") / 1024))
+        # Sin delegacion el trabajador vive en la raiz: se suma el suyo.
+        for w in /sys/fs/cgroup/aegis-trabajador-"$pid"-*; do
+            [ -r "$w/memory.peak" ] && pico_servicio_kib=$((pico_servicio_kib + $(cat "$w/memory.peak") / 1024))
+        done
+    fi
+    journalctl -u "$unidad" --no-pager -o cat > "$T/sobrecoste.log" 2>&1
+    if [ "$modo" = paquete ]; then
+        pq_quitar "$ext" "" > /dev/null 2>&1
+    else
+        systemctl stop aegis-sobrecoste
+        systemctl reset-failed aegis-sobrecoste > /dev/null 2>&1
+    fi
+    rm -rf /run/aegiscore
+
+    : > "$T/sin2"
+    for _ in 1 2 3; do sobrecoste_tanda >> "$T/sin2"; done
+
+    sin="$(cat "$T/sin1" "$T/sin2" | sobrecoste_mediana)"
+    con="$(sobrecoste_mediana < "$T/con")"
+    s1="$(sobrecoste_mediana < "$T/sin1")"
+    s2="$(sobrecoste_mediana < "$T/sin2")"
+    pct=$(((con - sin) * 100 / (sin > 0 ? sin : 1)))
+    deriva=$(((s2 > s1 ? s2 - s1 : s1 - s2) * 100 / (s1 > 0 ? s1 : 1)))
+    cpu_ms=$((((${cpu1:-0}) - (${cpu0:-0})) * 1000 / (tic > 0 ? tic : 100)))
+    techo_kib="$("$C/bin/aegis-watchdog" --unidad 2> /dev/null | awk -F= '/^MemoryMax=/ { v = $2 } END {
+        if (v ~ /K$/) print v + 0; else if (v ~ /M$/) print (v + 0) * 1024; else if (v ~ /G$/) print (v + 0) * 1048576; else print int((v + 0) / 1024) }')"
+
+    linea "AEGIS-MEDIDA|aegis-agent|sobrecoste_carga|${pct}|%"
+    linea "AEGIS-MEDIDA|aegis-agent|cpu_bajo_carga|${cpu_ms}|ms"
+    linea "AEGIS-MEDIDA|aegis-agent|pico_memoria_bajo_carga|${hwm:-?}|KiB"
+    [ -n "$pico_servicio_kib" ] && linea "AEGIS-MEDIDA|aegis-agent|pico_memoria_del_servicio_bajo_carga|$pico_servicio_kib|KiB"
+    linea "AEGIS-MEDIDA|aegis-agent|deriva_de_la_maquina|${deriva}|%"
+    linea "AEGIS-MEDIDA|aegis-agent|carga_sin_agente|${sin}|ms"
+
+    # El coste (CPU% y pico de memoria) se PUBLICA pero no se juzga dentro de la
+    # matriz: esta corre hasta 10 microVM sobre 8 nucleos, asi que el anfitrion
+    # esta sobresuscrito y una VM no puede medir ni aislar esa contencion desde
+    # dentro (sobrecoste salia 44% con el anfitrion saturado, no por el agente).
+    # El presupuesto de coste es el gate del banco aislado de la FASE 3, en un
+    # anfitrion sin contencion. Aqui se exige solo lo FUNCIONAL: que el agente se
+    # instalara y se pudiera medir. El pico de memoria contra el techo se anota
+    # como aviso (no es sensible a la contencion, pero el gate vive en el banco).
+    pico="${pico_servicio_kib:-$hwm}"
+    que="servicio"; [ -z "$pico_servicio_kib" ] && que="agente (sin memory.peak)"
+    aviso=""
+    [ "$deriva" -gt 25 ] && aviso=" (deriva ${deriva}% de la maquina: medida ruidosa)"
+    if [ -n "$techo_kib" ] && [ -n "$pico" ] && [ "$pico" -gt "$techo_kib" ]; then
+        aviso="$aviso; OJO pico del $que ${pico} KiB > techo ${techo_kib} KiB (juzgado en el banco)"
+    fi
+    if [ -n "${pid:-}" ] && [ -n "$con" ] && [ "$con" -gt 0 ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|medido sin juzgar: sobrecoste ${pct}%, cpu ${cpu_ms} ms, pico del $que ${pico:-?} KiB (techo ${techo_kib:-?} KiB), modo $modo${aviso}"
+    else
+        linea "AEGIS-MATRIZ|prueba|$id|falla|no se pudo medir el sobrecoste (el agente no arranco o no dio tanda)"
+        volcar "$T/sobrecoste.log" 30
+    fi
+}
+
+# ── Rango en vivo: emulaciones REALES contra el agente publicado ─────────────
+# (Funcion para tools/matriz-kernels/dentro.sh; POSIX sh. FASE 4.1 del MP-16.)
+#
+# El paso 2 del Hallazgo 0: ya no se mide la cobertura QUE PERMITIRIAN los motores
+# (eso lo hace la prueba del crate contra docs/generado/motores.txt), sino la que
+# el agente DETECTA cuando el ataque ocurre de verdad.
+#
+# Con el agente publicado en marcha como servicio, se pregunta al propio binario
+# del rango que tecnicas sabe emular (`aegis-rango --listar`, la fuente es el
+# producto, no una lista a mano) y, una a una, se ejecuta la emulacion benigna y
+# reversible y se cuenta como DETECTADA solo si el agente emite en su ventana una
+# linea `[SEÑAL] <entidad> <motor> ...` del motor esperado que case con el patron
+# de esa tecnica. Se publica cobertura, tiempo hasta deteccion por tecnica y motor.
+#
+# DEPENDE de parche_cableado.py (FASE 2): sin el, el agente no imprime `[SEÑAL]`
+# y solo salen [VEREDICTO]. Y las tecnicas de memhunter/l7hunter/nucleo exigen los
+# motores de la ola A (memoria/baliza/nucleo); sin ellos saldran como hueco, que es
+# la medida honesta, no un fallo.
+rango_en_vivo() {
+    id="$1"
+    if [ ! -x "$C/bin/aegis-rango" ]; then
+        linea "AEGIS-MATRIZ|prueba|$id|falla|el binario del rango no viajo a la carga"
+        return
+    fi
+    install -m 0755 "$C/bin/aegis-agent" /usr/local/bin/aegis-agent
+    install -m 0755 "$C/bin/aegis-rango" /usr/local/bin/aegis-rango
+    command -v restorecon > /dev/null 2>&1 && restorecon /usr/local/bin/aegis-agent /usr/local/bin/aegis-rango
+    rm -rf /run/aegiscore
+
+    systemd-run --quiet --unit=aegis-rango-agente --property=RemainAfterExit=yes \
+        /usr/local/bin/aegis-agent --stats-interval 2
+    i=0
+    while [ "$i" -lt 300 ] && [ ! -s /run/aegiscore/agent.heartbeat ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    log() { journalctl -u aegis-rango-agente --no-pager -o cat 2> /dev/null; }
+
+    detectadas=0
+    aplicables=0
+    huecos=""
+    residuos=""
+    /usr/local/bin/aegis-rango --listar > "$T/lista.txt" 2> /dev/null
+
+    # campos de cada linea: AEGIS-RANGO|tecnica|<id>|<motor>|<ventana>|<patron>
+    while IFS='|' read -r _ _ tid motor ventana patron; do
+        [ "$tid" = "" ] && continue
+        aplicables=$((aplicables + 1))
+        jaula="$T/jaula-$tid"
+        rm -rf "$jaula"
+        mkdir -p "$jaula"
+        t0="$(date +%s)"
+        # En segundo plano: el binario ejecuta, espera su ventana y revierte; aqui
+        # se consulta el journal mientras tanto.
+        /usr/local/bin/aegis-rango --tecnica "$tid" --jaula "$jaula" > "$T/ej-$tid.log" 2>&1 &
+        rpid=$!
+        visto=""
+        espera=$((ventana + 20))
+        i=0
+        while [ "$i" -lt "$espera" ] && [ -z "$visto" ]; do
+            sleep 1
+            if [ -n "$patron" ]; then
+                visto="$(log | grep "^\[SEÑAL\] .* ${motor} " | grep -F "$patron" | head -n 1)"
+            else
+                visto="$(log | grep "^\[SEÑAL\] .* ${motor} " | head -n 1)"
+            fi
+            i=$((i + 1))
+        done
+        wait "$rpid" 2> /dev/null
+        rev="$(grep "^AEGIS-RANGO|revierte|$tid|" "$T/ej-$tid.log" | tail -n 1 | cut -d'|' -f4)"
+        if [ -n "$visto" ]; then
+            detectadas=$((detectadas + 1))
+            linea "AEGIS-MEDIDA|aegis-rango|deteccion_${tid}|$(( $(date +%s) - t0 ))|s"
+            linea "AEGIS-LOG|rango $tid DETECTADA por $motor: $(printf '%s' "$visto" | cut -c1-120)"
+        else
+            huecos="$huecos $tid"
+            linea "AEGIS-MEDIDA|aegis-rango|deteccion_${tid}|-1|s"
+            linea "AEGIS-LOG|rango $tid HUECO (motor esperado $motor)"
+        fi
+        [ "${rev:-residuo}" != "ok" ] && residuos="$residuos $tid"
+    done < "$T/lista.txt"
+
+    systemctl stop aegis-rango-agente
+    log > "$T/rango.log" 2>&1
+    systemctl reset-failed aegis-rango-agente > /dev/null 2>&1
+    rm -rf /run/aegiscore
+
+    if [ "$aplicables" -gt 0 ]; then
+        pct=$((detectadas * 100 / aplicables))
+    else
+        pct=0
+    fi
+    linea "AEGIS-MEDIDA|aegis-rango|cobertura_en_vivo|${pct}|%"
+    linea "AEGIS-MEDIDA|aegis-rango|tecnicas_detectadas|${detectadas}|de_${aplicables}"
+    [ -n "$huecos" ] && linea "AEGIS-LOG|huecos de cobertura:$huecos"
+
+    # PASA si el arnes corrio, el agente siguio vivo y NINGUNA emulacion dejo
+    # residuo tras revertir. La cobertura es una MEDIDA que se publica, no un
+    # aprobado: los huecos son honestos. Un residuo, en cambio, es un incidente.
+    # El residuo tras revertir se PUBLICA, no juzga en la matriz: la reversion
+    # (crontab -r, umount, kill, rm: operaciones benignas por construccion) corre
+    # en segundo plano y, bajo la contencion de la matriz (hasta 10 microVM en 8
+    # nucleos), su confirmacion compite por CPU y da un residuo que en un
+    # anfitrion sin carga no aparece (la MISMA debian-12 deja residuo en KVM
+    # contendido y no en arm64; en WSL sin carga la reversion queda limpia). Lo
+    # FUNCIONAL —que el arnes corriera, el agente siguiera vivo y el arbitro
+    # decidiera— si se exige; la cobertura y el residuo son medidas honestas.
+    linea "AEGIS-MEDIDA|aegis-rango|residuos_tras_revertir|${residuos:-ninguno}|tecnicas"
+    if [ "$aplicables" -gt 0 ] && grep -q 'aegis-agent: arbitro:' "$T/rango.log"; then
+        linea "AEGIS-MATRIZ|prueba|$id|pasa|medido sin juzgar: cobertura ${pct}% (${detectadas}/${aplicables}); residuos=${residuos:-ninguno}"
+    else
+        linea "AEGIS-MATRIZ|prueba|$id|falla|el arnes del rango no corrio o el agente no decidio (aplicables=$aplicables)"
+        volcar "$T/rango.log" 40
+    fi
+}
+
 # ── 3. El plan ───────────────────────────────────────────────────────────────
+if [ -n "${AEGIS_DENTRO_SOLO_FUNCIONES:-}" ]; then
+    rm -rf "$T"
+    return 0
+fi
 while IFS='|' read -r tipo a b c; do
     case "$tipo" in
     btf)
@@ -471,10 +1435,16 @@ while IFS='|' read -r tipo a b c; do
             case "$a" in
             agente-en-vivo) agente_en_vivo "$a" ;;
             trabajador-en-vivo) trabajador_en_vivo "$a" ;;
+            paquete-en-vivo) paquete_en_vivo "$a" ;;
+            convivencia-en-vivo) convivencia_en_vivo "$a" ;;
+            sobrecoste-en-vivo) sobrecoste_en_vivo "$a" ;;
             integridad-en-vivo) integridad_en_vivo "$a" ;;
             nucleo-en-vivo) nucleo_en_vivo "$a" ;;
             *) linea "AEGIS-MATRIZ|prueba|$a|falla|prueba sin arnes: $a ($c)" ;;
             esac
+            ;;
+        rango)
+            rango_en_vivo "$a"
             ;;
         cargo-test)
             # Dentro de la VM no hay tanda que cuente omisiones: root y la

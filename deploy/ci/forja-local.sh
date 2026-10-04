@@ -30,7 +30,7 @@ fi
 echo "==> forgejo $VERSION (verificado por suma)"
 # `forgejo --version` dice «Forgejo version 16.0.5+gitea-...»: se busca la
 # version exacta seguida de «+» o de fin, no el tercer campo tal cual.
-if ! forgejo --version 2>/dev/null | grep -qE "version $VERSION(\+| |$)"; then
+if ! forgejo --version 2>/dev/null | grep >/dev/null -E "version $VERSION(\+| |$)"; then
     tmp="$(mktemp -d)"
     base="https://codeberg.org/forgejo/forgejo/releases/download/v$VERSION"
     bin="forgejo-$VERSION-linux-amd64"
@@ -103,7 +103,7 @@ fi
 
 echo "==> base de datos"
 # La salida se guarda y se ensena si falla: callarla escondia justo el error.
-if ! forgejo_cli migrate > /tmp/forgejo-migrate.log 2>&1 || grep -q "\[F\]" /tmp/forgejo-migrate.log; then
+if ! forgejo_cli migrate > /tmp/forgejo-migrate.log 2>&1 || grep >/dev/null "\[F\]" /tmp/forgejo-migrate.log; then
     cat /tmp/forgejo-migrate.log >&2
     exit 1
 fi

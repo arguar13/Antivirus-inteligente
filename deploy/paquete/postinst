@@ -1,0 +1,159 @@
+#!/bin/sh
+# Despues de instalar o actualizar: uid del trabajador, presupuesto del host,
+# servicio en marcha y COMPROBACION de que el agente late. Si una actualizacion
+# no late, se vuelve a los binarios anteriores (guardados por preinst), se deja
+# constancia y se falla, para que el gestor de paquetes lo marque.
+#
+# Sirve a dpkg (`configure <vieja>` | `abort-*`) y a rpm (`%post`: 1 = instalar,
+# >= 2 = actualizar). @VERSION@ lo sustituye tools/empaquetar.sh.
+#
+# Lo que la vuelta atras es y lo que no, sin adornos: vuelve atras LOS BINARIOS
+# y el host sigue protegido por la version anterior en segundos. La base de
+# datos del gestor queda en la version nueva, marcada como fallida (dpkg:
+# half-configured; rpm: el %post fallo). Se reconcilia instalando la anterior
+# (`dpkg -i` o `rpm -U --oldpackage`) o una nueva; mientras tanto, reconfigurar
+# ESTA version se niega (marca `revertido`) en vez de fingir que funciona.
+set -u
+
+VERSION_PAQUETE="@VERSION@"
+BIN=/usr/libexec/aegis
+ESTADO=/var/lib/aegiscore
+ANTERIOR="$ESTADO/anterior"
+REVERTIDO="$ESTADO/revertido"
+LATIDO=/run/aegiscore/agent.heartbeat
+DROPIN_DIR=/etc/systemd/system/aegis-agent.service.d
+UID_TRABAJADOR=64701
+PLAZO_SALUD="${AEGIS_PLAZO_SALUD:-120}"
+
+case "${1:-}" in
+    configure | [1-9]*) ;;
+    *) exit 0 ;;
+esac
+
+aviso() { echo "aegis-agent: $*" >&2; }
+
+# Una version que ya se revirtio no se da por buena por reintentar su
+# configuracion (`dpkg --configure -a` lo hace solo): late con los binarios
+# ANTERIORES y diria que esta instalada la nueva.
+if [ -f "$REVERTIDO" ] && [ "$(cat "$REVERTIDO" 2> /dev/null)" = "$VERSION_PAQUETE" ]; then
+    aviso "la version $VERSION_PAQUETE ya no latio y se revirtio; instala la anterior o una nueva"
+    exit 1
+fi
+
+# El uid propio del trabajador confinado queda RESERVADO con nombre, para que
+# ninguna otra cuenta lo reciba despues. El trabajador no crea ficheros
+# (RLIMIT_FSIZE=0, Landlock), asi que la cuenta no posee nada en disco.
+reservar_uid() {
+    getent passwd aegis-trabajador > /dev/null 2>&1 && return 0
+    if getent passwd "$UID_TRABAJADOR" > /dev/null 2>&1; then
+        aviso "el uid $UID_TRABAJADOR ya es de «$(getent passwd "$UID_TRABAJADOR" | cut -d: -f1)»: el trabajador confinado compartiria uid con esa cuenta (declarado en la degradacion)"
+        return 0
+    fi
+    command -v useradd > /dev/null 2>&1 || { aviso "sin useradd: el uid $UID_TRABAJADOR queda sin nombre"; return 0; }
+    shell=/bin/false
+    for s in /usr/sbin/nologin /sbin/nologin; do
+        [ -x "$s" ] && { shell="$s"; break; }
+    done
+    # El comentario (GECOS) no puede llevar «:», que separa los campos de
+    # /etc/passwd: con «AegisCore: ...» useradd falla en Debian y en Ubuntu 26.04
+    # sale con 0 SIN crear la cuenta. Por eso, ademas, se comprueba la cuenta
+    # creada y no solo el codigo de salida, y el aviso lleva el error real.
+    error="$(useradd --system --uid "$UID_TRABAJADOR" --user-group --no-create-home \
+        --home-dir / --shell "$shell" --comment "AegisCore - trabajador confinado" \
+        aegis-trabajador 2>&1)"
+    if [ "$(getent passwd aegis-trabajador | cut -d: -f3)" = "$UID_TRABAJADOR" ]; then
+        mkdir -p "$ESTADO"
+        : > "$ESTADO/usuario-creado"
+    else
+        aviso "no se pudo reservar el uid $UID_TRABAJADOR: ${error:-useradd no creo la cuenta}"
+    fi
+}
+
+# El techo de memoria de ESTE host, calculado por aegis-presupuesto (el mismo
+# codigo que usa el watchdog). Nunca un numero escrito en la plantilla.
+presupuesto() {
+    mkdir -p "$DROPIN_DIR"
+    if "$BIN/aegis-watchdog" --unidad > "$DROPIN_DIR/.10-presupuesto.conf" 2> /dev/null \
+        && grep -q '^MemoryMax=' "$DROPIN_DIR/.10-presupuesto.conf"; then
+        chmod 0644 "$DROPIN_DIR/.10-presupuesto.conf"
+        mv -f "$DROPIN_DIR/.10-presupuesto.conf" "$DROPIN_DIR/10-presupuesto.conf"
+    else
+        rm -f "$DROPIN_DIR/.10-presupuesto.conf"
+        aviso "no se pudo calcular el presupuesto de memoria; el servicio arranca sin techo"
+    fi
+}
+
+# El agente late desde su bucle: un latido escrito DESPUES de arrancar es la
+# prueba de que engancho sus sondas y consume. /run/aegiscore lo vacia systemd
+# al parar, asi que un latido que existe tras el reinicio es de este arranque;
+# ademas se exige que su fecha no sea anterior al arranque.
+late_desde() {
+    desde="$1"
+    i=0
+    while [ "$i" -lt "$PLAZO_SALUD" ]; do
+        if [ -f "$LATIDO" ] && [ "$(stat -c %Y "$LATIDO" 2> /dev/null || echo 0)" -ge "$desde" ]; then
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+arrancar() {
+    desde="$(date +%s)"
+    systemctl restart aegis-agent.service > /dev/null 2>&1 || return 1
+    late_desde "$desde"
+}
+
+# Cambio atomico de un binario: copia al lado y `mv`, que en el mismo sistema de
+# ficheros es un rename. Nunca hay un instante con el binario a medias. La copia
+# nace en /usr/libexec/aegis y hereda su etiqueta SELinux (bin_t); restorecon
+# lo confirma donde existe.
+restaurar() {
+    for b in aegis-agent aegis-watchdog; do
+        [ -f "$ANTERIOR/$b" ] || return 1
+    done
+    # VERSION tambien: lo que dice el disco tiene que ser lo que corre.
+    for b in aegis-agent aegis-watchdog VERSION HUELLA; do
+        [ -f "$ANTERIOR/$b" ] || continue
+        cp -p "$ANTERIOR/$b" "$BIN/.$b.restaurando" || return 1
+        mv -f "$BIN/.$b.restaurando" "$BIN/$b" || return 1
+    done
+    # Una version anterior que no traia HUELLA no hereda la de la rota.
+    [ -f "$ANTERIOR/HUELLA" ] || rm -f "$BIN/HUELLA"
+    command -v restorecon > /dev/null 2>&1 && restorecon -R "$BIN" > /dev/null 2>&1
+    return 0
+}
+
+reservar_uid
+presupuesto
+if ! command -v systemctl > /dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+    aviso "sin systemd en marcha: el servicio no se arranca (contenedor o chroot)"
+    exit 0
+fi
+systemctl daemon-reload > /dev/null 2>&1
+systemctl enable aegis-agent.service > /dev/null 2>&1
+
+if arrancar; then
+    rm -rf "$ANTERIOR" "$REVERTIDO"
+    exit 0
+fi
+
+if [ -f "$ANTERIOR/aegis-agent" ]; then
+    aviso "la version $VERSION_PAQUETE no late en ${PLAZO_SALUD} s: se restaura la anterior ($(cat "$ANTERIOR/VERSION" 2> /dev/null || echo desconocida))"
+    # Parada AUTORIZADA: la marca impide que el watchdog relance mientras para.
+    [ -d /run/aegiscore ] && : > /run/aegiscore/agent.shutdown
+    systemctl stop aegis-agent.service > /dev/null 2>&1
+    if restaurar && arrancar; then
+        printf '%s\n' "$VERSION_PAQUETE" > "$REVERTIDO"
+        aviso "restaurada: el agente anterior late. El paquete queda marcado como fallido."
+    else
+        aviso "TAMPOCO la version anterior late: revisa journalctl -u aegis-agent"
+    fi
+    # La copia se conserva: si el administrador reintenta, sigue siendo la buena.
+    exit 1
+fi
+
+aviso "el agente no late en ${PLAZO_SALUD} s tras instalar: revisa journalctl -u aegis-agent"
+exit 1

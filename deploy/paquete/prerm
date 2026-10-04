@@ -1,0 +1,47 @@
+#!/bin/sh
+# Antes de quitar el paquete: desinstalacion AUTORIZADA y parada ordenada.
+#
+# Si la consola dejo al instalar el resumen de un token de desinstalacion
+# (/etc/aegiscore/desinstalacion.sha256), quitar el paquete exige ese token en
+# AEGIS_TOKEN_DESINSTALAR (dpkg, apt, rpm y dnf pasan el entorno a este
+# script). Lo que esto protege y lo que no, sin adornos: frena la
+# desinstalacion por un script, un operador despistado o un malware que llama
+# al gestor de paquetes; NO frena a root, que puede borrar el resumen, parar el
+# servicio o quitar los ficheros a mano. Contra root lo que queda es que el
+# latido desaparece y el plano de control lo ve (modelo de amenazas, AM-1.2).
+# El resumen es SHA-256 sin sal: el token tiene que ser aleatorio y largo
+# (lo emite la consola), nunca una palabra.
+#
+# Si se rechaza: dpkg llama a `postinst abort-remove` y el paquete sigue
+# instalado; rpm aborta el borrado. En los dos, el agente NO se ha parado.
+#
+# En una actualizacion no se para nada: postinst reinicia con la version nueva.
+#
+# Sirve a dpkg (`remove` | `upgrade` | `deconfigure` | `failed-upgrade`) y a
+# rpm (`%preun`: 0 = quitar, >= 1 = actualizar).
+set -u
+
+case "${1:-}" in
+    remove | 0) ;;
+    *) exit 0 ;;
+esac
+
+RESUMEN=/etc/aegiscore/desinstalacion.sha256
+if [ -f "$RESUMEN" ]; then
+    esperado="$(tr -d '[:space:]' < "$RESUMEN")"
+    dado="$(printf '%s' "${AEGIS_TOKEN_DESINSTALAR:-}" | sha256sum | cut -d' ' -f1)"
+    if [ -z "${AEGIS_TOKEN_DESINSTALAR:-}" ] || [ -z "$esperado" ] || [ "$dado" != "$esperado" ]; then
+        echo "aegis-agent: desinstalacion NO autorizada: hace falta el token que emite la consola en AEGIS_TOKEN_DESINSTALAR" >&2
+        exit 1
+    fi
+fi
+
+# Parada AUTORIZADA: la marca impide que el watchdog vuelva a lanzar al agente
+# mientras systemd lo para.
+if [ -d /run/aegiscore ]; then
+    : > /run/aegiscore/agent.shutdown
+fi
+if command -v systemctl > /dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl disable --now aegis-agent.service > /dev/null 2>&1
+fi
+exit 0

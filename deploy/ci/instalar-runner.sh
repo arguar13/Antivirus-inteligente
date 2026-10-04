@@ -16,10 +16,13 @@
 set -euo pipefail
 
 VERSION_RUNNER="13.2.0"
-VERSION_RUST="1.94.0"
 DIR_RUNNER="/var/lib/forgejo-runner"
 CACHE="/var/cache/aegis-ci"
 RAIZ="$(cd "$(dirname "$0")/../.." && pwd)"
+# La version de Rust no se escribe aqui: es la de rust-toolchain.toml, la unica
+# del repositorio (y tools/toolchain/fijado.toml fija sus hashes).
+VERSION_RUST="$(awk -F'"' '/^channel[[:space:]]*=/{print $2; exit}' "$RAIZ/rust-toolchain.toml")"
+[ -n "$VERSION_RUST" ] || { echo "rust-toolchain.toml no declara channel" >&2; exit 1; }
 
 VERDE=$'\033[32m'; ROJO=$'\033[31m'; GRIS=$'\033[90m'; FIN=$'\033[0m'
 ok()    { printf '    %sOK%s    %s\n' "$VERDE" "$FIN" "$1"; }
@@ -34,6 +37,8 @@ PAQUETES=(
     # matriz de kernels
     qemu-system-x86 qemu-system-arm qemu-utils qemu-efi-aarch64 ovmf
     cloud-image-utils e2fsprogs
+    # paquetes del agente (tools/empaquetar.sh): dpkg-deb viene con dpkg
+    rpm
     # pruebas de integracion del plano de control
     postgresql redis-server
     # testigos y material de las pruebas del agente: make ci no admite que se
@@ -49,7 +54,7 @@ comprobar() {
     if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then ok "KVM"; else falta "KVM (/dev/kvm): la matriz de kernels no puede arrancar"; fi
     if [ -n "${HOME:-}" ]; then ok "HOME"; else falta "HOME sin definir (la unidad del runner necesita User=root)"; fi
     for b in clang qemu-system-x86_64 qemu-system-aarch64 cloud-localds mkfs.ext4 readelf nm \
-             psql redis-server node lld-link nft python3 java; do
+             psql redis-server node lld-link nft python3 java dpkg-deb rpmbuild; do
         if command -v "$b" >/dev/null 2>&1; then ok "$b"; else falta "$b"; fi
     done
     for b in cargo rustup cargo-deny cargo-audit cargo-vet cargo-fuzz; do
@@ -57,10 +62,10 @@ comprobar() {
     done
     if command -v rustup >/dev/null 2>&1; then
         for t in x86_64-unknown-linux-musl aarch64-unknown-linux-gnu; do
-            if rustup target list --installed 2>/dev/null | grep -qx "$t"; then ok "objetivo $t"; else falta "objetivo de Rust $t"; fi
+            if rustup target list --installed 2>/dev/null | grep >/dev/null -x "$t"; then ok "objetivo $t"; else falta "objetivo de Rust $t"; fi
         done
         nightly="$(tr -d '[:space:]' < "$RAIZ/tools/toolchain/nightly-fuzz.txt")"
-        if rustup toolchain list 2>/dev/null | grep -q "^$nightly"; then ok "toolchain de fuzzing $nightly"; else falta "toolchain de fuzzing $nightly"; fi
+        if rustup toolchain list 2>/dev/null | grep >/dev/null "^$nightly"; then ok "toolchain de fuzzing $nightly"; else falta "toolchain de fuzzing $nightly"; fi
     fi
     if [ -x /opt/aegis/musl-sysroot/bin/aegis-musl-gcc ]; then ok "sysroot musl"; else falta "sysroot musl (tools/toolchain/preparar_musl.sh)"; fi
     if [ -s /opt/aegis-btf/vmlinux-construccion ]; then ok "BTF de construccion"; else falta "BTF de construccion (tools/toolchain/traer_btf_construccion.sh)"; fi

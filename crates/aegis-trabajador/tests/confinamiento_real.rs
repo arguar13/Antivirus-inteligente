@@ -34,6 +34,7 @@ fn config() -> Option<ConfigTrabajador> {
     let mut c = ConfigTrabajador::este_binario().expect("ruta del ejecutable");
     c.programa = PathBuf::from(env!("CARGO_BIN_EXE_aegis-trabajador-prueba"));
     c.argumentos = Vec::new();
+    c.nombre = None;
     c.memoria_max = 96 * 1024 * 1024;
     c.max_muertes = 50;
     Some(c)

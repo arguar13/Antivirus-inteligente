@@ -1,0 +1,61 @@
+#!/bin/sh
+# Despues de quitar el paquete: lo que el paquete no posee pero creo al
+# instalar o al funcionar, para que no quede NADA que actue sobre el host:
+# drop-in, estado de systemd, /run, cgroups y el uid reservado.
+#
+# Sirve a dpkg (`remove` | `purge` | `upgrade` | `abort-*` | `disappear`) y a
+# rpm (`%postun`: 0 = quitar, >= 1 = actualizar).
+#
+# Los DATOS y la CONFIGURACION: la cuarentena y el estado de /var/lib/aegiscore,
+# y /etc/aegiscore (el enlace con el plano de control, plano-control.toml, su
+# identidad y su PKI, y el resumen del token de desinstalacion). dpkg los borra
+# con `purge` y los deja con `remove`, como manda Debian. rpm no tiene purga:
+# los deja, salvo con AEGIS_PURGAR=1 en el entorno. La cuarentena contiene
+# muestras que pueden ser evidencia, y la identidad del agente es la que el
+# plano de control conoce: borrarlas es una decision, no un efecto secundario.
+#
+# Un solo directorio de configuracion para el producto: /etc/aegiscore, el que
+# lee el agente (crates/aegis-agent/src/plano.rs). La purga no puede dejar ahi
+# una identidad con la que un host retirado seguiria hablando con la flota.
+set -u
+
+case "${1:-}" in
+    remove | purge | 0) ;;
+    *) exit 0 ;;
+esac
+
+ESTADO=/var/lib/aegiscore
+
+rm -rf /etc/systemd/system/aegis-agent.service.d
+if command -v systemctl > /dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    systemctl daemon-reload > /dev/null 2>&1
+    # Que la unidad no quede en la memoria de systemd como «fallida».
+    systemctl reset-failed aegis-agent.service > /dev/null 2>&1
+fi
+# /run: systemd lo borra al parar (RuntimeDirectory); esto cubre un agente
+# parado a mano o muerto a la fuerza.
+rm -rf /run/aegiscore
+# Los cgroups de trabajadores que pudieran quedar en la raiz (agente sin la
+# delegacion, o muerto a la fuerza). Solo se borran los vacios: rmdir de un
+# cgroup con procesos falla, no se lleva nada vivo por delante.
+for d in /sys/fs/cgroup/aegis-trabajador-*; do
+    [ -d "$d" ] && rmdir "$d" 2> /dev/null
+done
+# La copia para la vuelta atras y la marca de version revertida.
+rm -rf "$ESTADO/anterior" "$ESTADO/anterior.nueva" "$ESTADO/revertido"
+# El uid reservado, solo si lo creo este paquete.
+if [ -f "$ESTADO/usuario-creado" ]; then
+    if command -v userdel > /dev/null 2>&1 && userdel aegis-trabajador > /dev/null 2>&1; then
+        getent group aegis-trabajador > /dev/null 2>&1 && groupdel aegis-trabajador > /dev/null 2>&1
+        rm -f "$ESTADO/usuario-creado"
+    else
+        echo "aegis-agent: no se pudo borrar la cuenta aegis-trabajador" >&2
+    fi
+fi
+if [ "${1:-}" = purge ] || { [ "${1:-}" = 0 ] && [ "${AEGIS_PURGAR:-0}" = 1 ]; }; then
+    rm -rf /etc/aegiscore "$ESTADO"
+else
+    # Sin purga solo queda lo que tenga datos.
+    rmdir "$ESTADO/quarantine" "$ESTADO" 2> /dev/null
+fi
+exit 0

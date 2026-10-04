@@ -2,33 +2,38 @@
 # Valores por defecto del rol. Se sobreescriben desde el inventario o el
 # playbook; ninguno guarda un secreto.
 
-# Origen del paquete del agente. Un repositorio interno, no Internet: el
-# artefacto que se instala tiene que ser el que publico el pipeline, con su
+# Donde publica el pipeline los paquetes (tools/empaquetar.sh). Un repositorio
+# interno, no Internet: se instala el artefacto que paso las puertas, con su
 # suma SHA-256 verificada.
 aegis_agente_repositorio_url: "https://paquetes.interno.empresa.local/aegis"
-aegis_agente_version: "1.0.0"
 
-# Suma del binario. Verificarla es lo que convierte "descargar un fichero" en
-# "instalar el artefacto auditado".
+# Version COMPLETA del paquete, con su revision: 0.1.0-1 es
+# aegis-agent_0.1.0-1_amd64.deb y aegis-agent-0.1.0-1.x86_64.rpm.
+aegis_agente_version: "0.1.0-1"
+
+# Suma del paquete de ESTE formato y arquitectura (SHA256SUMS del pipeline).
 aegis_agente_sha256: ""
 
-# Plano de control al que se conecta la flota (salida `flota_endpoint` de Terraform).
-aegis_agente_servidor_flota: "aegis-flota.empresa.local:8443"
+# Cuanto espera el postinst a que el agente lata antes de volver a la version
+# anterior. En hosts lentos o muy cargados, mas.
+aegis_agente_plazo_salud: 120
 
-# Rutas de instalacion.
-aegis_agente_bin_dir: /usr/local/bin
-aegis_agente_etc_dir: /etc/aegis
-aegis_agente_var_dir: /var/lib/aegis
-aegis_agente_log_dir: /var/log/aegis
+# Resumen SHA-256 del token de desinstalacion que emite la consola (no el
+# token). Vacio: la desinstalacion no exige token.
+aegis_agente_token_desinstalacion_sha256: ""
 
-# Usuario de servicio sin shell ni directorio propio.
-aegis_agente_usuario: aegis
-aegis_agente_grupo: aegis
+# --- Plano de control (H-40) -----------------------------------------------
+# Servidor del plano de control (salida `flota_endpoint` de Terraform), como
+# `host:puerto` o `mtls://host:puerto`. Vacio: sin plano de control.
+aegis_agente_servidor_flota: ""
 
-# Ancla de confianza de la flota: el certificado PUBLICO de la CA del plano de
-# control. Solo el certificado; la clave privada jamas sale del servidor.
-aegis_agente_ca_cert: ""
+# La identidad de flota del agente, en PEM. Van en un fichero cifrado con
+# ansible-vault, NUNCA en el inventario en claro: la clave es la identidad del
+# equipo ante el plano de control.
+aegis_agente_flota_ca_pem: ""
+aegis_agente_flota_cert_pem: ""
+aegis_agente_flota_clave_pem: ""
 
-# Presupuesto de memoria del agente, coherente con el que vigila el pipeline.
-aegis_agente_memoria_max: 64M
-aegis_agente_cpu_max: "40%"
+# Reintento maximo (s) y plazo de red (s) del enlace.
+aegis_agente_flota_reintento_max_seg: 300
+aegis_agente_flota_plazo_red_seg: 10

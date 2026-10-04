@@ -1,20 +1,3 @@
 ---
-- name: Recargar systemd
-  ansible.builtin.systemd_service:
-    daemon_reload: true
-
-- name: Reiniciar el agente
-  ansible.builtin.systemd_service:
-    name: aegis-agent
-    state: restarted
-  # El reinicio espera a que el servicio quede activo; si no, la tarea de
-  # verificacion posterior comprobaria un servicio que aun esta arrancando.
-  register: aegis_agente_reinicio
-  until: aegis_agente_reinicio is succeeded
-  retries: 3
-  delay: 5
-
-- name: Reiniciar el supervisor
-  ansible.builtin.systemd_service:
-    name: aegis-watchdog
-    state: restarted
+# Sin manejadores: el paquete reinicia el servicio y comprueba que late.
+[]

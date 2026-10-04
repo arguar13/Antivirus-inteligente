@@ -6,7 +6,7 @@ Tres piezas, tres públicos distintos:
 |---|---|---|
 | [`terraform/`](terraform/) | el **plano de control** en la nube | Terraform sobre AWS |
 | [`ansible/`](ansible/) | el **agente** en la flota Linux | Ansible sobre SSH |
-| [`windows/`](windows/) | el **agente** en la flota Windows | MSI silencioso por directiva de grupo |
+| [`windows/`](windows/) | el agente en la flota Windows: **no es producto** ([Plataformas](../docs/matriz-capacidades.md#plataformas)) | MSI silencioso por directiva de grupo |
 
 Todo se valida con las herramientas reales antes de llegar a la rama principal:
 
@@ -59,9 +59,9 @@ en el plan de recuperación con la misma prioridad que la base de datos.
 cd ansible
 cp inventario.ejemplo.ini inventario.ini       # y adaptarlo
 ansible-playbook -i inventario.ini deploy_aegis.yml \
-  -e "aegis_agente_sha256=<suma> aegis_agente_version=1.0.0" \
+  -e "aegis_agente_sha256=<suma del paquete> aegis_agente_version=0.1.0-1" \
   -e "aegis_agente_servidor_flota=$(terraform -chdir=../terraform output -raw flota_endpoint)" \
-  -e "@secretos/ca.yml" \
+  -e "@secretos/flota.yml" --ask-vault-pass \
   --check --diff        # ensayo primero, sin tocar nada
 ```
 
@@ -79,11 +79,16 @@ Se comprueba **antes** que el sistema está soportado y que el kernel llega a
 4.18 (sin eso no hay eBPF utilizable), y se **avisa si convive otro EDR**: dos
 agentes compitiendo por los mismos enganches del kernel pueden bloquearse.
 
-### La clave privada del endpoint no viaja
+### La identidad del endpoint: hoy la clave sí viaja, cifrada
 
-El agente genera su clave **en la máquina** y envía solo una petición de firma.
-La clave no pasa por la red, ni por el inventario, ni por el nodo de control. Es
-la diferencia entre *aprovisionar identidades* y *repartir credenciales*.
+La matrícula por petición de firma (el agente genera su clave en la máquina y
+solo envía un CSR) **no existe todavía** (H-40, FASE 7 del MP-16). Hasta
+entonces la consola emite el certificado y la clave PKCS#8 de cada agente, y el
+rol los lleva cifrados con `ansible-vault` (`secretos/flota.yml`) a
+`/etc/aegiscore/pki/`, la clave en modo 0600, junto con el enlace
+`/etc/aegiscore/plano-control.toml`. Es un riesgo declarado: quien tenga el
+fichero del vault y su contraseña tiene la identidad de cada equipo. Ver
+[los runbooks](../docs/operacion/instalar.md).
 
 ### El servicio `systemd` está endurecido, pero no encerrado
 
@@ -92,19 +97,28 @@ puede: necesita ver el sistema entero y hablar con el kernel. Si se le encierra
 del todo deja de detectar — y un antivirus que no detecta es peor que ninguno,
 porque da confianza sin darla.
 
-Por eso el servicio concede capacidades **concretas** (`CAP_BPF`, `CAP_PERFMON`,
-`CAP_SYS_PTRACE`, `CAP_DAC_READ_SEARCH`…) sin ser root, y deja explícitamente
-desactivadas tres protecciones, cada una con su motivo escrito al lado:
-`ProtectKernelModules` (lee la lista de módulos para cazar rootkits),
-`ProtectProc` (mirar `/proc` de otros procesos es literalmente su trabajo) y
-`MemoryDenyWriteExecute` (el desempaquetador ejecuta código en su recinto).
+La unidad no la escribe el rol: es la del paquete
+([`paquete/aegis-agent.service`](paquete/aegis-agent.service)), una sola, cuyo
+proceso principal es el watchdog. Corre como root con un conjunto límite de
+capacidades **concreto** (`CAP_BPF`, `CAP_PERFMON`, `CAP_SYS_ADMIN` para el
+espacio de nombres de red del trabajador confinado, `CAP_SYS_PTRACE`,
+`CAP_DAC_READ_SEARCH`…), cada una con su motivo escrito al lado, y deja fuera a
+propósito `PrivateTmp`, `ProtectKernelModules`, `ProtectClock`,
+`PrivateDevices` y `ProtectProc`, también con su motivo. El techo de memoria lo
+calcula el paquete para cada host (`aegis-watchdog --unidad`).
 
-No están `CAP_SYS_ADMIN` ni `CAP_SYS_MODULE`: un agente comprometido no debe
-poder cargar un módulo de kernel.
+No están `CAP_SYS_MODULE` ni `CAP_NET_RAW`: un agente comprometido no debe
+poder cargar un módulo de kernel, y la matriz de kernels lo comprueba en el
+proceso vivo. El detalle, el ciclo de vida (actualizar, volver atrás,
+desinstalar con token) y la convivencia con otros agentes están en
+[el módulo 111](../docs/111-empaquetado-y-convivencia.md).
 
 ---
 
 ## 3. Flota Windows (MSI + GPO)
+
+> **Windows no es producto** ([Plataformas](../docs/matriz-capacidades.md#plataformas)):
+> lo que sigue instala un driver y un servicio que hoy no protegen ninguna máquina.
 
 ```powershell
 # Una sola vez, desde un controlador de dominio o una estación con RSAT:

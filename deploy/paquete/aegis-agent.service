@@ -1,0 +1,118 @@
+# AegisCore: el agente EDR, bajo su watchdog. Instalada por el paquete
+# (deploy/paquete/, tools/empaquetar.sh). FASE 3 del MP-16.
+#
+# UNA sola unidad, y su proceso principal es el WATCHDOG, que lanza al agente
+# como hijo y lo vigila por su latido. Antes habia dos unidades hermanas y
+# ninguna podia funcionar: el watchdog no sabe vigilar un servicio (lanza y
+# vigila procesos hijos), a la del agente se le pasaba una opcion que no existe
+# (`--config`), y se declaraba `Type=notify` sin que el agente notifique nada.
+# Asi: systemd reinicia al watchdog si muere, el watchdog reinicia al agente si
+# muere o deja de latir, y una parada autorizada deja la marca que impide al
+# watchdog reiniciarlo.
+#
+# El techo de memoria NO esta aqui: lo calcula aegis-presupuesto para ESTE host
+# al instalar (`aegis-watchdog --unidad`), en el drop-in
+# /etc/systemd/system/aegis-agent.service.d/10-presupuesto.conf.
+
+[Unit]
+Description=AegisCore: agente EDR bajo su watchdog
+Documentation=https://github.com/arguar13/Antivirus-inteligente
+# Sin network-online.target: el agente no necesita red para proteger, y esperar
+# a la red retrasa el arranque del EDR hasta dos minutos en hosts con DHCP
+# lento, justo la ventana en la que corre lo que se ejecuta al arrancar.
+After=local-fs.target
+# Un agente que no arranca se reintenta siempre: un EDR que se rinde a la
+# quinta es un EDR apagado.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/aegis/aegis-watchdog \
+    --program /usr/libexec/aegis/aegis-agent \
+    --arg --control-socket --arg /run/aegiscore/agent.sock \
+    --heartbeat /run/aegiscore/agent.heartbeat \
+    --marker /run/aegiscore/agent.shutdown \
+    --max-age-ms 15000
+# La parada de systemd llega a todos los procesos de la unidad (watchdog,
+# agente y, con la delegacion de abajo, el trabajador confinado): el agente la
+# atiende (desengancha sus sondas y publica su informe) y el watchdog termina.
+KillMode=control-group
+TimeoutStopSec=30
+Restart=always
+RestartSec=1
+
+# El subarbol de cgroup del servicio es del agente: el watchdog se baja a la
+# hoja `supervision` y el agente cuelga de aqui el cgroup de su trabajador
+# confinado, con su techo. Sin delegacion el trabajador se creaba en la RAIZ de
+# /sys/fs/cgroup, donde el que manda es systemd: podia quitarle el reparto de
+# `cpu` al reajustar la raiz, y la parada del servicio no lo alcanzaba.
+# La variable la leen el watchdog (bajar_a_la_hoja) y el cliente del trabajador
+# (crates/aegis-trabajador/src/cliente.rs, base_delegada): sin ella, o lanzado
+# fuera de esta unidad, el trabajador sigue colgando de la raiz.
+Delegate=yes
+Environment=AEGIS_CGROUP_DELEGADO=1
+
+# /run/aegiscore: latido, marca de parada y canal de control. Lo crea systemd,
+# con el dueño y los permisos correctos, y lo borra al parar.
+RuntimeDirectory=aegiscore
+RuntimeDirectoryMode=0750
+# /var/lib/aegiscore: la cuarentena (`aegisctl quarantine`), que el agente
+# abre en /var/lib/aegiscore/quarantine. Con ProtectSystem=strict es lo unico
+# de /var en lo que puede escribir.
+StateDirectory=aegiscore
+StateDirectoryMode=0700
+UMask=0077
+
+# Root, y el conjunto de capacidades JUSTO que usa hoy (solo auditoria):
+#   BPF, PERFMON              cargar las sondas y engancharlas (perf_event_open);
+#                             nucleo (kfuncs de tareas) las exige en CapEff
+#   SYS_ADMIN                 unshare(CLONE_NEWNET) del trabajador confinado;
+#                             BPF en kernels anteriores a 5.8
+#   SETUID, SETGID            el trabajador baja a su uid propio (64701)
+#   SYS_PTRACE                /proc/<pid>/mem y process_vm_readv de procesos
+#                             ajenos (motor de memoria, FASE 2 ola A)
+#   DAC_READ_SEARCH           leer los ejecutables que se analizan aunque no
+#                             sean legibles por root sin DAC (modo 0700 ajeno)
+#   NET_ADMIN                 `aegisctl isolate` (nft, por el canal de control);
+#                             XDP cuando el IPS entre en el agente
+#   SYS_RESOURCE              memoria bloqueada de los mapas BPF (kernel < 5.11)
+#   KILL                      matar al trabajador; la respuesta, cuando se
+#                             autorice imponer
+# NO estan, a proposito: NET_RAW (el agente no abre sockets crudos: hoy no
+# engancha XDP ni captura), DAC_OVERRIDE, FOWNER y CHOWN (mover a cuarentena
+# ficheros de otros usuarios: se añaden cuando la FASE 4 autorice imponer),
+# SYS_MODULE, SYS_TIME, SYS_BOOT, SYS_RAWIO, MKNOD, SETFCAP.
+User=root
+CapabilityBoundingSet=CAP_BPF CAP_PERFMON CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_NET_ADMIN CAP_SYS_RESOURCE CAP_KILL
+# Soltar privilegios (el trabajador) no es ganarlos: compatible con NoNewPrivileges.
+NoNewPrivileges=true
+LimitMEMLOCK=infinity
+
+# El sistema de ficheros, de solo lectura salvo lo suyo.
+ProtectSystem=strict
+ProtectHome=read-only
+# PrivateTmp=NO, a proposito: el motor estatico lee por RUTA el ejecutable que
+# el kernel le notifica. Con un /tmp privado, /tmp/x y /var/tmp/x serian OTRO
+# fichero (o ninguno) para el agente, y /tmp es donde cae lo primero que se
+# descarga un atacante. Lo mismo con ProtectKernelModules (esconde
+# /usr/lib/modules, que la integridad del nucleo compara) y ProtectClock (fija
+# DeviceAllow=char-rtc y cierra el resto de /dev, TPM incluido): lo que
+# quitarian ya lo quita el conjunto de capacidades de arriba.
+PrivateTmp=false
+# El trabajador vive en su propio cgroup, con techo de memoria y CPU que pone
+# el agente: necesita escribir en /sys/fs/cgroup.
+ProtectControlGroups=false
+# Solo el espacio de nombres de red, y solo para el trabajador: nace sin
+# interfaces, que es lo que lo deja sin red.
+RestrictNamespaces=net
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aegis-agent
+
+[Install]
+WantedBy=multi-user.target

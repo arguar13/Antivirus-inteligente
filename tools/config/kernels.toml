@@ -24,8 +24,21 @@
 memoria_mib = 2048
 cpus = 2
 cpus_emulado = 4
-plazo_kvm_s = 600
-plazo_emulado_s = 3600
+# Plazo POR microVM (backstop del arranque entero). No es el guardia principal:
+# cada paso del plan (dentro.sh) tiene su propio tope interno (instalar 120/400 s,
+# arranque del agente 300 s, ventanas del rango). Este solo evita que una VM que
+# no arranca se cuelgue para siempre.
+#
+# Dimensionado con las MEDIDAS de la propia matriz, no a ojo: la FASE 3 añadio el
+# ciclo de vida de paquetes (vuelta atras medida: 47 s en KVM, 566 s emulado;
+# instalar+actualizar ~5/170 s) y la FASE 4 el rango con 5 tecnicas y ~325 s de
+# ventanas de deteccion FIJAS (no escalan con la CPU). Con eso el plan pasa de
+# los 600/3600 s con que se dimensiono antes, y agotarlos dejaba reversiones del
+# rango a medias (residuos) por contencion. KVM: plan ~735 s medido + holgura
+# para 3 VMs en paralelo. Emulado: ~4500 s medido (trabajo a ~12x + ventanas
+# fijas) + holgura.
+plazo_kvm_s = 1200
+plazo_emulado_s = 7200
 
 # ── x86-64 ──────────────────────────────────────────────────────────────────
 
@@ -203,6 +216,12 @@ binario = "aegis-agent"
 acompanantes = ["aegis-watchdog"]
 
 [[prueba]]
+id = "rango-en-vivo"
+descripcion = "El rango ejecuta emulaciones ATT&CK reales, benignas y reversibles, contra el agente publicado; se cuenta detectada solo la tecnica con una señal del agente en su ventana. Publica cobertura, tiempo hasta deteccion y motor."
+tipo = "rango"
+binario = "aegis-agent"
+
+[[prueba]]
 id = "integridad-en-vivo"
 descripcion = "Una puerta trasera en sshd_config (PermitRootLogin yes) con el agente en marcha: el agente dice qué cambió en el fichero y quién lo cambió."
 tipo = "instalable"
@@ -213,3 +232,27 @@ id = "nucleo-en-vivo"
 descripcion = "Con la máquina en reposo el verificador cruzado de tareas no acusa a nadie, y un proceso escondido de /proc con un montaje encima sale como oculto-en-userland; donde el kernel no tiene los kfuncs de tareas, el motor queda degradado con su motivo."
 tipo = "instalable"
 binario = "aegis-agent"
+
+[[prueba]]
+id = "paquete-en-vivo"
+descripcion = "El paquete .deb o .rpm con el gestor nativo: instalar, actualizar, una versión que no late vuelve sola a la anterior y el gestor la marca fallida, reconciliar, y desinstalar solo con autorización y sin residuos (procesos, unidad, drop-in, /run, cgroups, usuario, ficheros, /etc/aegiscore)."
+tipo = "instalable"
+binario = "aegis-agent"
+acompanantes = ["aegis-watchdog"]
+paquetes = true
+
+[[prueba]]
+id = "convivencia-en-vivo"
+descripcion = "El agente instalado junto a auditd, un segundo consumidor eBPF de los mismos tracepoints y un antivirus ajeno con fanotify que tarda en contestar: nadie ciega a nadie y el camino caliente no espera al analista."
+tipo = "instalable"
+binario = "aegis-agent"
+acompanantes = ["aegis-watchdog"]
+paquetes = true
+
+[[prueba]]
+id = "sobrecoste-en-vivo"
+descripcion = "La misma carga (ejecuciones, ficheros, lecturas) sin y con el agente INSTALADO: sobrecoste, CPU del agente y pico de memoria del servicio frente al techo que calcula aegis-presupuesto. Solo se juzga con KVM."
+tipo = "instalable"
+binario = "aegis-agent"
+acompanantes = ["aegis-watchdog"]
+paquetes = true

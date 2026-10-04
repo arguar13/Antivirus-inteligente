@@ -1,191 +1,291 @@
 ---
-# Instalacion del agente AegisCore en un endpoint Linux.
+# Instalacion del agente AegisCore en un endpoint Linux (FASE 3 del MP-16).
 #
-# Todo el rol es idempotente: volver a pasarlo sobre una flota ya desplegada no
-# reinstala ni reinicia nada. En miles de maquinas eso es la diferencia entre
-# una comprobacion de estado inofensiva y una interrupcion del servicio.
+# El rol instala EL PAQUETE que publica el pipeline (.deb o .rpm de
+# tools/empaquetar.sh), verificado por su suma, con el gestor nativo. La unidad
+# de systemd, el techo de memoria de ESTE host, el uid del trabajador confinado,
+# la comprobacion de que el agente late y la vuelta atras si no late los pone el
+# paquete: el rol no duplica nada de eso. La version anterior del rol escribia
+# dos unidades propias y llamaba a `aegis-agent enrolar`, `--comprobar-config` y
+# `estado --json`, que el agente no tiene: no podia terminar en ningun host.
+#
+# Idempotente: si la version pedida ya esta instalada no se descarga ni se toca
+# nada, y el servicio no se reinicia.
 
-- name: Comprobar que se ha indicado la suma del artefacto
+- name: Comprobar que se ha indicado la suma del paquete
   ansible.builtin.assert:
     that:
       - aegis_agente_sha256 | length == 64
     fail_msg: >-
-      Falta `aegis_agente_sha256`. Instalar un binario sin verificar su suma
-      convierte el repositorio de paquetes en el punto unico desde el que se
-      compromete la flota entera.
+      Falta `aegis_agente_sha256`. Instalar un paquete sin verificar su suma
+      convierte el repositorio en el punto unico desde el que se compromete la
+      flota entera.
     quiet: true
 
-- name: Comprobar que se ha indicado el ancla de confianza
-  ansible.builtin.assert:
-    that:
-      - aegis_agente_ca_cert | length > 0
-      - "'BEGIN CERTIFICATE' in aegis_agente_ca_cert"
-    fail_msg: >-
-      Falta `aegis_agente_ca_cert`. Sin el certificado de la CA de la flota, el agente
-      no puede verificar al plano de control y aceptaria a cualquiera que
-      alcanzara el puerto.
-    quiet: true
+- name: Deducir el formato y el nombre del paquete de este host
+  ansible.builtin.set_fact:
+    aegis_agente_formato: "{{ 'deb' if ansible_facts['os_family'] == 'Debian' else 'rpm' }}"
+    aegis_agente_fichero: >-
+      {{
+        ('aegis-agent_' ~ aegis_agente_version ~ '_'
+         ~ ({'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']]) ~ '.deb')
+        if ansible_facts['os_family'] == 'Debian' else
+        ('aegis-agent-' ~ aegis_agente_version ~ '.' ~ ansible_facts['architecture'] ~ '.rpm')
+      }}
 
-# --- Usuario de servicio ----------------------------------------------------
-- name: Crear el grupo del servicio
-  ansible.builtin.group:
-    name: "{{ aegis_agente_grupo }}"
-    system: true
-    state: present
+- name: Leer los paquetes instalados
+  ansible.builtin.package_facts:
+    manager: auto
 
-- name: Crear el usuario del servicio
-  ansible.builtin.user:
-    name: "{{ aegis_agente_usuario }}"
-    group: "{{ aegis_agente_grupo }}"
-    system: true
-    # Sin shell ni directorio propio: si alguien consigue las credenciales del
-    # usuario del servicio, no obtiene una sesion interactiva.
-    shell: /usr/sbin/nologin
-    create_home: false
-    home: "{{ aegis_agente_var_dir }}"
-    state: present
+- name: Saber si la version pedida ya esta instalada
+  ansible.builtin.set_fact:
+    aegis_agente_ya_esta: >-
+      {{
+        (ansible_facts['packages']['aegis-agent'] | default([]))
+        | selectattr('version', 'defined')
+        | map(attribute='version')
+        | list | length > 0
+        and (
+          (ansible_facts['packages']['aegis-agent'][0]['version']
+           ~ ('-' ~ ansible_facts['packages']['aegis-agent'][0]['release']
+              if ansible_facts['packages']['aegis-agent'][0]['release'] | default('') | length > 0
+              else ''))
+          == aegis_agente_version
+        )
+      }}
 
-# --- Directorios ------------------------------------------------------------
-- name: Crear los directorios del agente
+# Restos del rol anterior: una /etc/systemd/system/aegis-agent.service TAPA la
+# unidad del paquete (/usr/lib/systemd/system), y aegis-watchdog.service lanzaba
+# un segundo supervisor.
+- name: Parar el supervisor suelto del despliegue anterior
+  ansible.builtin.systemd_service:
+    name: aegis-watchdog.service
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Quitar las unidades del despliegue anterior
   ansible.builtin.file:
-    path: "{{ item.ruta }}"
-    state: directory
-    owner: "{{ item.duenno | default('root') }}"
-    group: "{{ aegis_agente_grupo }}"
-    mode: "{{ item.modo }}"
+    path: "/etc/systemd/system/{{ item }}"
+    state: absent
   loop:
-    - { ruta: "{{ aegis_agente_etc_dir }}", modo: "0750" }
-    # La identidad del endpoint vive aqui. 0700 y del usuario del servicio: la
-    # clave privada del agente no la lee ni el grupo.
-    - { ruta: "{{ aegis_agente_etc_dir }}/pki", modo: "0700", duenno: "{{ aegis_agente_usuario }}" }
-    - { ruta: "{{ aegis_agente_var_dir }}", modo: "0750", duenno: "{{ aegis_agente_usuario }}" }
-    - { ruta: "{{ aegis_agente_log_dir }}", modo: "0750", duenno: "{{ aegis_agente_usuario }}" }
-  loop_control:
-    label: "{{ item.ruta }}"
+    - aegis-agent.service
+    - aegis-watchdog.service
+  register: aegis_agente_unidades_viejas
 
-# --- Binarios ---------------------------------------------------------------
-- name: Descargar el agente
+- name: Recargar systemd si se quito alguna unidad vieja
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: aegis_agente_unidades_viejas is changed
+
+- name: Descargar el paquete verificado
   ansible.builtin.get_url:
-    url: "{{ aegis_agente_repositorio_url }}/{{ aegis_agente_version }}/aegis-agent"
-    dest: "{{ aegis_agente_bin_dir }}/aegis-agent"
-    # La suma se comprueba ANTES de que el fichero llegue a su destino: si no
-    # coincide, la tarea falla y no queda un binario a medio verificar.
+    url: "{{ aegis_agente_repositorio_url }}/{{ aegis_agente_fichero }}"
+    dest: "/var/tmp/{{ aegis_agente_fichero }}"
+    # La suma se comprueba ANTES de que el fichero llegue a su destino.
     checksum: "sha256:{{ aegis_agente_sha256 }}"
     owner: root
     group: root
-    mode: "0755"
-  notify: Reiniciar el agente
+    mode: "0600"
+  when: not aegis_agente_ya_esta | bool
 
-- name: Descargar el supervisor de auto-defensa
-  ansible.builtin.get_url:
-    url: "{{ aegis_agente_repositorio_url }}/{{ aegis_agente_version }}/aegis-watchdog"
-    dest: "{{ aegis_agente_bin_dir }}/aegis-watchdog"
-    checksum: "sha256:{{ aegis_agente_watchdog_sha256 | default(omit) }}"
-    owner: root
-    group: root
-    mode: "0755"
-  notify: Reiniciar el supervisor
+# El postinst del paquete espera a que el agente LATA y, si no late, vuelve a
+# la version anterior y falla: el fallo de esta tarea para la tanda.
+- name: Instalar el paquete (dpkg)
+  ansible.builtin.apt:
+    deb: "/var/tmp/{{ aegis_agente_fichero }}"
+  environment:
+    AEGIS_PLAZO_SALUD: "{{ aegis_agente_plazo_salud }}"
+  when:
+    - not aegis_agente_ya_esta | bool
+    - aegis_agente_formato == 'deb'
 
-# --- Identidad de la flota --------------------------------------------------
-- name: Instalar el ancla de confianza de la flota
-  ansible.builtin.copy:
-    content: "{{ aegis_agente_ca_cert }}"
-    dest: "{{ aegis_agente_etc_dir }}/pki/flota-ca.crt"
-    owner: root
-    group: "{{ aegis_agente_grupo }}"
-    mode: "0644"
-  notify: Reiniciar el agente
-
-# El agente genera su clave EN LA MAQUINA y envia solo una peticion de firma.
-# La clave privada del endpoint no viaja por la red, no pasa por el inventario
-# de Ansible y no queda en el nodo de control. Es la diferencia entre
-# aprovisionar identidades y repartir credenciales.
-- name: Comprobar si el endpoint ya tiene identidad
-  ansible.builtin.stat:
-    path: "{{ aegis_agente_etc_dir }}/pki/endpoint.crt"
-  register: aegis_agente_identidad
-
-- name: Solicitar la identidad inicial al plano de control
+- name: Instalar el paquete (rpm)
+  # rpm y no dnf/zypper: el mismo camino en RedHat y en Suse, sin repositorio.
   ansible.builtin.command:
-    cmd: >-
-      {{ aegis_agente_bin_dir }}/aegis-agent enrolar
-      --servidor {{ aegis_agente_servidor_flota }}
-      --ca {{ aegis_agente_etc_dir }}/pki/flota-ca.crt
-      --salida {{ aegis_agente_etc_dir }}/pki
-    creates: "{{ aegis_agente_etc_dir }}/pki/endpoint.crt"
-  become: true
-  become_user: "{{ aegis_agente_usuario }}"
-  when: not aegis_agente_identidad.stat.exists
-  register: aegis_agente_enrolamiento
-  changed_when: aegis_agente_enrolamiento.rc == 0
+    cmd: "rpm -U --oldpackage /var/tmp/{{ aegis_agente_fichero }}"
+  environment:
+    AEGIS_PLAZO_SALUD: "{{ aegis_agente_plazo_salud }}"
+  changed_when: true
+  when:
+    - not aegis_agente_ya_esta | bool
+    - aegis_agente_formato == 'rpm'
 
-# --- Configuracion ----------------------------------------------------------
-- name: Escribir la configuracion del agente
-  ansible.builtin.template:
-    src: agente.toml.j2
-    dest: "{{ aegis_agente_etc_dir }}/agente.toml"
-    owner: root
-    group: "{{ aegis_agente_grupo }}"
-    mode: "0640"
-    # Sin validacion, una plantilla mal escrita deja el agente sin arrancar en
-    # todos los endpoints a la vez.
-    validate: "{{ aegis_agente_bin_dir }}/aegis-agent --comprobar-config %s"
-  notify: Reiniciar el agente
+- name: Borrar el paquete descargado
+  ansible.builtin.file:
+    path: "/var/tmp/{{ aegis_agente_fichero }}"
+    state: absent
 
-# --- Servicios --------------------------------------------------------------
-- name: Instalar las unidades de systemd
-  ansible.builtin.template:
-    src: "{{ item }}.service.j2"
-    dest: "/etc/systemd/system/{{ item }}.service"
+# /etc/aegiscore es el UNICO directorio de configuracion del producto: el que
+# lee el agente y el que la purga del paquete borra entero.
+- name: Crear el directorio de configuracion del agente
+  ansible.builtin.file:
+    path: /etc/aegiscore
+    state: directory
     owner: root
     group: root
-    mode: "0644"
+    mode: "0700"
+  when: aegis_agente_token_desinstalacion_sha256 | length == 64
+
+- name: Instalar el resumen del token de desinstalacion
+  ansible.builtin.copy:
+    content: "{{ aegis_agente_token_desinstalacion_sha256 }}\n"
+    dest: /etc/aegiscore/desinstalacion.sha256
+    owner: root
+    group: root
+    mode: "0600"
+  when: aegis_agente_token_desinstalacion_sha256 | length == 64
+
+# --- Plano de control (H-40) -----------------------------------------------
+# H-40 (FASE 7 del MP-16): el rol de antes pasaba al agente la opcion `--config`
+# (con agente.toml), que el agente rechaza con codigo 2. La unidad es la del paquete y
+# no pasa opciones de configuracion: el enlace con el plano de control se
+# configura escribiendo /etc/aegiscore/plano-control.toml, el fichero que el
+# agente lee por defecto. `tools/verificar-runbooks.sh` comprueba en make ci que
+# todo lo que este directorio lanza existe en el --help de su binario.
+#
+# Sin servidor indicado no se escribe nada (y se quita lo que hubiera): el agente
+# protege en local y lo dice al arrancar. La matricula por CSR no existe
+# todavia: la identidad del agente (certificado y clave PKCS#8) la emite la
+# consola y llega cifrada con ansible-vault. La clave VIAJA, cifrada, hasta que
+# exista la matricula; es un riesgo declarado, no un descuido.
+#
+# El fichero lo lee un analizador ESTRICTO (crates/aegis-agent/src/plano.rs):
+# solo la seccion [flota]; `servidor`, `ca`, `certificado` y `clave` entre
+# comillas dobles y sin escapes; `reintento_max_seg` (1 a 3600) y
+# `plazo_red_seg` (1 a 120) enteros. Lo que no cumple eso se para AQUI, y no en
+# el agente, que protegeria en local sin reportar.
+- name: Comprobar que la identidad y el enlace de flota son validos
+  ansible.builtin.assert:
+    that:
+      - "'BEGIN CERTIFICATE' in aegis_agente_flota_ca_pem"
+      - "'BEGIN CERTIFICATE' in aegis_agente_flota_cert_pem"
+      # PKCS#8: «BEGIN PRIVATE KEY». Una clave SEC1 («BEGIN EC PRIVATE KEY»)
+      # o PKCS#1 el enlace no la lee.
+      - "'BEGIN PRIVATE KEY' in aegis_agente_flota_clave_pem"
+      - "'\"' not in aegis_agente_servidor_flota"
+      - "'\\\\' not in aegis_agente_servidor_flota"
+      - aegis_agente_flota_reintento_max_seg | int >= 1
+      - aegis_agente_flota_reintento_max_seg | int <= 3600
+      - aegis_agente_flota_plazo_red_seg | int >= 1
+      - aegis_agente_flota_plazo_red_seg | int <= 120
+    fail_msg: >-
+      Con `aegis_agente_servidor_flota` hacen falta la CA de la flota, el
+      certificado y la clave PKCS#8 del agente (aegis_agente_flota_*_pem), un
+      servidor sin comillas ni barras invertidas, y reintento (1 a 3600 s) y
+      plazo de red (1 a 120 s) en rango: si no, el agente rechaza el enlace y no
+      reporta.
+    quiet: true
+  when: aegis_agente_servidor_flota | length > 0
+
+- name: Crear el directorio de la identidad de flota
+  ansible.builtin.file:
+    path: /etc/aegiscore/pki
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: aegis_agente_servidor_flota | length > 0
+
+- name: Instalar la CA de la flota, el certificado y la clave del agente
+  ansible.builtin.copy:
+    content: "{{ item.contenido }}"
+    dest: "/etc/aegiscore/pki/{{ item.fichero }}"
+    owner: root
+    group: root
+    mode: "{{ item.modo }}"
   loop:
-    - aegis-agent
-    - aegis-watchdog
-  notify:
-    - Recargar systemd
-    - Reiniciar el agente
+    - { fichero: flota-ca.crt, contenido: "{{ aegis_agente_flota_ca_pem }}", modo: "0644" }
+    - { fichero: agente.crt, contenido: "{{ aegis_agente_flota_cert_pem }}", modo: "0644" }
+    # 0600 o el enlace la rechaza.
+    - { fichero: agente.key, contenido: "{{ aegis_agente_flota_clave_pem }}", modo: "0600" }
+  loop_control:
+    label: "{{ item.fichero }}"
+  no_log: true
+  register: aegis_agente_pki
+  when: aegis_agente_servidor_flota | length > 0
 
-- name: Aplicar los cambios de unidades antes de habilitarlas
-  ansible.builtin.meta: flush_handlers
+- name: Escribir el enlace con el plano de control
+  ansible.builtin.copy:
+    dest: /etc/aegiscore/plano-control.toml
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      # Generado por Ansible (rol aegis_agente). Lo lee aegis-agent al arrancar.
+      [flota]
+      servidor = "{{ aegis_agente_servidor_flota }}"
+      ca = "/etc/aegiscore/pki/flota-ca.crt"
+      certificado = "/etc/aegiscore/pki/agente.crt"
+      clave = "/etc/aegiscore/pki/agente.key"
+      reintento_max_seg = {{ aegis_agente_flota_reintento_max_seg | int }}
+      plazo_red_seg = {{ aegis_agente_flota_plazo_red_seg | int }}
+  register: aegis_agente_plano
+  when: aegis_agente_servidor_flota | length > 0
 
-- name: Habilitar y arrancar el agente
+- name: Quitar el enlace si ya no hay plano de control
+  ansible.builtin.file:
+    path: /etc/aegiscore/plano-control.toml
+    state: absent
+  register: aegis_agente_plano_quitado
+  when: aegis_agente_servidor_flota | length == 0
+
+# El agente lee el enlace al arrancar: un cambio exige reiniciarlo. Se reinicia
+# aqui y no con un manejador para que la verificacion de abajo mire ya al
+# agente con la configuracion nueva.
+- name: Reiniciar el agente si cambio su enlace con el plano de control
   ansible.builtin.systemd_service:
-    name: aegis-agent
-    enabled: true
-    state: started
-    daemon_reload: true
-
-- name: Habilitar y arrancar el supervisor
-  ansible.builtin.systemd_service:
-    name: aegis-watchdog
-    enabled: true
-    state: started
+    name: aegis-agent.service
+    state: restarted
+  when: >-
+    (aegis_agente_plano is changed)
+    or (aegis_agente_pki is changed)
+    or (aegis_agente_plano_quitado is changed)
 
 # --- Verificacion -----------------------------------------------------------
 # Un despliegue que no comprueba el resultado no es un despliegue, es una
-# esperanza. Estas tareas fallan el host si el agente no quedo operativo, y el
-# playbook para la tanda antes de tocar mas endpoints.
-- name: Comprobar que el agente esta activo
+# esperanza. Se mira lo que se ve en el host, no lo que dijo el gestor.
+- name: Comprobar que el servicio esta activo
   ansible.builtin.systemd_service:
-    name: aegis-agent
+    name: aegis-agent.service
   register: aegis_agente_estado
   failed_when: aegis_agente_estado.status.ActiveState != "active"
 
-- name: Comprobar que el agente alcanza el plano de control
+# La edad se mide EN el host (su reloj y el del fichero): ansible_facts
+# date_time es la hora de la recogida de datos, al principio de la jugada.
+- name: Comprobar que el agente late (latido de hace menos de 60 s)
+  ansible.builtin.shell:
+    cmd: echo $(( $(date +%s) - $(stat -c %Y /run/aegiscore/agent.heartbeat) ))
+  register: aegis_agente_edad_latido
+  changed_when: false
+  retries: 12
+  delay: 5
+  until:
+    - aegis_agente_edad_latido.rc == 0
+    - (aegis_agente_edad_latido.stdout | int) < 60
+
+- name: Consultar el canal de control
   ansible.builtin.command:
-    cmd: "{{ aegis_agente_bin_dir }}/aegis-agent estado --json"
-  become: true
-  become_user: "{{ aegis_agente_usuario }}"
-  register: aegis_agente_diagnostico
+    cmd: /usr/bin/aegisctl status
+  register: aegis_agente_ctl
+  changed_when: false
+  failed_when: false
+
+# Si se pidio plano de control, el agente tiene que haberlo cargado: su informe
+# lleva la linea «plano de control:». Si no sale, o este agente no enlaza (sin
+# H-23) o la configuracion se rechazo: en los dos casos la tanda se para.
+- name: Comprobar que el agente cargo su enlace con el plano de control
+  ansible.builtin.command:
+    cmd: /usr/bin/aegisctl status
+  register: aegis_agente_ctl_plano
   changed_when: false
   retries: 6
-  delay: 5
-  until: (aegis_agente_diagnostico.stdout | from_json).enrolado | default(false)
+  delay: 10
+  until: "'plano de control:' in aegis_agente_ctl_plano.stdout"
+  when: aegis_agente_servidor_flota | length > 0
 
 - name: Resumen del endpoint
   ansible.builtin.debug:
     msg: >-
-      {{ inventory_hostname }}: agente {{ aegis_agente_version }} activo,
-      enrolado como {{ (aegis_agente_diagnostico.stdout | from_json).cn | default('desconocido') }}
+      {{ inventory_hostname }}: aegis-agent {{ aegis_agente_version }} activo y
+      latiendo; canal de control {{ 'responde' if aegis_agente_ctl.rc | default(1) == 0 else 'NO responde' }}.

@@ -10,8 +10,8 @@
 #
 # Uso:
 #   ansible-playbook -i inventario.ini deploy_aegis.yml \
-#     -e "aegis_sha256=<suma> aegis_agente_version=1.0.0" \
-#     -e "@secretos/ca.yml"
+#     -e "aegis_agente_sha256=<suma del paquete> aegis_agente_version=0.1.0-1" \
+#     -e "@secretos/flota.yml" --ask-vault-pass
 #
 # Ensayo sin tocar nada:
 #   ansible-playbook -i inventario.ini deploy_aegis.yml --check --diff

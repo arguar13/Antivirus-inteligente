@@ -38,6 +38,9 @@ use crate::servidor::VAR_UID;
 pub struct ConfigTrabajador {
     /// El ejecutable: el propio agente.
     pub programa: PathBuf,
+    /// Como se le ve en `ps` (argv[0]). Con `programa` = /proc/self/exe, sin
+    /// esto el trabajador se llamaria «/proc/self/exe».
+    pub nombre: Option<OsString>,
     /// Sus argumentos: los que lo convierten en trabajador.
     pub argumentos: Vec<OsString>,
     /// El uid propio con el que se confina.
@@ -63,8 +66,14 @@ impl ConfigTrabajador {
     ///
     /// Si no se puede saber la ruta del ejecutable actual.
     pub fn este_binario() -> std::io::Result<ConfigTrabajador> {
+        let yo = std::env::current_exe()?;
         Ok(ConfigTrabajador {
-            programa: std::env::current_exe()?,
+            // /proc/self/exe y no la ruta: al actualizar el paquete la ruta ya
+            // es el binario NUEVO y la del viejo dice «(deleted)». Un trabajador
+            // relanzado antes de que el postinst reinicie tiene que ser de ESTA
+            // version, que es la que habla su protocolo (FASE 3 del MP-16).
+            programa: PathBuf::from("/proc/self/exe"),
+            nombre: Some(yo.into_os_string()),
             argumentos: vec!["--trabajador".into()],
             uid: UID_POR_DEFECTO,
             memoria_max: 256 * 1024 * 1024,
@@ -135,21 +144,68 @@ struct Cgroup {
     dir: PathBuf,
     /// Por que no hay techo de CPU, si no lo hay.
     sin_cpu: Option<String>,
+    /// El techo de memoria que se le puso de verdad.
+    memoria: u64,
+}
+
+/// El cgroup del servicio, si la unidad se lo delega al agente.
+///
+/// La unidad del paquete pone `Delegate=yes` y `AEGIS_CGROUP_DELEGADO=1`, y el
+/// watchdog se baja a la hoja `supervision` antes de lanzar al agente. Solo asi
+/// el cgroup del servicio se queda sin procesos propios y puede repartir
+/// controladores a sus hijos: cgroup v2 no deja hacer las dos cosas.
+fn base_delegada() -> Option<PathBuf> {
+    std::env::var_os("AEGIS_CGROUP_DELEGADO")?;
+    let propio = std::fs::read_to_string("/proc/self/cgroup").ok()?;
+    let ruta = propio.lines().find_map(|l| l.strip_prefix("0::"))?.trim();
+    let servicio = ruta.strip_suffix("/supervision")?;
+    let base = Path::new("/sys/fs/cgroup").join(servicio.trim_start_matches('/'));
+    base.join("cgroup.subtree_control")
+        .is_file()
+        .then_some(base)
+}
+
+/// Suelo del techo del trabajador bajo el servicio: con menos no analiza nada.
+const SUELO_TRABAJADOR: u64 = 32 * 1024 * 1024;
+
+/// El techo del trabajador dentro del servicio: lo que la unidad deja entre su
+/// pico (`memory.high`) y su techo (`memory.max`), que es lo que el presupuesto
+/// no le da al nucleo. Asi agente y trabajador juntos no llegan al OOM del
+/// servicio. Nunca por encima del configurado; sin techos numericos en la
+/// unidad, el configurado.
+fn techo_bajo_el_servicio(max: Option<u64>, alto: Option<u64>, configurado: u64) -> u64 {
+    match (max, alto) {
+        (Some(max), Some(alto)) if max > alto => {
+            configurado.min((max - alto).max(SUELO_TRABAJADOR))
+        }
+        _ => configurado,
+    }
+}
+
+fn leer_limite(base: &Path, fichero: &str) -> Option<u64> {
+    std::fs::read_to_string(base.join(fichero))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
 }
 
 impl Cgroup {
     /// Crea (o reutiliza) el cgroup y le pone el techo.
     ///
-    /// Se crea directamente bajo la raiz de cgroup v2: la raiz es la unica que
-    /// puede tener procesos y a la vez repartir controladores a sus hijos, asi
-    /// que funciona igual con el agente como servicio de systemd que lanzado a
-    /// mano. Con el empaquetado (FASE 3) pasara a colgar del cgroup delegado del
-    /// servicio.
+    /// Con la unidad del paquete (`Delegate=yes`) cuelga del cgroup del
+    /// servicio ([`base_delegada`]): la parada de systemd lo alcanza, systemd no
+    /// le reajusta el reparto y su memoria cuenta en el presupuesto del agente.
+    /// Sin delegacion (el agente lanzado a mano o por otra unidad) se crea bajo
+    /// la raiz de cgroup v2, la unica que puede tener procesos y a la vez
+    /// repartir controladores a sus hijos.
     fn crear(config: &ConfigTrabajador) -> Result<Cgroup, String> {
-        let raiz = Path::new("/sys/fs/cgroup");
-        if !raiz.join("cgroup.controllers").is_file() {
+        if !Path::new("/sys/fs/cgroup/cgroup.controllers").is_file() {
             return Err("no hay cgroup v2 unificado en /sys/fs/cgroup".into());
         }
+        let delegado = base_delegada();
+        let raiz_propia = delegado
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("/sys/fs/cgroup"));
+        let raiz = raiz_propia.as_path();
         Cgroup::limpiar_huerfanos(raiz);
         // Los controladores que el hijo necesita tienen que estar repartidos
         // desde la raiz. Se daba por hecho, y en las VM de la matriz la raiz no
@@ -168,8 +224,20 @@ impl Cgroup {
         if !dir.is_dir() {
             std::fs::create_dir(&dir).map_err(|e| format!("crear {}: {e}", dir.display()))?;
         }
-        let mut cg = Cgroup { dir, sin_cpu };
-        cg.escribir("memory.max", &config.memoria_max.to_string())?;
+        let memoria = match &delegado {
+            Some(base) => techo_bajo_el_servicio(
+                leer_limite(base, "memory.max"),
+                leer_limite(base, "memory.high"),
+                config.memoria_max,
+            ),
+            None => config.memoria_max,
+        };
+        let mut cg = Cgroup {
+            dir,
+            sin_cpu,
+            memoria,
+        };
+        cg.escribir("memory.max", &memoria.to_string())?;
         // Sin intercambio: con swap, el techo de memoria no seria un techo.
         let _ = cg.escribir("memory.swap.max", "0");
         cg.escribir("pids.max", "1")?;
@@ -184,7 +252,8 @@ impl Cgroup {
         Ok(cg)
     }
 
-    /// Activa un controlador en el reparto de la raiz, si no lo esta ya.
+    /// Activa un controlador en el reparto de `raiz` (la de cgroup v2 o la del
+    /// servicio delegado), si no lo esta ya.
     fn repartir(raiz: &Path, controlador: &str) -> Result<(), String> {
         let control = raiz.join("cgroup.subtree_control");
         let activos =
@@ -307,7 +376,7 @@ impl Trabajador {
                 let d = format!(
                     "{} (memoria {} MiB, {cpu}, 1 proceso)",
                     c.dir.display(),
-                    config.memoria_max / (1024 * 1024),
+                    c.memoria / (1024 * 1024),
                 );
                 (Some(c), d)
             }
@@ -369,7 +438,11 @@ impl Trabajador {
     }
 
     fn lanzar(&mut self) -> Result<(), String> {
-        let mut hijo = Command::new(&self.config.programa)
+        let mut orden = Command::new(&self.config.programa);
+        if let Some(n) = &self.config.nombre {
+            std::os::unix::process::CommandExt::arg0(&mut orden, n);
+        }
+        let mut hijo = orden
             .args(&self.config.argumentos)
             .env_clear()
             .env(VAR_UID, self.config.uid.to_string())
@@ -387,6 +460,11 @@ impl Trabajador {
                 return Err(format!("no se pudo meter en su cgroup: {m}"));
             }
         }
+        // Heredaba el OOMScoreAdjust=-500 del agente. Con los dos bajo el mismo
+        // MemoryMax del servicio, ante un OOM el que muere es el trabajador (se
+        // relanza y su analisis es SinDatos), nunca el nucleo. Subirse la
+        // puntuacion no necesita privilegios; si ya salio, no hay nada que hacer.
+        let _ = std::fs::write(format!("/proc/{}/oom_score_adj", hijo.id()), "1000");
 
         let entrada: ChildStdin = hijo.stdin.take().ok_or("sin stdin")?;
         let salida = hijo.stdout.take().ok_or("sin stdout")?;
@@ -624,5 +702,37 @@ impl Drop for Trabajador {
         if let Some(mut v) = self.vivo.take() {
             let _ = v.matar();
         }
+    }
+}
+
+#[cfg(test)]
+mod pruebas {
+    use super::*;
+
+    const MIB: u64 = 1024 * 1024;
+
+    #[test]
+    fn el_techo_bajo_el_servicio_es_el_hueco_entre_pico_y_techo() {
+        // Host de 2 GiB: techo 160 MiB, pico 96 MiB -> 64 MiB para el trabajador.
+        assert_eq!(
+            techo_bajo_el_servicio(Some(160 * MIB), Some(96 * MIB), 256 * MIB),
+            64 * MIB
+        );
+        // Nunca mas que lo configurado.
+        assert_eq!(
+            techo_bajo_el_servicio(Some(1536 * MIB), Some(1024 * MIB), 256 * MIB),
+            256 * MIB
+        );
+        // Ni menos que el suelo.
+        assert_eq!(
+            techo_bajo_el_servicio(Some(100 * MIB), Some(95 * MIB), 256 * MIB),
+            SUELO_TRABAJADOR
+        );
+        // Sin techos numericos («max») o incoherentes: el configurado.
+        assert_eq!(techo_bajo_el_servicio(None, None, 256 * MIB), 256 * MIB);
+        assert_eq!(
+            techo_bajo_el_servicio(Some(96 * MIB), Some(160 * MIB), 256 * MIB),
+            256 * MIB
+        );
     }
 }
