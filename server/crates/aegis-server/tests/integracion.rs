@@ -15,28 +15,17 @@ use std::sync::Arc;
 use aegis_fleet::pki::AutoridadCertificadora;
 use aegis_fleet::servidor::ServidorFlota;
 use aegis_fleet::{ClienteFlota, EmisorLocal, PoliticaRotacion, RotadorCertificados};
+mod comun;
 use aegis_prueba::{omitir, Requisito};
 use aegis_server::almacen::{Almacen, VistaCorrelacion};
 use aegis_server::cache::{Cache, Veredicto};
 use aegis_server::dominio::{clasificar_mitre, ServicioFlota};
 use aegis_server::flota::ManejadorPersistente;
-
-/// Cadena de conexion de la base de datos de pruebas.
-fn url_pg() -> String {
-    std::env::var("AEGIS_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
-}
+use comun::{almacen_real, url_pg};
 
 /// Cadena de conexion de la cache de pruebas.
 fn url_redis() -> String {
     std::env::var("AEGIS_TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
-}
-
-/// Abre el almacen de pruebas, o `None` si no hay PostgreSQL.
-async fn almacen_de_pruebas() -> Option<Almacen> {
-    let a = Almacen::conectar(&url_pg(), 8).await.ok()?;
-    a.migrar().await.ok()?;
-    Some(a)
 }
 
 /// Identificador unico por prueba: las pruebas comparten la base de datos y no
@@ -71,11 +60,7 @@ static CERROJO_POLITICA: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(
 
 #[tokio::test]
 async fn un_agente_se_enrola_late_y_reporta_contra_postgres_real() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir(
-            &format!("no hay PostgreSQL en {}", url_pg()),
-            Requisito::Postgresql,
-        );
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -114,8 +99,7 @@ async fn un_agente_se_enrola_late_y_reporta_contra_postgres_real() {
 
 #[tokio::test]
 async fn el_evento_se_guarda_clasificado_en_mitre_att_ck() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -149,8 +133,7 @@ async fn el_evento_se_guarda_clasificado_en_mitre_att_ck() {
 
 #[tokio::test]
 async fn una_severidad_fuera_de_rango_no_rompe_la_restriccion_del_esquema() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -171,8 +154,7 @@ async fn una_severidad_fuera_de_rango_no_rompe_la_restriccion_del_esquema() {
 
 #[tokio::test]
 async fn el_comando_de_aislamiento_llega_al_agente_por_su_latido() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -214,8 +196,7 @@ async fn el_comando_de_aislamiento_llega_al_agente_por_su_latido() {
 #[tokio::test]
 async fn solo_puede_haber_una_politica_activa() {
     let _politica = CERROJO_POLITICA.lock().await;
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let v1 = almacen
@@ -253,8 +234,7 @@ async fn solo_puede_haber_una_politica_activa() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn publicaciones_de_politica_simultaneas_se_serializan_sin_perder_ninguna() {
     let _politica = CERROJO_POLITICA.lock().await;
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     const CONCURRENTES: usize = 8;
@@ -400,8 +380,7 @@ fn agente_real(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn el_agente_autentico_habla_con_el_plano_de_control_sobre_mtls_y_queda_en_postgres() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -488,8 +467,7 @@ async fn el_agente_autentico_habla_con_el_plano_de_control_sobre_mtls_y_queda_en
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn un_impostor_con_otra_ca_no_llega_a_tocar_la_base_de_datos() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -627,8 +605,7 @@ async fn no_entra_por_grpc(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_sin_certificado_de_la_flota_se_rechaza_en_el_handshake() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -656,8 +633,7 @@ async fn grpc_sin_certificado_de_la_flota_se_rechaza_en_el_handshake() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn grpc_la_identidad_sale_del_certificado_y_no_de_la_cabecera() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -728,8 +704,7 @@ fn bundle_con(id_indicador: &str) -> String {
 
 #[tokio::test]
 async fn un_bundle_stix_se_ingiere_y_sus_objetos_quedan_consultables() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -759,8 +734,7 @@ async fn un_bundle_stix_se_ingiere_y_sus_objetos_quedan_consultables() {
 
 #[tokio::test]
 async fn el_mismo_indicador_visto_por_dos_endpoints_suma_avistamientos_en_vez_de_duplicarse() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -799,8 +773,7 @@ async fn el_mismo_indicador_visto_por_dos_endpoints_suma_avistamientos_en_vez_de
 
 #[tokio::test]
 async fn un_documento_que_no_es_un_bundle_se_rechaza() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -816,8 +789,7 @@ async fn un_documento_que_no_es_un_bundle_se_rechaza() {
 
 #[tokio::test]
 async fn el_linaje_de_procesos_se_guarda_entero_con_sus_aristas() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -882,8 +854,7 @@ async fn el_linaje_de_procesos_se_guarda_entero_con_sus_aristas() {
 
 #[tokio::test]
 async fn un_texto_desmesurado_del_endpoint_se_recorta_antes_de_tocar_la_base_de_datos() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -925,8 +896,7 @@ async fn un_texto_desmesurado_del_endpoint_se_recorta_antes_de_tocar_la_base_de_
 #[tokio::test]
 async fn el_motor_compila_las_reglas_activas_en_la_politica_publicada() {
     let _politica = CERROJO_POLITICA.lock().await;
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
 
@@ -981,8 +951,7 @@ async fn el_motor_compila_las_reglas_activas_en_la_politica_publicada() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn una_regla_global_llega_al_agente_real_por_empuje_sin_esperar_su_latido() {
     let _politica = CERROJO_POLITICA.lock().await;
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -1097,8 +1066,7 @@ async fn una_regla_global_llega_al_agente_real_por_empuje_sin_esperar_su_latido(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn el_agente_entrega_stix_y_linaje_por_el_canal_mtls_y_queda_en_postgres() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -1257,8 +1225,7 @@ async fn sigue_pendiente(almacen: &Almacen, cn: &str, id: uuid::Uuid) -> bool {
 
 #[tokio::test]
 async fn una_caceria_llega_al_agente_que_no_la_ha_contestado_y_deja_de_llegarle_al_responder() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -1314,8 +1281,7 @@ async fn una_caceria_llega_al_agente_que_no_la_ha_contestado_y_deja_de_llegarle_
 async fn la_respuesta_de_un_agente_es_idempotente_ante_un_reintento() {
     // Un endpoint con mala red que reintenta no puede inflar el recuento: el
     // analista veria una amenaza mas extendida de lo que esta.
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -1364,8 +1330,7 @@ async fn la_respuesta_de_un_agente_es_idempotente_ante_un_reintento() {
 
 #[tokio::test]
 async fn el_resumen_agrega_toda_la_flota_y_distingue_lo_que_no_se_pudo_ver() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -1460,8 +1425,7 @@ async fn el_resumen_agrega_toda_la_flota_y_distingue_lo_que_no_se_pudo_ver() {
 
 #[tokio::test]
 async fn una_caceria_cerrada_deja_de_entregarse() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -1497,8 +1461,7 @@ async fn el_objetivo_se_congela_al_lanzar_la_caceria() {
     // El denominador de la cobertura tiene que capturarse AL LANZAR. Si se
     // contara al leer el resultado, un endpoint que se apago despues de
     // responder haria bajar el porcentaje sin que nadie dejara de contestar.
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -1548,8 +1511,7 @@ async fn el_objetivo_se_congela_al_lanzar_la_caceria() {
 /// el valor esta garantizado antes de leerlo.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn una_cuarentena_de_enjambre_llega_al_agente_real_y_queda_contabilizada() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -1753,8 +1715,7 @@ async fn abierta_para(almacen: &Almacen, clave: &str) -> Option<VistaCorrelacion
 /// El caso que justifica toda la fase: nada delata la campana en un endpoint.
 #[tokio::test]
 async fn una_campana_repartida_entre_endpoints_se_ve_solo_desde_el_plano_de_control() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -1802,8 +1763,7 @@ async fn una_campana_repartida_entre_endpoints_se_ve_solo_desde_el_plano_de_cont
 /// Un endpoint ruidoso no es una campana, por muchas alertas que emita.
 #[tokio::test]
 async fn un_solo_endpoint_no_puede_fabricar_una_correlacion_distribuida() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -1844,8 +1804,7 @@ async fn un_solo_endpoint_no_puede_fabricar_una_correlacion_distribuida() {
 /// Una campana en curso es UNA correlacion, no una por evaluacion.
 #[tokio::test]
 async fn una_campana_que_dura_no_produce_una_tormenta_de_correlaciones() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -1901,8 +1860,7 @@ async fn una_campana_que_dura_no_produce_una_tormenta_de_correlaciones() {
 /// Cerrar como falso positivo tiene que impedir que vuelva.
 #[tokio::test]
 async fn un_falso_positivo_cerrado_no_se_reabre_en_la_evaluacion_siguiente() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -1964,8 +1922,7 @@ async fn un_falso_positivo_cerrado_no_se_reabre_en_la_evaluacion_siguiente() {
 /// exactamente lo que tiene en la mano una vuelta en vuelo.
 #[tokio::test]
 async fn una_vuelta_en_vuelo_con_instantanea_vieja_no_reabre_un_falso_positivo() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -2054,8 +2011,7 @@ async fn una_vuelta_en_vuelo_con_instantanea_vieja_no_reabre_un_falso_positivo()
 /// Las alertas sin el atributo de agrupacion no participan.
 #[tokio::test]
 async fn lo_que_no_se_pudo_ver_no_forma_un_grupo_que_dispare_siempre() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -2100,8 +2056,7 @@ async fn lo_que_no_se_pudo_ver_no_forma_un_grupo_que_dispare_siempre() {
 /// Una regla desactivada deja de evaluarse.
 #[tokio::test]
 async fn una_heuristica_desactivada_no_dispara() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));
@@ -2129,8 +2084,7 @@ async fn una_heuristica_desactivada_no_dispara() {
 /// Unos atributos adversos no llegan a la base de datos.
 #[tokio::test]
 async fn unos_detalles_invalidos_del_endpoint_se_rechazan_antes_de_persistirse() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));

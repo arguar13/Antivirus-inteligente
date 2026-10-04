@@ -20,37 +20,17 @@
 //! Se omite (y se cuenta, via `aegis_prueba`) solo si no hay PostgreSQL. Si hay
 //! base y la migracion falla, FALLA: una 0011 rota es justo lo que esto vigila.
 
-use aegis_prueba::{omitir, Requisito};
-use aegis_server::almacen::Almacen;
+mod comun;
 use aegis_server::particiones::{
     self, Politica, ADELANTO_MESES, RETENCION_RECOMENDADA_MESES, TABLAS,
 };
+use comun::almacen_real;
 use sqlx::{PgPool, Postgres, Transaction};
 
 /// Las pruebas de este fichero van una detras de otra: la de la purga toma un
 /// cerrojo exclusivo sobre `alertas` hasta deshacer su transaccion, y las demas
 /// escriben en ella.
 static EN_SERIE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-fn url_pg() -> String {
-    std::env::var("AEGIS_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
-}
-
-/// El almacen de pruebas, migrado. `None` solo si no hay PostgreSQL.
-async fn almacen() -> Option<Almacen> {
-    let a = match Almacen::conectar(&url_pg(), 4).await {
-        Ok(a) => a,
-        Err(e) => {
-            omitir(&format!("no hay PostgreSQL ({e})"), Requisito::Postgresql);
-            return None;
-        }
-    };
-    if let Err(e) = a.migrar().await {
-        panic!("hay PostgreSQL y las migraciones no se aplican: {e}");
-    }
-    Some(a)
-}
 
 /// Una transaccion con la sesion en UTC, para que los meses que calcula la
 /// prueba y los que usan las funciones de la 0011 sean el mismo calendario.
@@ -134,7 +114,9 @@ async fn insertar(
 #[tokio::test]
 async fn las_tablas_que_crecen_estan_particionadas_por_tiempo_y_sin_default() {
     let _serie = EN_SERIE.lock().await;
-    let Some(a) = almacen().await else { return };
+    let Some(a) = almacen_real(4).await else {
+        return;
+    };
     let pool = a.pool();
 
     for t in TABLAS {
@@ -182,7 +164,9 @@ async fn las_tablas_que_crecen_estan_particionadas_por_tiempo_y_sin_default() {
 #[tokio::test]
 async fn hay_hija_para_ahora_y_para_cada_mes_de_adelanto() {
     let _serie = EN_SERIE.lock().await;
-    let Some(a) = almacen().await else { return };
+    let Some(a) = almacen_real(4).await else {
+        return;
+    };
     let pool = a.pool();
 
     // Lo mismo que hace el servidor al arrancar, sin purga: sobre la base de
@@ -229,7 +213,9 @@ async fn hay_hija_para_ahora_y_para_cada_mes_de_adelanto() {
 #[tokio::test]
 async fn la_retencion_suelta_la_hija_entera_y_no_toca_el_mes_en_curso() {
     let _serie = EN_SERIE.lock().await;
-    let Some(a) = almacen().await else { return };
+    let Some(a) = almacen_real(4).await else {
+        return;
+    };
     let pool = a.pool();
 
     // Una retencion de cero meses soltaria el mes en curso: se rechaza.

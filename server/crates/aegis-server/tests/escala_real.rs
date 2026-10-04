@@ -25,9 +25,10 @@
 //! El muro real (cien mil conexiones mTLS vivas, discos de produccion) se declara
 //! en `tools/verificar-escala-real.sh`.
 
-use aegis_prueba::{omitir, Requisito};
-use aegis_server::almacen::{Almacen, NuevaAlerta};
+mod comun;
+use aegis_server::almacen::NuevaAlerta;
 use chrono::Utc;
+use comun::almacen_real;
 use sqlx::Row;
 
 /// Las dos pruebas de este fichero se ejecutan UNA DETRAS DE OTRA. La de la purga
@@ -50,17 +51,6 @@ async fn wal_desde(pool: &sqlx::PgPool, lsn: &str) -> f64 {
         .fetch_one(pool)
         .await
         .expect("pg_wal_lsn_diff")
-}
-
-fn url_pg() -> String {
-    std::env::var("AEGIS_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
-}
-
-async fn almacen() -> Option<Almacen> {
-    let a = Almacen::conectar(&url_pg(), 16).await.ok()?;
-    a.migrar().await.ok()?;
-    Some(a)
 }
 
 fn sufijo() -> String {
@@ -94,11 +84,7 @@ fn percentil_ns(muestras: &mut [u128], p: f64) -> u128 {
 #[tokio::test]
 async fn cero_perdida_contada_en_los_dos_extremos_contra_postgres_real() {
     let _serie = EN_SERIE.lock().await;
-    let Some(a) = almacen().await else {
-        omitir(
-            "no hay PostgreSQL (AEGIS_TEST_PG_URL). La medida real se declara.",
-            Requisito::Postgresql,
-        );
+    let Some(a) = almacen_real(16).await else {
         return;
     };
     let run = sufijo();
@@ -211,11 +197,7 @@ async fn la_purga_es_metadato_no_un_barrido_de_filas() {
     // particion es O(1) en metadato y no toca las filas, asi que no compite con la
     // ingesta; un DELETE recorre y bloquea. Se demuestra contra PostgreSQL REAL en
     // un esquema desechable, a escala pequena —la propiedad no depende del tamano—.
-    let Some(a) = almacen().await else {
-        omitir(
-            "no hay PostgreSQL. La medida de purga se declara.",
-            Requisito::Postgresql,
-        );
+    let Some(a) = almacen_real(16).await else {
         return;
     };
     let esquema = format!("purga_{}", sufijo());

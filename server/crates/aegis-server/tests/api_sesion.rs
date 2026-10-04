@@ -14,6 +14,9 @@
 
 use std::sync::Arc;
 
+mod comun;
+use comun::{almacen_real, url_redis};
+
 use aegis_prueba::{omitir, Requisito};
 
 use aegis_server::almacen::Almacen;
@@ -24,15 +27,6 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use tower::ServiceExt;
 
-fn url_pg() -> String {
-    std::env::var("AEGIS_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
-}
-
-fn url_redis() -> String {
-    std::env::var("AEGIS_TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
-}
-
 /// Falta un servicio: por el ayudante comun, que en make ci lo exige (la
 /// tanda falla) y en local lo anota como omision.
 fn falta<T>(que: &str, requisito: Requisito) -> Option<T> {
@@ -42,16 +36,7 @@ fn falta<T>(que: &str, requisito: Requisito) -> Option<T> {
 
 /// Estado de la API contra PostgreSQL y Redis reales.
 async fn estado_real() -> Option<(EstadoApi, Almacen)> {
-    let almacen = match Almacen::conectar(&url_pg(), 4).await {
-        Ok(a) => a,
-        Err(e) => return falta(&format!("PostgreSQL ({e})"), Requisito::Postgresql),
-    };
-    if let Err(e) = almacen.migrar().await {
-        return falta(
-            &format!("migraciones de PostgreSQL ({e})"),
-            Requisito::Postgresql,
-        );
-    }
+    let almacen = almacen_real(4).await?;
     let cache = match Cache::conectar(&url_redis()).await {
         Ok(c) => c,
         Err(e) => return falta(&format!("Redis ({e})"), Requisito::Redis),

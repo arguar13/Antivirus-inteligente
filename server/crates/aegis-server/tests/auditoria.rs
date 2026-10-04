@@ -16,21 +16,10 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use aegis_firehose::diario::Config as ConfigDiario;
 use aegis_firehose::reintento::Politica;
 use aegis_firehose::syslog_tls::{ConfigSyslog, DestinoSyslog};
-use aegis_prueba::{omitir, Requisito};
-use aegis_server::almacen::Almacen;
+mod comun;
 use aegis_server::dominio::ServicioFlota;
 use aegis_server::firehose::Firehose;
-
-fn url_pg() -> String {
-    std::env::var("AEGIS_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
-}
-
-async fn almacen_de_pruebas() -> Option<Almacen> {
-    let a = Almacen::conectar(&url_pg(), 4).await.ok()?;
-    a.migrar().await.ok()?;
-    Some(a)
-}
+use comun::almacen_real;
 
 struct Temporal(std::path::PathBuf);
 
@@ -166,8 +155,7 @@ fn arrancar_firehose(dir: &std::path::Path, direccion: &str, ca: &[u8]) -> Arc<F
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn una_alerta_de_un_endpoint_acaba_en_el_siem_del_cliente() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(4).await else {
         return;
     };
     let t = temporal("feliz");
@@ -211,8 +199,7 @@ async fn lo_ocurrido_con_el_siem_caido_llega_cuando_el_siem_vuelve() {
     // El caso que justifica la fase entera: el SIEM se reinicia por
     // mantenimiento y el atacante actua en ese rato. Sin diario, esa evidencia
     // no existiria en la plataforma del cliente.
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(4).await else {
         return;
     };
     let t = temporal("caida");
@@ -258,8 +245,7 @@ async fn lo_ocurrido_con_el_siem_caido_llega_cuando_el_siem_vuelve() {
 async fn sin_firehose_configurado_el_producto_sigue_funcionando() {
     // Un despliegue sin SIEM tiene que detectar igual. El producto no puede
     // dejar de funcionar porque el cliente aun no haya integrado su plataforma.
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(4).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);

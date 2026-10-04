@@ -32,18 +32,36 @@ pub fn unico() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..12].to_string()
 }
 
-/// Estado de la API contra PostgreSQL y Redis reales. Sin ellos se omite
-/// diciendolo (y, con `AEGIS_EXIGIR=servicios`, falla).
-pub async fn estado_real() -> Option<(EstadoApi, Almacen, Arc<ServicioFlota>)> {
-    let almacen = match Almacen::conectar(&url_pg(), 8).await {
+/// El PostgreSQL de pruebas, migrado, con un pool de `conexiones`.
+///
+/// Es la UNICA via de las pruebas a la base de datos. Distingue lo que el
+/// entorno no da de lo que el producto hace mal:
+/// - si no se puede conectar, se omite con el error REAL del intento (y, con
+///   `AEGIS_EXIGIR=servicios`, falla diciendolo);
+/// - si conecta pero una migracion no aplica, la prueba FALLA: eso es un defecto
+///   del producto, nunca una omision. Mezclar los dos casos hacia que un fallo
+///   de migracion se leyera como «no hay PostgreSQL».
+pub async fn almacen_real(conexiones: u32) -> Option<Almacen> {
+    let almacen = match Almacen::conectar(&url_pg(), conexiones).await {
         Ok(a) => a,
         Err(e) => {
-            omitir(&format!("no hay PostgreSQL ({e})"), Requisito::Postgresql);
+            omitir(
+                &format!("no hay PostgreSQL en {} ({e})", url_pg()),
+                Requisito::Postgresql,
+            );
             return None;
         }
     };
-    // Una migracion que no aplica es un fallo, no una omision.
-    almacen.migrar().await.expect("las migraciones aplican");
+    if let Err(e) = almacen.migrar().await {
+        panic!("las migraciones no aplican sobre {}: {e}", url_pg());
+    }
+    Some(almacen)
+}
+
+/// Estado de la API contra PostgreSQL y Redis reales. Sin ellos se omite
+/// diciendolo (y, con `AEGIS_EXIGIR=servicios`, falla).
+pub async fn estado_real() -> Option<(EstadoApi, Almacen, Arc<ServicioFlota>)> {
+    let almacen = almacen_real(8).await?;
     let cache = match Cache::conectar(&url_redis()).await {
         Ok(c) => c,
         Err(e) => {

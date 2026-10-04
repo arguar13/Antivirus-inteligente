@@ -23,14 +23,10 @@
 //! AEGIS_BENCH_CORRELACION=1 cargo test -p aegis-server --test correlacion_escala -- --nocapture
 //! ```
 
+mod comun;
 use aegis_prueba::{omitir, Requisito};
-use aegis_server::almacen::Almacen;
 use aegis_server::heuristicas::NuevaHeuristica;
-
-fn url_pg() -> String {
-    std::env::var("AEGIS_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
-}
+use comun::almacen_real;
 
 /// Endpoints de la flota simulada.
 const ENDPOINTS: usize = 10_000;
@@ -74,11 +70,9 @@ async fn una_vuelta_de_correlacion_cabe_de_sobra_en_su_periodo() {
         );
         return;
     }
-    let Ok(almacen) = Almacen::conectar(&url_pg(), 8).await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
-    almacen.migrar().await.unwrap();
     let pool = almacen.pool();
     let marca = uuid::Uuid::new_v4().simple().to_string();
     let categoria = format!("bench-{marca}");

@@ -21,28 +21,17 @@ use aegis_itdr::kerberos::{EventoKdc, TipoCifrado};
 use aegis_itdr::{ClaseAmenaza, Deteccion, Severidad};
 use aegis_orchestrator::{AccionRemediacion, EstadoPlaybook, Objetivo};
 use aegis_orchestrator::{EjecutorRemediacion, Orquestador};
-use aegis_prueba::{omitir, Requisito};
-use aegis_server::almacen::Almacen;
+mod comun;
 use aegis_server::dominio::ServicioFlota;
 use aegis_server::itdr::TelemetriaIdentidad;
 use aegis_server::remediacion::{
     clave_accion, EjecutorFlota, MotorVivo, RegistroPostgres, RegistroRemediacion,
 };
+use comun::almacen_real;
 use sqlx::Row;
 
 const T0: u64 = 1_800_000_000;
 const HORA: u64 = 3_600;
-
-fn url_pg() -> String {
-    std::env::var("AEGIS_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
-}
-
-async fn almacen_de_pruebas() -> Option<Almacen> {
-    let a = Almacen::conectar(&url_pg(), 8).await.ok()?;
-    a.migrar().await.ok()?;
-    Some(a)
-}
 
 fn cn_unico(prefijo: &str) -> String {
     format!("{prefijo}-{}", uuid::Uuid::new_v4().simple())
@@ -83,11 +72,7 @@ fn telemetria_golden(cuenta: &str) -> TelemetriaIdentidad {
 /// fuera atomico ahi, el endpoint recibiria el playbook DOS veces.
 #[tokio::test]
 async fn dos_instancias_a_la_vez_solo_abren_una_remediacion() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir(
-            &format!("no hay PostgreSQL en {}", url_pg()),
-            Requisito::Postgresql,
-        );
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let cn = cn_unico("cerrojo");
@@ -129,8 +114,7 @@ async fn dos_instancias_a_la_vez_solo_abren_una_remediacion() {
 /// que genera eventos.
 #[tokio::test]
 async fn tras_concluir_el_enfriamiento_impide_relanzar_y_luego_deja() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let cn = cn_unico("enfriamiento");
@@ -214,8 +198,7 @@ async fn tras_concluir_el_enfriamiento_impide_relanzar_y_luego_deja() {
 /// mismo mecanismo que usa el boton de la consola.
 #[tokio::test]
 async fn el_ejecutor_real_marca_el_aislamiento_y_encola_la_orden() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = ServicioFlota::nuevo(almacen.clone(), 30);
@@ -266,8 +249,7 @@ async fn el_ejecutor_real_marca_el_aislamiento_y_encola_la_orden() {
 /// leia el analista llevaba tres errores de PostgreSQL sin traducir.
 #[tokio::test]
 async fn un_endpoint_desconocido_falla_limpio_sin_abortar_el_playbook() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let ejecutor = EjecutorFlota::nuevo(almacen.clone());
@@ -324,8 +306,7 @@ async fn un_endpoint_desconocido_falla_limpio_sin_abortar_el_playbook() {
 /// alerta persistida -> registro de la remediacion. Sin un solo doble.
 #[tokio::test]
 async fn el_circuito_completo_de_identidad_a_flota_con_infraestructura_real() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir("no hay PostgreSQL", Requisito::Postgresql);
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let servicio = Arc::new(ServicioFlota::nuevo(almacen.clone(), 30));

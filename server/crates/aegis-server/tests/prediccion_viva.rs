@@ -19,21 +19,11 @@ use aegis_itdr::grafo::Nivel;
 use aegis_orchestrator::{AccionRemediacion, EjecutorRemediacion, Objetivo};
 use aegis_predict::grafo::{Activo, ClaseActivo, Evidencia, Paso, RelacionSerializable, Via};
 use aegis_predict::{ConfigContencion, GrafoAtaque};
-use aegis_prueba::{omitir, Requisito};
+mod comun;
 use aegis_server::almacen::Almacen;
 use aegis_server::prediccion::{contener_preventivamente, ResultadoPreventivo};
 use aegis_server::remediacion::EjecutorFlota;
-
-fn url_pg() -> String {
-    std::env::var("AEGIS_TEST_PG_URL")
-        .unwrap_or_else(|_| "postgres://postgres@%2Fvar%2Frun%2Fpostgresql/aegis_test".to_string())
-}
-
-async fn almacen_de_pruebas() -> Option<Almacen> {
-    let a = Almacen::conectar(&url_pg(), 8).await.ok()?;
-    a.migrar().await.ok()?;
-    Some(a)
-}
+use comun::almacen_real;
 
 fn cn_unico(prefijo: &str) -> String {
     format!("{prefijo}-{}", uuid::Uuid::new_v4().simple())
@@ -110,11 +100,7 @@ fn grafo(endpoint: &str) -> GrafoAtaque {
 /// aparece encolada en PostgreSQL para el endpoint.
 #[tokio::test]
 async fn una_contencion_preventiva_encola_una_orden_real_en_el_endpoint() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir(
-            &format!("no hay PostgreSQL en {}", url_pg()),
-            Requisito::Postgresql,
-        );
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let cn = cn_unico("pred");
@@ -155,11 +141,7 @@ async fn una_contencion_preventiva_encola_una_orden_real_en_el_endpoint() {
 /// crudo.
 #[tokio::test]
 async fn una_contencion_sobre_un_endpoint_no_matriculado_falla_con_un_motivo_legible() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir(
-            &format!("no hay PostgreSQL en {}", url_pg()),
-            Requisito::Postgresql,
-        );
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let cn = cn_unico("fantasma");
@@ -187,11 +169,7 @@ async fn una_contencion_sobre_un_endpoint_no_matriculado_falla_con_un_motivo_leg
 /// la fase, comprobado de extremo a extremo.
 #[tokio::test]
 async fn una_evidencia_fabricada_no_encola_ninguna_orden() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir(
-            &format!("no hay PostgreSQL en {}", url_pg()),
-            Requisito::Postgresql,
-        );
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let cn = cn_unico("victima");
@@ -243,11 +221,7 @@ async fn una_evidencia_fabricada_no_encola_ninguna_orden() {
 /// sitios donde arreglar el mismo fallo.
 #[tokio::test]
 async fn la_orden_preventiva_usa_el_mismo_verbo_que_la_de_deteccion() {
-    let Some(almacen) = almacen_de_pruebas().await else {
-        omitir(
-            &format!("no hay PostgreSQL en {}", url_pg()),
-            Requisito::Postgresql,
-        );
+    let Some(almacen) = almacen_real(8).await else {
         return;
     };
     let cn = cn_unico("verbo");
