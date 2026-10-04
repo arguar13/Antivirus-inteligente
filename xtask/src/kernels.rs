@@ -1451,6 +1451,135 @@ mod tests {
         assert_eq!(suma_publicada(bsd, "otro.qcow2"), None);
     }
 
+    /// Ejecuta `guion` con `sh` (dash en Debian/Ubuntu, como en las microVM)
+    /// tras cargar `dentro.sh` en modo solo-funciones. `sleep` se anula para
+    /// que las esperas del arnes no cuesten tiempo real. `ruta` va delante
+    /// del PATH (para un `journalctl` de mentira).
+    #[cfg(unix)]
+    fn arnes(guion: &str, ruta: Option<&Path>) -> String {
+        let dentro =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../tools/matriz-kernels/dentro.sh");
+        let mut path = std::env::var("PATH").unwrap_or_default();
+        if let Some(r) = ruta {
+            path = format!("{}:{path}", r.display());
+        }
+        let salida = Command::new("sh")
+            .arg("-c")
+            .arg(format!(". \"$1\"; sleep() {{ :; }}; {guion}"))
+            .arg("arnes")
+            .arg(&dentro)
+            .env("AEGIS_DENTRO_SOLO_FUNCIONES", "1")
+            .env("PATH", path)
+            .output()
+            .expect("sh");
+        assert!(
+            salida.status.success(),
+            "sh fallo: {}",
+            String::from_utf8_lossy(&salida.stderr)
+        );
+        String::from_utf8_lossy(&salida.stdout).into_owned()
+    }
+
+    #[cfg(unix)]
+    fn juicio(args: &str) -> String {
+        arnes(&format!("juicio_trabajador {args}"), None)
+    }
+
+    /// El arnes NO es la unica causa de muerte del trabajador: el agente lo
+    /// mata al vencer el plazo de un analisis, y al llegar a su umbral enfria
+    /// (debian-12-arm64, emulado: 3 muertes de la prueba + 2 por plazo). La
+    /// prueba exigia exactamente 4 muertes propias y fallaba con el
+    /// cortacircuitos funcionando. Lo que se sigue exigiendo siempre: sin
+    /// reinicio del watchdog, cada muerte contada, eventos tras la ultima y
+    /// parada limpia.
+    #[cfg(unix)]
+    #[test]
+    fn el_arnes_juzga_el_trabajador_con_las_muertes_del_propio_agente() {
+        // Orden: muertes contadas plazos enfriamientos umbral reinicios antes despues limpia
+        assert!(juicio("4 4 0 0 '' 0 100 200 si").starts_with("pasa|"));
+        // El caso real de debian-12-arm64.
+        let real = juicio("3 5 2 1 5 0 3483 3952 si");
+        assert!(real.starts_with("pasa|"), "{real}");
+        assert!(real.contains("cortacircuitos"), "{real}");
+        // Faltan muertes y nada lo explica: fallo.
+        let sin = juicio("3 3 0 0 '' 0 100 200 si");
+        assert!(sin.contains("faltan-muertes-sin-enfriamiento"), "{sin}");
+        // Dice que enfrio, pero lo contado no llega a su propio umbral.
+        assert!(juicio("3 4 1 1 5 0 100 200 si").starts_with("falla|"));
+        // Cada condicion de produccion sigue siendo fallo duro.
+        assert!(juicio("4 4 0 0 '' 1 100 200 si").contains("el-watchdog-reinicio"));
+        assert!(juicio("4 4 0 0 '' 0 100 139 si").contains("no-vio-eventos"));
+        assert!(juicio("4 4 0 0 '' 0 '' 200 si").contains("no-vio-eventos"));
+        assert!(juicio("4 3 0 0 '' 0 100 200 si").contains("no-conto-las-muertes"));
+        assert!(juicio("4 '' 0 0 '' 0 100 200 si").contains("no-conto-las-muertes"));
+        assert!(juicio("4 4 0 0 '' 0 100 200 no").contains("sin-parada-limpia"));
+        assert!(juicio("0 5 5 1 5 0 100 200 si").contains("la-prueba-no-mato-ninguno"));
+    }
+
+    /// Un `journalctl` de mentira: devuelve un informe del arbitro solo a
+    /// partir de la llamada `desde` (el agente recien instalado aun no habia
+    /// informado) y apunta sus argumentos.
+    #[cfg(unix)]
+    fn journal_falso(dir: &Path, desde: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let f = dir.join("journalctl");
+        std::fs::write(
+            &f,
+            format!(
+                "#!/bin/sh\n\
+                 n=$(cat \"{d}/n\" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > \"{d}/n\"\n\
+                 echo \"$*\" >> \"{d}/args\"\n\
+                 [ $n -ge {desde} ] && echo 'aegis-agent: arbitro: eventos=2707 p50_ns=1 p99_ns=2 max_ns=3'\n\
+                 exit 0\n",
+                d = dir.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// La linea base de convivencia salia «?» (ubuntu-24.04-arm64): se leia
+    /// una sola vez, de un journal donde el agente recien instalado aun no
+    /// habia escrito ningun informe. Ahora se espera su primer informe, la
+    /// lectura vacia se reintenta con tope, y solo se lee lo escrito desde
+    /// que empezo la prueba (la unidad la compartio paquete-en-vivo antes).
+    #[cfg(unix)]
+    #[test]
+    fn el_arnes_lee_la_linea_base_cuando_el_agente_ya_informo() {
+        let tmp = std::env::temp_dir().join(format!("aegis-arnes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // Informa a la llamada 6: la espera tras instalar lo aguarda.
+        journal_falso(&tmp, 6);
+        let v = arnes(
+            "CV_DESDE=@1700000000; cv_esperar_informe 400; printf '[%s]' \"$(cv_eventos)\"",
+            Some(&tmp),
+        );
+        assert_eq!(v, "[2707]");
+        let args = std::fs::read_to_string(tmp.join("args")).unwrap();
+        assert!(
+            args.lines().all(|l| l.contains("--since @1700000000")),
+            "toda lectura acotada a la prueba: {args}"
+        );
+
+        // Sin esperar, una lectura vacia se reintenta en vez de dar «?».
+        let _ = std::fs::remove_file(tmp.join("n"));
+        let v = arnes("printf '[%s]' \"$(cv_eventos)\"", Some(&tmp));
+        assert_eq!(v, "[2707]");
+
+        // Un agente que nunca informa: vacio tras el tope, sin colgarse.
+        let _ = std::fs::remove_file(tmp.join("n"));
+        journal_falso(&tmp, 1_000_000);
+        let v = arnes(
+            "cv_esperar_informe 30; printf '[%s]' \"$(cv_eventos)\"",
+            Some(&tmp),
+        );
+        assert_eq!(v, "[]");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn familias_de_kernel() {
         assert!(familia_coincide("5.10", "5.10.0-32-cloud-amd64"));
