@@ -5,6 +5,7 @@
 //! comentados; el codigo de aqui solo los aplica.
 
 mod amenazas;
+mod auditoria;
 mod capas;
 mod config;
 mod docs;
@@ -12,9 +13,12 @@ mod enlace;
 mod incrustados;
 mod invariantes;
 mod kernels;
+mod marcador;
 mod matriz;
 mod nombres;
+mod plataformas;
 mod repo;
+mod sbom;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -37,6 +41,17 @@ Arquitectura
   incrustados             Todo fichero incrustado (include_bytes!) esta en git.
   arquitectura            capas + nombres + amenazas + incrustados.
 
+Auditoria externa (tools/config/auditoria.toml)
+  sbom [--comprobar] [--dist DIR]
+                          SBOM CycloneDX 1.5 de cada instalable, desde Cargo.lock
+                          (docs/generado/auditoria/sbom/). --comprobar: falla si no
+                          corresponde al Cargo.lock o si un crate no declara licencia.
+                          --dist DIR: comprueba que los binarios de DIR salen de este
+                          arbol y coinciden con su SHA256SUMS, y escribe a su lado el
+                          SBOM con su SHA-256 y la procedencia SLSA v1 (sin firmar).
+                          `docs` genera ademas docs/generado/auditoria/ (indice,
+                          SBOM, nivel SLSA y alcance del pentest).
+
 Matriz de kernels (tools/config/kernels.toml)
   kernels traer [--solo ID]... [--arquitectura ARQ]
                           Descarga las imagenes y las verifica con las sumas oficiales.
@@ -44,6 +59,12 @@ Matriz de kernels (tools/config/kernels.toml)
                           Arranca cada distribucion en una microVM y ejecuta la matriz.
   kernels btf --solo ID   Extrae el BTF del kernel de una imagen (para compilar las
                           sondas de otra arquitectura).
+
+Scorecard
+  marcador [--publicar]   Scorecard (cobertura ATT&CK, deteccion, FP, latencia) desde
+                          la matriz, docs/generado/motores.txt y la tarjeta del
+                          modelo, en target/marcador/; --publicar lo copia a
+                          docs/generado/scorecard.md.
 
 Para los scripts de construccion
   instalables [--hermetico] [--workspace WS]
@@ -135,6 +156,7 @@ fn ejecutar(args: &[String]) -> Resultado<()> {
                 amenazas::comprobar(&repo),
                 incrustados::comprobar(&repo),
                 invariantes::comprobar(&repo),
+                plataformas::comprobar(&repo),
             ];
             let mut fallos = Vec::new();
             for r in resultados {
@@ -164,6 +186,39 @@ fn ejecutar(args: &[String]) -> Resultado<()> {
                         .into(),
                 ),
             }
+        }
+        Some("marcador") => {
+            let repo = repo::Repo::cargar(&raiz)?;
+            println!("{}", marcador::escribir(&repo, tiene("--publicar"))?);
+            Ok(())
+        }
+        Some("sbom") => {
+            // FASE 7 del MP-16: el SBOM de cada instalable y, con --dist, el del
+            // build con el hash de cada binario y su procedencia.
+            let repo = repo::Repo::cargar(&raiz)?;
+            let comprobar = tiene("--comprobar");
+            let sboms = sbom::calcular_todos(&repo)?;
+            if comprobar {
+                let d = sbom::diferencias(&repo, &sboms);
+                if !d.is_empty() {
+                    return Err(format!(
+                        "el SBOM versionado no corresponde al Cargo.lock actual:\n    {}\n\
+                         Regeneralo con `cargo xtask sbom` (o `cargo xtask docs`) y comitea el resultado.",
+                        d.join("\n    ")
+                    )
+                    .into());
+                }
+            }
+            let mut ficheros = Vec::new();
+            for s in &sboms {
+                ficheros.push((s.ruta(), sbom::texto(s, None)?));
+            }
+            docs::escribir(&repo.raiz, &ficheros, comprobar)?;
+            println!("{}", sbom::resumen(&sboms));
+            if let Some(dir) = opcion(args, "--dist") {
+                println!("{}", sbom::dist(&repo, &sboms, &repo.raiz.join(dir))?);
+            }
+            Ok(())
         }
         Some("instalables") => {
             let inst: config::Instalables = config::leer(&raiz, "instalables.toml")?;

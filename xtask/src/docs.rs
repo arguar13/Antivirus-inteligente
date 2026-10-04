@@ -15,9 +15,13 @@
 //! | `{{componentes_agente}}`    | tabla de crates del agente                        |
 //! | `{{componentes_servidor}}`  | tabla de crates del plano de control              |
 //! | `{{documentacion}}`         | indice de `docs/`                                 |
+//! | `{{plataformas}}`           | que plataformas son producto (plataformas.toml)   |
 //!
 //! La prosa de la plantilla no puede llevar cifras escritas a mano (regla 3 del
 //! proyecto): [`cifras_a_mano`] las busca y la generacion falla si encuentra una.
+//!
+//! Genera ademas el paquete para auditoria externa, `docs/generado/auditoria/`
+//! (ver [`crate::auditoria`] y [`crate::sbom`]).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -65,6 +69,10 @@ pub fn generar(repo: &Repo, m: &Matriz) -> Resultado<Vec<(PathBuf, String)>> {
         bloque_componentes(repo, m, "servidor"),
     );
     bloques.insert("documentacion", bloque_documentacion(repo));
+    bloques.insert(
+        "plataformas",
+        crate::plataformas::bloque(&repo.raiz, false)?,
+    );
 
     let mut readme = String::from(
         "<!--\n  GENERADO por `cargo xtask docs`. NO SE EDITA AQUI.\n  \
@@ -83,10 +91,18 @@ pub fn generar(repo: &Repo, m: &Matriz) -> Resultado<Vec<(PathBuf, String)>> {
         }
     }
 
-    Ok(vec![
+    let mut generados = vec![
         (PathBuf::from(MATRIZ), render_matriz(repo, m)),
         (PathBuf::from("README.md"), readme),
-    ])
+    ];
+    // El paquete para auditoria externa (FASE 7 del MP-16): el SBOM de cada
+    // instalable y el indice, el alcance del pentest y el nivel SLSA.
+    let sboms = crate::sbom::calcular_todos(repo)?;
+    for s in &sboms {
+        generados.push((s.ruta(), crate::sbom::texto(s, None)?));
+    }
+    generados.extend(crate::auditoria::generar(repo, m, &sboms)?);
+    Ok(generados)
 }
 
 /// Escribe los documentos, o con `comprobar` solo compara y falla si divergen.
@@ -252,7 +268,7 @@ fn contar(m: &Matriz, ws: &str, e: Estado) -> usize {
         .count()
 }
 
-fn bloque_estado(m: &Matriz) -> String {
+pub(crate) fn bloque_estado(m: &Matriz) -> String {
     let mut s = String::new();
     s.push_str("| Espacio de trabajo | Producto | Condicional | Biblioteca | Herramienta |\n");
     s.push_str("|---|---:|---:|---:|---:|\n");
@@ -563,6 +579,14 @@ fn bloque_documentacion(repo: &Repo) -> String {
                 .map(|(_, b)| b.to_string())
                 .unwrap_or(titulo);
             let num = nombre.split('-').next().and_then(|n| n.parse::<u32>().ok());
+            // El documento de una plataforma que no es producto lo dice tambien
+            // en el indice (FASE 7 del MP-16): su titulo de fase, que no se
+            // reescribe, no puede leerse como una promesa.
+            let titulo = if crate::plataformas::es_no_producto(&texto) {
+                format!("{titulo} *(plataforma no producto)*")
+            } else {
+                titulo
+            };
             docs.push((num, nombre, titulo));
         }
     }
@@ -658,6 +682,14 @@ fn render_matriz(repo: &Repo, m: &Matriz) -> String {
             }
         );
     }
+
+    // Plataformas (FASE 7 del MP-16). generar() ya leyo y valido el mismo
+    // fichero para el README; si aqui fallara, el error queda escrito en la
+    // matriz y `docs --comprobar` lo caza.
+    s.push_str(
+        &crate::plataformas::bloque(&repo.raiz, true)
+            .unwrap_or_else(|e| format!("## Plataformas\n\n**ERROR**: {e}\n\n")),
+    );
 
     s.push_str("## Matriz de kernels\n\n");
     s.push_str(

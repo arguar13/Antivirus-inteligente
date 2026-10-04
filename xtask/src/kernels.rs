@@ -127,7 +127,7 @@ impl Drop for Reserva<'_> {
     }
 }
 
-fn trabajo(repo: &Repo) -> PathBuf {
+pub(crate) fn trabajo(repo: &Repo) -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| repo.raiz.join("target"))
@@ -306,7 +306,7 @@ fn artefactos(repo: &Repo, arq: &str) -> Artefactos {
 }
 
 /// La huella del arbol de trabajo, de su unica definicion (`tools/huella-arbol.sh`).
-fn huella_del_arbol(repo: &Repo) -> Resultado<String> {
+pub(crate) fn huella_del_arbol(repo: &Repo) -> Resultado<String> {
     let salida = ejecutar_cmd(
         Command::new(repo.raiz.join("tools/huella-arbol.sh")).current_dir(&repo.raiz),
         "tools/huella-arbol.sh",
@@ -326,7 +326,12 @@ fn huella_del_arbol(repo: &Repo) -> Resultado<String> {
 /// motores recien integrados no estaban en las VMs (FASE 2 del MP-16). Una matriz
 /// verde sobre otro binario es un verde falso, asi que sin huella, o con otra, no
 /// se arranca ninguna VM.
-fn procedencia(grabada: Option<&str>, actual: &str, dist: &Path, remedio: &str) -> Resultado<()> {
+pub(crate) fn procedencia(
+    grabada: Option<&str>,
+    actual: &str,
+    dist: &Path,
+    remedio: &str,
+) -> Resultado<()> {
     match grabada.map(str::trim) {
         Some(h) if h == actual => Ok(()),
         Some(h) => Err(format!(
@@ -401,6 +406,9 @@ fn preparar_carga(repo: &Repo, k: &Kernels, arq: &str, dir: &Path) -> Resultado<
                     }
                     std::fs::copy(&origen, carga.join("bin").join(extra))?;
                 }
+                if p.paquetes {
+                    copiar_paquetes(repo, arq, &carga, &actual)?;
+                }
                 let _ = writeln!(
                     plan,
                     "prueba|{}|instalable|{}",
@@ -421,6 +429,13 @@ fn preparar_carga(repo: &Repo, k: &Kernels, arq: &str, dir: &Path) -> Resultado<
                 quitar_depuracion(&destino, arq);
                 let _ = writeln!(plan, "prueba|{}|cargo-test|{}", p.id, prueba);
             }
+            "rango" => {
+                eprintln!("xtask: compilando aegis-rango (server, estatico) para {arq}");
+                let exe = compilar_rango_estatico(repo, arq)?;
+                std::fs::copy(&exe, carga.join("bin/aegis-rango"))?;
+                quitar_depuracion(&carga.join("bin/aegis-rango"), arq);
+                let _ = writeln!(plan, "prueba|{}|rango|", p.id);
+            }
             otro => return Err(format!("prueba {}: tipo desconocido {otro}", p.id).into()),
         }
     }
@@ -429,6 +444,50 @@ fn preparar_carga(repo: &Repo, k: &Kernels, arq: &str, dir: &Path) -> Resultado<
     let img = dir.join(format!("carga-{arq}.img"));
     imagen_ext4(&img, ETIQUETA, mib_para(&carga)?, Some(&carga))?;
     Ok(img)
+}
+
+/// Los paquetes .deb y .rpm de la arquitectura, con su ORDEN, a `paquetes/` de
+/// la carga. Lo que se prueba en la microVM tiene que ser exactamente lo que
+/// `tools/empaquetar.sh --matriz` construyo desde los binarios de ESTE arbol: se
+/// comprueban su HUELLA (la de los binarios de los que salen, como con los
+/// binarios sueltos) y sus SHA256SUMS. El grupo `kernels` de make ci los rehace
+/// antes de arrancar.
+fn copiar_paquetes(repo: &Repo, arq: &str, carga: &Path, actual: &str) -> Resultado<()> {
+    let destino = carga.join("paquetes");
+    if destino.is_dir() {
+        return Ok(());
+    }
+    let origen = if arq == "x86_64" {
+        repo.raiz.join("dist-paquetes")
+    } else {
+        repo.raiz.join(format!("dist-paquetes-{arq}"))
+    };
+    let remedio = format!("tools/empaquetar.sh --matriz --arq {arq}");
+    if !origen.join("ORDEN").is_file() {
+        return Err(format!(
+            "faltan los paquetes de {arq} en {}: {remedio}",
+            origen.display()
+        )
+        .into());
+    }
+    let grabada = std::fs::read_to_string(origen.join("HUELLA")).ok();
+    procedencia(grabada.as_deref(), actual, &origen, &remedio)?;
+    let cuadra = Command::new("sha256sum")
+        .args(["--quiet", "-c", "SHA256SUMS"])
+        .current_dir(&origen)
+        .status()?;
+    if !cuadra.success() {
+        return Err(format!("{} no cuadra con sus SHA256SUMS", origen.display()).into());
+    }
+    std::fs::create_dir_all(&destino)?;
+    for e in std::fs::read_dir(&origen)? {
+        let e = e?;
+        let nombre = e.file_name().to_string_lossy().into_owned();
+        if nombre == "ORDEN" || nombre.ends_with(".deb") || nombre.ends_with(".rpm") {
+            std::fs::copy(e.path(), destino.join(nombre))?;
+        }
+    }
+    Ok(())
 }
 
 /// Quita la informacion de depuracion de una prueba estatica antes de meterla en
@@ -546,6 +605,69 @@ fn compilar_prueba_estatica(
         .ok_or_else(|| format!("cargo no informo del ejecutable de {paquete}/{prueba}").into())
 }
 
+/// Compila el binario `aegis-rango` del workspace del SERVIDOR como binario
+/// estatico para la microVM, con la misma receta de enlace que el agente de esa
+/// arquitectura. Trae solo las emulaciones benignas (sin la caracteristica
+/// `sistema`, aplazada): no añade dependencias, asi que server/Cargo.lock no
+/// cambia.
+fn compilar_rango_estatico(repo: &Repo, arq: &str) -> Resultado<PathBuf> {
+    let mut cmd = Command::new(crate::repo::cargo());
+    let triple = match arq {
+        "x86_64" => {
+            let sysroot = std::env::var("AEGIS_MUSL_SYSROOT")
+                .unwrap_or_else(|_| "/opt/aegis/musl-sysroot".into());
+            let cc = format!("{sysroot}/bin/aegis-musl-gcc");
+            cmd.env("CC_x86_64_unknown_linux_musl", &cc)
+                .env("AR_x86_64_unknown_linux_musl", "ar")
+                .env("CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", &cc)
+                .env("RUSTFLAGS", "-C link-self-contained=no");
+            "x86_64-unknown-linux-musl"
+        }
+        "aarch64" => {
+            let lib = "/usr/lib/aarch64-linux-gnu";
+            cmd.env(
+                "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER",
+                "aarch64-linux-gnu-gcc",
+            )
+            .env("CC_aarch64_unknown_linux_gnu", "aarch64-linux-gnu-gcc")
+            .env("AR_aarch64_unknown_linux_gnu", "aarch64-linux-gnu-ar")
+            .env(
+                "RUSTFLAGS",
+                format!("-C target-feature=+crt-static -L native={lib}"),
+            );
+            "aarch64-unknown-linux-gnu"
+        }
+        otra => return Err(format!("arquitectura sin receta estatica: {otra}").into()),
+    };
+    cmd.args([
+        "build",
+        "--release",
+        "--message-format=json-render-diagnostics",
+    ])
+    .args([
+        "--target",
+        triple,
+        "-p",
+        "aegis-rango",
+        "--bin",
+        "aegis-rango",
+    ])
+    .arg("--manifest-path")
+    .arg(repo.raiz.join("server/Cargo.toml"))
+    .stdout(Stdio::piped())
+    .stderr(Stdio::inherit());
+    let salida = cmd.output().map_err(|e| format!("cargo: {e}"))?;
+    if !salida.status.success() {
+        return Err(format!("no compila aegis-rango (server) para {arq}").into());
+    }
+    String::from_utf8_lossy(&salida.stdout)
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter(|v| v["reason"] == "compiler-artifact" && v["target"]["name"] == "aegis-rango")
+        .find_map(|v| v["executable"].as_str().map(PathBuf::from))
+        .ok_or_else(|| "cargo no informo del ejecutable de aegis-rango".into())
+}
+
 /// Las features de la configuracion, con la variante de enlace estatico de la
 /// arquitectura: `hermetico` en x86-64, `estatico-sistema` en aarch64.
 fn caracteristicas_de(declaradas: &[String], estatica: &str) -> Vec<String> {
@@ -624,13 +746,44 @@ fn arrancar(
     std::fs::create_dir_all(dir)?;
     let disco = dir.join("disco.qcow2");
     let _ = std::fs::remove_file(&disco);
-    ejecutar_cmd(
-        Command::new("qemu-img")
-            .args(["create", "-q", "-f", "qcow2", "-F", "qcow2", "-b"])
-            .arg(base)
-            .arg(&disco),
-        "qemu-img create",
-    )?;
+    // El overlay crece a 20 GiB SOLO si la imagen base es diminuta (< 2 GiB).
+    // La unica asi es openSUSE Leap (~0.8 GiB), que se quedaba sin disco en el
+    // ciclo de paquetes (instalar v1, actualizar a v2, instalar la v3 rota y
+    // volver atras: ~26 MiB de binarios por version mas journal) y hacia que
+    // `rpm` abortara con «needs NN MB on the / filesystem». El overlay es
+    // disperso y cloud-init crece la particion al arrancar (growpart).
+    //
+    // NUNCA se agranda una base que ya tiene sitio: (1) un tamaño MENOR que la
+    // base truncaria su sistema de ficheros —amazon-linux trae 25 GiB y con un
+    // overlay de 20 GiB no arrancaba—, y (2) crecer una base holgada solo alarga
+    // el growpart/resize al arrancar, carisimo bajo emulacion (las arm64). Las
+    // demas imagenes (>= 3 GiB) tienen sitio de sobra: debian-12-arm64 a 3 GiB
+    // pasa el ciclo entero.
+    // El tamaño virtual de la base, de la linea «virtual size: 25 GiB
+    // (26843545600 bytes)» de `qemu-img info`. Se usa la salida HUMANA, no la
+    // JSON: el JSON trae DOS «virtual-size» (el del fichero contenedor y el del
+    // disco) y coger el primero daba el del contenedor (~1.8 GiB) y truncaba
+    // amazon-linux. Si no se puede leer, se asume GRANDE y NO se agranda: nunca
+    // truncar es mas seguro que arriesgarse a romper un sistema de ficheros.
+    let base_bytes = ejecutar_cmd(
+        Command::new("qemu-img").arg("info").arg(base),
+        "qemu-img info",
+    )?
+    .lines()
+    .find(|l| l.trim_start().starts_with("virtual size:"))
+    .and_then(|l| l.split('(').nth(1))
+    .and_then(|s| s.split_whitespace().next())
+    .and_then(|s| s.parse::<u64>().ok())
+    .unwrap_or(u64::MAX);
+    let mut crear = Command::new("qemu-img");
+    crear
+        .args(["create", "-q", "-f", "qcow2", "-F", "qcow2", "-b"])
+        .arg(base)
+        .arg(&disco);
+    if base_bytes < 2 * 1024 * 1024 * 1024 {
+        crear.arg("20G");
+    }
+    ejecutar_cmd(&mut crear, "qemu-img create")?;
     let semilla = semilla(dir, &im.id)?;
     let serie = dir.join("consola.log");
     let _ = std::fs::remove_file(&serie);

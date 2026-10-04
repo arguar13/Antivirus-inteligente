@@ -155,7 +155,9 @@ pub fn calcular(repo: &Repo) -> Resultado<Matriz> {
     let mut pruebas = Vec::new();
     for p in &kernels.prueba {
         let ejercidos = match p.tipo.as_str() {
-            "instalable" => {
+            // En `rango` el producto ejercido es el instalable bajo prueba
+            // (`binario`); aegis-rango es solo el arnes que lanza las emulaciones.
+            "instalable" | "rango" => {
                 let bin = p.binario.as_deref().unwrap_or_default();
                 let mut ejercidos = BTreeSet::new();
                 for b in std::iter::once(bin).chain(p.acompanantes.iter().map(String::as_str)) {

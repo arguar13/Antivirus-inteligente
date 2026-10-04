@@ -1,0 +1,497 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Paquete para auditoría externa (FASE 7 del MP-16)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Lo que el paquete de docs/generado/auditoria/ NO puede sacar del código: la
+#  prosa, lo que cargo no ve (código C incluido en un crate, bibliotecas de
+#  sistema) y los requisitos SLSA. Lo leen:
+#
+#    · cargo xtask sbom    [sbom], [[sistema]] y [[vendorizado]]
+#    · cargo xtask docs    todo, para generar docs/generado/auditoria/
+#
+#  Reglas que la generación comprueba (falla si no se cumplen):
+#    · la prosa no lleva cifras escritas a mano (regla 3 del proyecto);
+#    · cada [[vendorizado]] aplica a algún instalable y su evidencia existe;
+#    · cada extractor de [[superficie]] encuentra algo en el código;
+#    · un requisito [[slsa]] que «cumple» lleva evidencia, toda evidencia
+#      existe, y un «no» que su fichero `desmiente` contradice falla.
+
+[sbom]
+# El de tools/ci/hermetico.sh (TRIPLE).
+objetivo_hermetico = "x86_64-unknown-linux-musl"
+# El de los instalables sin versión hermética (hoy, el servidor).
+objetivo_nativo = "x86_64-unknown-linux-gnu"
+
+# ── Bibliotecas de sistema: entran en el binario sin pasar por cargo ─────────
+#
+# `version_de`: de dónde sale la versión en el SBOM del build. `rustc` = campo
+# `compilador` de MANIFIESTO.txt; `dpkg:<paquete>` = medida en el constructor.
+# En el SBOM versionado no hay versión: el repositorio no la fija.
+
+[[sistema]]
+nombre = "rust-std"
+licencia = "MIT OR Apache-2.0"
+aplica = "todos"
+version_de = "rustc"
+descripcion = "Biblioteca estándar de Rust (std, core, alloc) del toolchain que compila."
+
+[[sistema]]
+nombre = "musl"
+licencia = "MIT"
+aplica = "hermetico"
+version_de = "dpkg:musl-dev"
+descripcion = "libc enlazada estáticamente; sale del paquete musl-dev del constructor (tools/toolchain/preparar_musl.sh)."
+
+[[sistema]]
+nombre = "libunwind"
+licencia = "Apache-2.0 WITH LLVM-exception"
+aplica = "hermetico"
+version_de = "rustc"
+descripcion = "Desenrollador de LLVM que el toolchain de Rust distribuye para musl; lo copia al sysroot tools/toolchain/preparar_musl.sh."
+
+# ── Código C incluido en crates ──────────────────────────────────────────────
+#
+# cargo-deny solo ve la licencia del crate, no la del código C que compila por
+# dentro. Aquí se DECLARA, con la licencia del proyecto de origen: es una
+# descripción para el auditor, no una revisión de cumplimiento. Las
+# obligaciones de esas licencias en un binario estático están sin resolver
+# (decisión pendiente del propietario).
+
+[[vendorizado]]
+crate = "libbpf-sys"
+nombre = "libbpf"
+licencia = "LGPL-2.1-only OR BSD-2-Clause"
+exige_caracteristica = "hermetico"
+evidencia = { fichero = "crates/aegis-agent/Cargo.toml", contiene = "libbpf, libelf y zlib se compilan DESDE FUENTE" }
+nota = "libbpf-sys la compila desde su fuente incluida y queda enlazada estáticamente en el agente hermético."
+
+[[vendorizado]]
+crate = "libbpf-sys"
+nombre = "libelf"
+licencia = "GPL-2.0-or-later OR LGPL-3.0-or-later"
+exige_caracteristica = "hermetico"
+evidencia = { fichero = "crates/aegis-agent/Cargo.toml", contiene = "libbpf, libelf y zlib se compilan DESDE FUENTE" }
+nota = "De elfutils, enlazada estáticamente en el binario hermético. Qué exige su licencia en un binario estático (aviso, fuentes u objetos para reenlazar) NO está resuelto: queda pendiente de decisión del propietario y el auditor debe revisarlo."
+
+[[vendorizado]]
+crate = "libbpf-sys"
+nombre = "zlib"
+licencia = "Zlib"
+exige_caracteristica = "hermetico"
+evidencia = { fichero = "crates/aegis-agent/Cargo.toml", contiene = "libbpf, libelf y zlib se compilan DESDE FUENTE" }
+nota = "Enlazada estáticamente en el binario hermético."
+
+# ── Prosa ────────────────────────────────────────────────────────────────────
+
+[textos]
+introduccion = """
+Lo que un auditor externo necesita para empezar sin preguntar: qué hay, cómo está \
+construido, de qué está hecho, de dónde sale cada binario y qué se propone atacar. \
+Todo se genera desde el código con `cargo xtask docs`, y `make ci` falla si deja de \
+coincidir. Lo que no se puede derivar del código está en \
+[`tools/config/auditoria.toml`](../../../tools/config/auditoria.toml), con una evidencia \
+que se comprueba en cada generación.
+"""
+procedencia = """
+Los binarios herméticos no se versionan, y su SHA-256 depende del constructor: la \
+reproducibilidad solo se comprueba en la misma máquina (grupo `reproducible` de \
+`make ci`), con otros directorios de destino que los de `dist-hermetico/`. Por eso sus \
+sumas no están aquí, sino junto a ellos en `dist-hermetico/`. El grupo `auditoria` de \
+`make ci` comprueba que salen de este árbol (HUELLA) y que coinciden con `SHA256SUMS`, \
+y solo entonces escribe a su lado el SBOM con el hash de cada binario y la procedencia \
+del build.
+"""
+limitaciones_sbom = [
+    "Solo x86_64. El agente y el watchdog de aarch64 (`dist-hermetico-aarch64/`, variante `estatico-sistema` con la libelf y la zlib de la distribución) aún no tienen SBOM ni `SHA256SUMS`.",
+    "El servidor no tiene binario hermético: su SBOM no lleva hash, y glibc y las demás bibliotecas dinámicas del sistema donde se instala no aparecen.",
+    "La granularidad es el crate. El código C que un crate compila por dentro solo aparece si está declarado en `[[vendorizado]]`, y su licencia la declara el proyecto de origen: `cargo-deny` no la ve. Declararla no resuelve sus obligaciones.",
+    "La versión de la biblioteca estándar de Rust, de musl y de libunwind la fija el repositorio (`rust-toolchain.toml` y `tools/toolchain/fijado.toml`, grupo `toolchain` de `make ci`), pero la registra el SBOM del build, no este.",
+    "Un crate enlazado cuyo código descarta el enlazador sigue apareciendo: el SBOM sobreaproxima. Lo que se ejecuta de verdad lo dice la matriz de capacidades.",
+    "Los objetos eBPF incrustados se generan en `build.rs` y no llevan hash en el SBOM versionado.",
+]
+alcance_introduccion = """
+Propuesta de alcance para un pentest contratado. Las superficies y sus puntos de \
+entrada se extraen del código en cada generación: si el código cambia de forma que un \
+extractor ya no encuentra nada, `make ci` falla. Los ataques mínimos son el punto de \
+partida, no un techo. «Piden atención» marca lo que el propio código señala: una ruta \
+que se sirve sin sesión (`RUTAS_PUBLICAS`) o que no tiene fila en la tabla RBAC, o un \
+analizador sin objetivo de fuzzing.
+"""
+reglas = [
+    "Solo contra el entorno de prueba: máquinas virtuales de la matriz de kernels con el agente, el watchdog y el servidor instalados desde los artefactos del build auditado. Nunca contra equipos de terceros.",
+    "El build auditado se identifica por su `procedencia.intoto.json` (commit, huella del árbol y SHA-256 de cada binario). Un hallazgo sobre otro build se vuelve a comprobar sobre este.",
+    "Todo hallazgo se entrega con una reproducción mínima.",
+    "Nada de código ofensivo persistente ni destructivo fuera del rango benigno y reversible del proyecto (`aegis-rango`).",
+    "Las credenciales, certificados y claves del entorno de prueba se generan para el pentest y se revocan al terminar.",
+]
+fuera_de_alcance = [
+    "Windows y macOS: no son producto. Faltan la firma de Microsoft (MVI, ELAM) y el entitlement de Endpoint Security de Apple.",
+    "Ingeniería social y ataques físicos.",
+    "Infraestructura de terceros: la forja, el registro de crates, GitHub.",
+    "Denegación de servicio volumétrica contra la red del propietario.",
+]
+ventanas_y_contacto = """
+Las fija el propietario al contratar: ventana de pruebas, contacto técnico y canal \
+cifrado para hallazgos críticos. Hasta entonces este apartado queda abierto a propósito.
+"""
+criterios_de_cierre = [
+    "Cada hallazgo tiene causa raíz, arreglo y un verificador o invariante que hace fallar `make ci` si reaparece.",
+    "Cada hallazgo tiene su fila en el modelo de amenazas (`docs/modelo-de-amenazas.md`).",
+    "El auditor vuelve a probar sobre un build cuya procedencia coincide con la que cita el informe.",
+]
+constructor = """
+El runner de CI (Forgejo con KVM, `.forgejo/workflows/ci.yml`) corre hoy **en el mismo \
+PC en el que se desarrolla**, dentro de WSL, por decisión del propietario. \
+[`docs/ci-remoto.md`](../../ci-remoto.md) exige una máquina dedicada; hoy no lo es. \
+Nada de lo que produce cuenta como plataforma de construcción independiente: comparte \
+usuario, disco y red con quien escribe el código, y quien puede cambiar el código puede \
+cambiar el build. La procedencia lo registra (`constructorEnWsl` y el identificador del \
+constructor). GitHub Actions, que daría una plataforma alojada y procedencia firmada sin \
+coste en repositorios públicos, sigue bloqueado a nivel de cuenta \
+([`docs/07-estado-ci.md`](../../07-estado-ci.md)). Pasar a L2 sin coste exige resolver \
+ese bloqueo (y que el repositorio sea público para las atestaciones de GitHub) o una \
+máquina dedicada con una clave de firma que no esté en el PC de desarrollo.
+"""
+
+# ── Alcance del pentest: superficies ─────────────────────────────────────────
+#
+# `fuzz`: prefijos de los objetivos de fuzzing que cubren la superficie, de
+# `fuzz/Cargo.toml` y de `server/fuzz/Cargo.toml`.
+#
+# Extractores (tipo):
+#   variantes   variantes de `pub enum <nombre>`, con su doc; `omitir_atributo`
+#               salta las de prueba; `fuzz_prefijo` exige un objetivo por variante
+#   constantes  `const NOMBRE: T = valor;` de cada nombre (falta uno: error)
+#   rutas       `.ruta("patron", ...)` o `.route("patron", ...)` (las `marcas`)
+#               con sus métodos y manejadores. Con `publicas`, la constante del
+#               mismo fichero que lista las rutas sin sesión; con `reglas`, el
+#               fichero de la tabla RBAC (`const REGLAS`), de la que sale el
+#               permiso y el alcance de cada método y ruta
+#   rpc         `rpc Nombre(...)` de un .proto
+#   funciones   `pub fn` fuera de las pruebas
+
+[[superficie]]
+id = "parsers"
+nombre = "Parsers del trabajador"
+descripcion = """
+Todo byte no confiable que analiza el agente (ejecutables PE, ELF y Mach-O, el modelo \
+estático, el desensamblador, el emulador) se procesa en el proceso trabajador \
+confinado: seccomp, Landlock, sin red, uid propio, cgroup y plazo. El atacante busca \
+ejecutar código en el trabajador y salir del confinamiento, o dejar al agente sin \
+análisis.
+"""
+crates = ["aegis-trabajador", "aegis-ml", "aegis-pe", "aegis-macho", "aegis-disasm", "aegis-emu"]
+fuzz = ["trabajador_"]
+ataques = [
+    "Ficheros malformados que provoquen pánico, bucle o agotamiento de memoria: la protección no se interrumpe y el agente registra «SinDatos» con la causa.",
+    "Escape del confinamiento desde un analizador comprometido: abrir ficheros o sockets, llamadas al sistema fuera del filtro seccomp, escritura fuera de Landlock, señales al agente.",
+    "Agotar el freno de relanzamiento del trabajador para dejar el análisis estático sin servicio de forma sostenida.",
+]
+fuera = ["Los analizadores de prueba (`prueba-fallos`), que solo se compilan en las pruebas."]
+
+[[superficie.extractor]]
+tipo = "variantes"
+fichero = "crates/aegis-trabajador/src/analizadores.rs"
+titulo = "Analizadores que corren en el trabajador"
+nombre = "Analizador"
+omitir_atributo = "prueba-fallos"
+fuzz_prefijo = "trabajador_"
+
+[[superficie]]
+id = "ipc-trabajador"
+nombre = "IPC entre el agente y el trabajador"
+descripcion = """
+Tramas binarias versionadas entre el agente, que corre como root, y el trabajador. Un \
+trabajador comprometido controla las respuestas: el lado del agente que las decodifica \
+es la frontera que hay que atacar.
+"""
+crates = ["aegis-trabajador", "aegis-agent"]
+fuzz = ["trabajador_protocolo"]
+ataques = [
+    "Trabajador sustituido que envía informes forjados, gigantes, truncados o de otra versión: el agente los rechaza sin bloquearse ni reservar memoria sin cota.",
+    "Comprobar si el objetivo `trabajador_protocolo` ejercita el lado del agente (decodificación de `Informe` y `Fallo`) o solo el del trabajador.",
+    "Respuesta tardía de un trabajador ya sustituido atribuida a otra petición (identificador de petición).",
+]
+
+[[superficie.extractor]]
+tipo = "variantes"
+fichero = "crates/aegis-trabajador/src/protocolo.rs"
+titulo = "Tipos de trama"
+nombre = "Tipo"
+
+[[superficie.extractor]]
+tipo = "constantes"
+fichero = "crates/aegis-trabajador/src/protocolo.rs"
+titulo = "Versión y límites del protocolo"
+nombres = ["VERSION", "MAX_CARGA", "MAX_DATOS", "MAX_HALLAZGOS", "MAX_TEXTO", "MAX_ANALIZADORES"]
+
+[[superficie]]
+id = "socket-control"
+nombre = "Socket de control local"
+descripcion = """
+Socket Unix del agente que usa `aegisctl`: estado, escaneo bajo demanda, aislamiento de \
+red y cuarentena. Aislar la red desde aquí es una acción destructiva sobre la máquina.
+"""
+crates = ["aegis-ctl", "aegis-agent", "aegis-watchdog"]
+ataques = [
+    "Usuario no root que conecta al socket: permisos del fichero, carrera entre `bind` y `chmod`, identidad del par (SO_PEERCRED).",
+    "Órdenes malformadas o sin fin de línea; rutas de escaneo hostiles (enlaces simbólicos, `/proc`, FIFOs, ficheros enormes).",
+    "Crear la marca de parada del watchdog (`/run/aegiscore/agent.shutdown`) sin autorización para apagar la protección.",
+]
+
+[[superficie.extractor]]
+tipo = "variantes"
+fichero = "crates/aegis-ctl/src/protocol.rs"
+titulo = "Órdenes del protocolo"
+nombre = "Request"
+
+[[superficie.extractor]]
+tipo = "constantes"
+fichero = "crates/aegis-ctl/src/bin/aegisctl.rs"
+titulo = "Ruta del socket"
+nombres = ["SOCKET_POR_DEFECTO"]
+
+[[superficie]]
+id = "actualizacion"
+nombre = "Actualización"
+descripcion = """
+Verificación y aplicación de artefactos firmados (Ed25519, o híbrida con ML-DSA-65), con \
+copia de seguridad y reversión. Quien la engañe instala su código como root en toda la \
+flota.
+"""
+crates = ["aegis-update"]
+ataques = [
+    "Nombre de artefacto con `..` o ruta absoluta; bajada de versión (anti-rollback); huella que no corresponde a los bytes; firma solo clásica donde se exige la híbrida.",
+    "Interrupción entre la copia de seguridad y el reemplazo: el binario no puede quedar a medias ni sin copia.",
+    "Artefacto firmado para otro tipo (`ArtifactKind`) aplicado como binario del agente.",
+]
+
+[[superficie.extractor]]
+tipo = "funciones"
+fichero = "crates/aegis-update/src/updater.rs"
+titulo = "Entrada del actualizador"
+
+[[superficie.extractor]]
+tipo = "funciones"
+fichero = "crates/aegis-update/src/signature.rs"
+titulo = "Verificación de firmas"
+
+[[superficie]]
+id = "malla"
+nombre = "Malla P2P y enjambre"
+descripcion = """
+Dos transportes entre agentes: la malla UDP de la red local (vacunas, AEAD con clave \
+compartida) y el enjambre libp2p (gossipsub sobre Noise), que transporta órdenes \
+firmadas y artefactos troceados. Un nodo comprometido está dentro de los dos.
+"""
+crates = ["aegis-mesh", "aegis-swarm", "aegis-swarm-net"]
+ataques = [
+    "Nodo comprometido con la clave compartida de la malla: intentar retirar indicadores o inundar (cotas de saltos, deduplicación y tasa por par).",
+    "Sybil, reproducción de una orden auténtica tras un reinicio, colisión de identificadores y envenenamiento de trozos en el enjambre.",
+    "Comprobar que `LevantarAislamiento`, `DesactivarRegla` y `DegradarProteccion` no se aplican nunca llegando por la malla.",
+]
+
+[[superficie.extractor]]
+tipo = "variantes"
+fichero = "crates/aegis-mesh/src/wire.rs"
+titulo = "Mensajes de la malla UDP"
+nombre = "MsgType"
+
+[[superficie.extractor]]
+tipo = "constantes"
+fichero = "crates/aegis-mesh/src/wire.rs"
+titulo = "Versión y límites de la malla UDP"
+nombres = ["VERSION", "HEADER_LEN", "MAX_DATAGRAM"]
+
+[[superficie.extractor]]
+tipo = "variantes"
+fichero = "crates/aegis-swarm/src/mensaje.rs"
+titulo = "Mensajes del enjambre"
+nombre = "TipoMensaje"
+
+[[superficie.extractor]]
+tipo = "variantes"
+fichero = "crates/aegis-swarm/src/orden.rs"
+titulo = "Acciones que puede ordenar el enjambre"
+nombre = "Accion"
+
+[[superficie.extractor]]
+tipo = "constantes"
+fichero = "crates/aegis-swarm/src/mensaje.rs"
+titulo = "Versión y límites del enjambre"
+nombres = ["VERSION", "MAX_TEXTO", "MAX_MENSAJE"]
+
+[[superficie.extractor]]
+tipo = "constantes"
+fichero = "swarm-net/src/lib.rs"
+titulo = "Transporte libp2p"
+nombres = ["TEMA", "MAX_MENSAJE"]
+
+[[superficie]]
+id = "api"
+nombre = "API del plano de control y canales de la flota"
+descripcion = """
+API REST de administración (axum) que consume la consola: toda ruta exige sesión por \
+construcción (capa `exigir_sesion`) salvo las de `RUTAS_PUBLICAS`, y después el permiso \
+y el alcance de su fila en la tabla RBAC (matriz completa en \
+[`docs/generado/matriz-rbac.md`](../matriz-rbac.md)). La flota habla con el plano de \
+control por dos canales con el mismo verificador mTLS y la CA de flota como única raíz: \
+el transporte nativo de `aegis-fleet`, que usa el enlace del agente (solo auditoría), y \
+la superficie gRPC estándar (tonic) para integraciones de terceros. En los dos, la \
+identidad del par sale del certificado. Controla el aislamiento de cualquier máquina de \
+la flota.
+"""
+crates = ["aegis-server", "aegis-consola", "aegis-fleet"]
+fuzz = ["aegisql", "fleet_", "api_", "grpc_"]
+ataques = [
+    "Rutas sin sesión (`RUTAS_PUBLICAS`): fuerza bruta y enumeración de operadores en el inicio de sesión (tiempos, cupo de fallos) y fuga de información por la sonda de salud.",
+    "Escalada de rol e inquilino cruzado contra la tabla RBAC: un recurso de otro inquilino debe responder como inexistente; escrituras con verbo de lectura (`GET /api/agentes/{cn}/comando`, `GET /api/cuarentena?levantar=`).",
+    "AegisQL hostil contra el límite de coste de cada rol; cuerpos gigantes; WebSocket con el token en la consulta.",
+    "Flota sin certificado de cliente, con el de otra CA o suplantando un CN; tramas por encima del máximo; un `hay_comando` del latido que el enlace del agente, en solo auditoría, no debe obedecer.",
+]
+
+[[superficie.extractor]]
+tipo = "rutas"
+fichero = "server/crates/aegis-server/src/api.rs"
+titulo = "Rutas de la API REST, con su permiso y alcance RBAC"
+marcas = [".ruta("]
+publicas = "RUTAS_PUBLICAS"
+reglas = "server/crates/aegis-server/src/autorizacion.rs"
+
+[[superficie.extractor]]
+tipo = "rutas"
+fichero = "server/crates/aegis-server/src/panel.rs"
+titulo = "Rutas de la consola (ficheros estáticos incrustados en el binario)"
+marcas = [".route("]
+
+[[superficie.extractor]]
+tipo = "variantes"
+fichero = "crates/aegis-fleet/src/rpc.rs"
+titulo = "Métodos del transporte nativo de la flota (el del agente)"
+nombre = "Metodo"
+
+[[superficie.extractor]]
+tipo = "constantes"
+fichero = "crates/aegis-fleet/src/rpc.rs"
+titulo = "Límite de trama del transporte nativo"
+nombres = ["MAX_TRAMA"]
+
+[[superficie.extractor]]
+tipo = "rpc"
+fichero = "server/proto/aegis_fleet.proto"
+titulo = "Servicio gRPC estándar (tonic, solo mTLS)"
+
+# ── SLSA v1.0, pista Build ───────────────────────────────────────────────────
+#
+# nivel 1 a 3: requisitos de la pista Build. nivel 0: garantías complementarias
+# que el auditor pide junto a SLSA. El nivel alcanzado lo CALCULA la generación.
+# «cumple» exige evidencia, y la evidencia de un «cumple» es la puerta de
+# `make ci` que lo hace fallar si deja de ser cierto.
+
+[[slsa]]
+nivel = 1
+requisito = "Proceso de construcción consistente y guionizado"
+estado = "cumple"
+evidencia = [
+    { fichero = "tools/ci/hermetico.sh", contiene = "args=(build --release --locked" },
+    { fichero = "tools/ci-local.sh", contiene = "./tools/ci/hermetico.sh" },
+]
+detalle = "Un solo guion construye todos los binarios herméticos desde `tools/config/instalables.toml`, con `--locked`, dentro de `make ci`."
+
+[[slsa]]
+nivel = 1
+requisito = "La procedencia existe y la genera el build"
+estado = "cumple"
+evidencia = [
+    { fichero = "xtask/src/sbom.rs", contiene = "https://slsa.dev/provenance/v1" },
+    { fichero = "tools/ci-local.sh", contiene = "cargo xtask sbom --comprobar --dist dist-hermetico" },
+]
+detalle = "`dist-hermetico/procedencia.intoto.json`: declaración in-toto v1 con predicado SLSA v1 (sujetos con su SHA-256, commit, `Cargo.lock`, toolchain y huella del árbol), escrita por el grupo `auditoria` de `make ci` tras comprobar que los binarios salen de este árbol. Antes solo existía `MANIFIESTO.txt`, texto libre."
+
+[[slsa]]
+nivel = 1
+requisito = "La procedencia se distribuye con los artefactos"
+estado = "parcial"
+evidencia = [{ fichero = ".gitignore", contiene = "dist-hermetico/" }]
+detalle = "Se escribe junto a los binarios, pero no hay canal de publicación: `dist-hermetico/` está fuera de git y solo existe en la máquina que construye. Hasta que una publicación lleve juntos binarios, `SHA256SUMS`, `sbom/` y `procedencia.intoto.json`, solo la tiene quien recibe el directorio entero."
+
+[[slsa]]
+nivel = 2
+requisito = "Plataforma de construcción alojada"
+estado = "no"
+evidencia = [
+    { fichero = "docs/ci-remoto.md", contiene = "Máquina dedicada" },
+    { fichero = "docs/ci-remoto.md", contiene = "Mientras vive en el PC de desarrollo" },
+    { fichero = "docs/07-estado-ci.md", contiene = "GitHub Actions está bloqueado" },
+]
+detalle = "El runner corre en el PC de desarrollo, dentro de WSL (ver «Donde corre el constructor»), y GitHub Actions está bloqueado a nivel de cuenta."
+
+[[slsa]]
+nivel = 2
+requisito = "Procedencia auténtica, firmada por la plataforma"
+estado = "no"
+evidencia = [{ fichero = "crates/aegis-procedencia/src/verificacion.rs", contiene = "pub firma_valida: bool" }]
+detalle = "La declaración de procedencia se escribe sin firmar. `aegis-procedencia` no verifica ninguna firma de procedencia: recibe como un booleano el resultado de la firma del artefacto, que verifica `aegis-update`. Sin coste: Sigstore sin clave desde Actions, o `ssh-keygen -Y sign` con una clave de publicación que no viva en el PC de desarrollo."
+
+[[slsa]]
+nivel = 3
+requisito = "Constructor aislado entre ejecuciones"
+estado = "no"
+evidencia = [
+    { fichero = ".forgejo/workflows/ci.yml", contiene = "Corre en modo host y como root" },
+    { fichero = ".forgejo/workflows/ci.yml", contiene = "CARGO_TARGET_DIR: /var/cache/aegis-ci/target" },
+]
+detalle = "El runner corre en modo host y como root, con caché de compilación compartida entre ejecuciones."
+
+[[slsa]]
+nivel = 3
+requisito = "Procedencia infalsificable"
+estado = "no"
+detalle = "Exige que la clave de firma sea inaccesible a los pasos del build (flujo reutilizable tipo `slsa-github-generator`). Se declarará L3 solo cuando `slsa-verifier` lo verifique desde otra máquina."
+
+[[slsa]]
+nivel = 0
+requisito = "SBOM de cada instalable ligado al Cargo.lock, con licencias"
+estado = "cumple"
+evidencia = [
+    { fichero = "xtask/src/sbom.rs", contiene = '"bomFormat": "CycloneDX"' },
+    { fichero = "tools/ci-local.sh", contiene = "cargo xtask sbom --comprobar" },
+]
+detalle = "CycloneDX 1.5 por instalable en `docs/generado/auditoria/sbom/`. La puerta falla si no corresponde al `Cargo.lock` o si un crate no declara licencia. Declara la licencia del código C incluido; no revisa su cumplimiento."
+
+[[slsa]]
+nivel = 0
+requisito = "Build reproducible del producto en el mismo constructor"
+estado = "cumple"
+evidencia = [
+    { fichero = "tools/construir-reproducible.sh", contiene = "construir B \"$DIR_B\"" },
+    { fichero = "tools/ci-local.sh", contiene = "./tools/construir-reproducible.sh" },
+]
+detalle = "El grupo `reproducible` de `make ci` construye dos veces los instalables herméticos desde el mismo árbol, en dos directorios de destino (uno desde cero) y con `SOURCE_DATE_EPOCH` del commit, y falla si el SHA-256 de alguno difiere. Es reproducibilidad temporal en esta máquina: mismo compilador, mismo sysroot, misma ruta. No compara esos binarios con los de `dist-hermetico/`, que se construyen con otra lista de remapeos de ruta."
+
+[[slsa]]
+nivel = 0
+requisito = "Build reproducible verificado desde una segunda máquina"
+estado = "no"
+evidencia = [{ fichero = "tools/construir-reproducible.sh", contiene = "NO demuestra:" }]
+detalle = "Nadie ha reconstruido un commit en otra máquina para comparar los bytes: no hay segunda máquina (el runner es el PC de desarrollo). La toolchain sí está fijada en el repositorio (`rust-toolchain.toml`, `tools/toolchain/fijado.toml` y el sello del sysroot), que es lo que esa segunda máquina tendría que reproducir."
+
+[[slsa]]
+nivel = 0
+requisito = "Toolchain de Rust fijada"
+estado = "cumple"
+evidencia = [
+    { fichero = "rust-toolchain.toml", contiene = "channel = " },
+    { fichero = "tools/toolchain/fijado.toml", contiene = "[rust-std]" },
+    { fichero = "tools/toolchain/comprobar_toolchain.sh", contiene = "fijado_sello_valor" },
+    { fichero = "tools/ci-local.sh", contiene = "paso toolchain " },
+    { fichero = "tools/ci/hermetico.sh", contiene = "comprobar_toolchain.sh" },
+]
+detalle = "`rust-toolchain.toml` elige el canal y `tools/toolchain/fijado.toml` fija la salida exacta de `rustc` y `cargo`, el SHA-256 de cada `rust-std` y las versiones de los paquetes del sysroot musl. El grupo `toolchain` de `make ci` falla con otro compilador, y `hermetico.sh` no construye nada sin un sysroot sellado por la receta actual con esas versiones. `instalar-runner.sh` y la imagen leen o comprueban el mismo canal."
+
+[[slsa]]
+nivel = 0
+requisito = "Firma de SHA256SUMS y de los binarios"
+estado = "no"
+evidencia = [{ fichero = "tools/ci/hermetico.sh", contiene = 'sha256sum "${CONSTRUIDOS[@]}" > SHA256SUMS' }]
+detalle = "Las sumas se escriben sin firmar: prueban la integridad frente a un error, no frente a quien pueda reescribir el directorio."

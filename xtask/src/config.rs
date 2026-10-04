@@ -349,6 +349,10 @@ pub struct PruebaE2e {
     /// la matriz de capacidades les acredita lo que ejercen.
     #[serde(default)]
     pub acompanantes: Vec<String>,
+    /// Para `instalable`: la prueba necesita los paquetes .deb y .rpm de la
+    /// arquitectura (`tools/empaquetar.sh --matriz`), que viajan en `paquetes/`.
+    #[serde(default)]
+    pub paquetes: bool,
     /// Para `cargo-test`: el paquete.
     pub paquete: Option<String>,
     /// Para `cargo-test`: el destino de prueba (`tests/<nombre>.rs`).
@@ -356,4 +360,180 @@ pub struct PruebaE2e {
     /// Para `cargo-test`: features.
     #[serde(default)]
     pub caracteristicas: Vec<String>,
+}
+
+// ── auditoria.toml ──────────────────────────────────────────────────────────
+
+/// `tools/config/auditoria.toml`: lo que el paquete para auditoria externa no
+/// puede sacar del codigo, cada cosa con su evidencia.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Auditoria {
+    /// Objetivos para los que se resuelve el SBOM.
+    pub sbom: ConfigSbom,
+    /// Bibliotecas de sistema que entran en el binario sin pasar por cargo.
+    #[serde(default)]
+    pub sistema: Vec<ComponenteSistema>,
+    /// Codigo C que un crate lleva dentro.
+    #[serde(default)]
+    pub vendorizado: Vec<Vendorizado>,
+    /// Prosa del paquete.
+    pub textos: TextosAuditoria,
+    /// Superficies del alcance del pentest.
+    pub superficie: Vec<Superficie>,
+    /// Requisitos SLSA y garantias complementarias.
+    pub slsa: Vec<RequisitoSlsa>,
+}
+
+/// `[sbom]`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigSbom {
+    /// Triple de los binarios hermeticos (el de `tools/ci/hermetico.sh`).
+    pub objetivo_hermetico: String,
+    /// Triple de los instalables sin version hermetica.
+    pub objetivo_nativo: String,
+}
+
+/// Una biblioteca de sistema enlazada en el binario.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ComponenteSistema {
+    /// Nombre.
+    pub nombre: String,
+    /// Expresion SPDX, declarada por el proyecto de origen.
+    pub licencia: String,
+    /// `todos` o `hermetico`.
+    pub aplica: String,
+    /// De donde sale la version en el build: `rustc` (MANIFIESTO.txt) o
+    /// `dpkg:<paquete>` (medida en el constructor).
+    pub version_de: String,
+    /// Una linea.
+    pub descripcion: String,
+}
+
+/// Codigo C que un crate compila desde sus fuentes incluidas.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Vendorizado {
+    /// Crate que lo lleva dentro.
+    #[serde(rename = "crate")]
+    pub krate: String,
+    /// Nombre del componente C.
+    pub nombre: String,
+    /// Expresion SPDX, declarada por el proyecto de origen.
+    pub licencia: String,
+    /// Solo si el instalable se construye con esta feature.
+    #[serde(default)]
+    pub exige_caracteristica: Option<String>,
+    /// Prueba en el repositorio de que se compila incluido.
+    #[serde(default)]
+    pub evidencia: Option<Evidencia>,
+    /// Aclaracion.
+    pub nota: String,
+}
+
+/// `[textos]`: prosa, sin cifras escritas a mano.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextosAuditoria {
+    /// Primer parrafo del indice.
+    pub introduccion: String,
+    /// Por que las sumas no se versionan y donde estan.
+    pub procedencia: String,
+    /// Limites conocidos del SBOM.
+    pub limitaciones_sbom: Vec<String>,
+    /// Primer parrafo del alcance.
+    pub alcance_introduccion: String,
+    /// Reglas de enfrentamiento.
+    pub reglas: Vec<String>,
+    /// Fuera de alcance, en general.
+    pub fuera_de_alcance: Vec<String>,
+    /// Ventanas y contacto.
+    pub ventanas_y_contacto: String,
+    /// Criterios de cierre.
+    pub criterios_de_cierre: Vec<String>,
+    /// Donde corre el constructor.
+    pub constructor: String,
+}
+
+/// Una superficie de ataque del alcance del pentest.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Superficie {
+    /// Identificador (ancla del documento).
+    pub id: String,
+    /// Nombre visible.
+    pub nombre: String,
+    /// Que es y que busca el atacante.
+    pub descripcion: String,
+    /// Crates que la implementan.
+    pub crates: Vec<String>,
+    /// Prefijos de los objetivos de fuzzing que la cubren (`fuzz/Cargo.toml` y
+    /// `server/fuzz/Cargo.toml`).
+    #[serde(default)]
+    pub fuzz: Vec<String>,
+    /// Como se sacan del codigo sus puntos de entrada.
+    pub extractor: Vec<Extractor>,
+    /// Ataques minimos propuestos.
+    pub ataques: Vec<String>,
+    /// Fuera de alcance en esta superficie.
+    #[serde(default)]
+    pub fuera: Vec<String>,
+}
+
+/// Un extractor de puntos de entrada.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Extractor {
+    /// `variantes`, `constantes`, `rutas`, `rpc` o `funciones`.
+    pub tipo: String,
+    /// Fichero, relativo a la raiz.
+    pub fichero: String,
+    /// Titulo de la tabla.
+    pub titulo: String,
+    /// `variantes`: nombre del enum.
+    #[serde(default)]
+    pub nombre: Option<String>,
+    /// `variantes`: se omite la variante con un atributo que contenga esto.
+    #[serde(default)]
+    pub omitir_atributo: Option<String>,
+    /// `variantes`: cada variante exige el objetivo de fuzzing
+    /// `<prefijo><variante en minusculas>`.
+    #[serde(default)]
+    pub fuzz_prefijo: Option<String>,
+    /// `constantes`: nombres.
+    #[serde(default)]
+    pub nombres: Vec<String>,
+    /// `rutas`: llamadas que declaran una ruta (`.ruta(`, `.route(`).
+    #[serde(default)]
+    pub marcas: Vec<String>,
+    /// `rutas`: constante del mismo fichero con los pares (metodo, patron)
+    /// que se sirven SIN sesion (`RUTAS_PUBLICAS`).
+    #[serde(default)]
+    pub publicas: Option<String>,
+    /// `rutas`: fichero con la tabla RBAC (`const REGLAS`), de la que sale el
+    /// permiso y el alcance de cada metodo y ruta.
+    #[serde(default)]
+    pub reglas: Option<String>,
+}
+
+/// Un requisito SLSA (nivel 1 a 3) o una garantia complementaria (nivel 0).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RequisitoSlsa {
+    /// 1, 2 o 3; 0 = complementaria.
+    pub nivel: u8,
+    /// Que se exige.
+    pub requisito: String,
+    /// `cumple`, `parcial` o `no`.
+    pub estado: String,
+    /// Pruebas en el repositorio. Obligatorias si cumple.
+    #[serde(default)]
+    pub evidencia: Vec<Evidencia>,
+    /// Un fichero cuya existencia contradice un «no» o un «parcial».
+    #[serde(default)]
+    pub desmiente: Option<String>,
+    /// Explicacion.
+    pub detalle: String,
 }
