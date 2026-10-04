@@ -263,14 +263,16 @@ impl Analizadores {
         let modelo = modelo
             .as_ref()
             .map_err(|e| format!("el modelo no carga: {e}"))?;
-        let rasgos = aegis_ml::FeatureExtractor::default().extract(datos);
-        let vector = aegis_ml::features::to_vector(&rasgos);
+        // EL MISMO vector que `aegis-vectorizar` emite para entrenar: una sola
+        // funcion, para que entrenamiento y produccion no diverjan.
+        let vector = aegis_ml::vectorizar(datos);
         let p = modelo.predict(&vector).map_err(|e| e.to_string())?;
         let milesimas = (p.score.clamp(0.0, 1.0) * 1000.0) as u16;
         let confianza = aegis_entidad::escala::de_puntuacion(milesimas);
-        if aegis_ml::EMBEDDED_MODEL_ES_REFERENCIA {
-            // El modelo de referencia no esta entrenado: su puntuacion se ve,
-            // pero no acusa ni absuelve (ver aegis_ml::EMBEDDED_MODEL_ES_REFERENCIA).
+        if let aegis_ml::EstadoModelo::Referencia { motivo } = aegis_ml::puerta::estado() {
+            // Sin una tarjeta generada que lo respalde (hash de este modelo y
+            // de este extractor, FPR objetivo de tools/config/modelo.toml
+            // cumplido), la puntuacion se ve, pero no acusa ni absuelve.
             return Ok(Informe {
                 hallazgos: vec![hallazgo(
                     Motor::Aprendizaje,
@@ -278,7 +280,7 @@ impl Analizadores {
                     Severidad::Info,
                     Confianza::NULA,
                     format!(
-                        "modelo de referencia sin entrenar: puntuacion {:.3} ({:?}); no es evidencia",
+                        "modelo de referencia: puntuacion {:.3} ({:?}); no es evidencia ({motivo})",
                         p.score, p.verdict
                     ),
                 )],
@@ -601,7 +603,7 @@ mod pruebas {
     fn el_modelo_de_referencia_no_acusa_ni_absuelve() {
         // Sobre binarios corrientes el modelo de referencia daba «sospechoso»:
         // mientras no haya modelo entrenado, su puntuacion no es evidencia.
-        if !aegis_ml::EMBEDDED_MODEL_ES_REFERENCIA {
+        if !aegis_ml::modelo_es_referencia() {
             return; // con un modelo entrenado, acusar es su trabajo
         }
         let mut a = Analizadores::default();
@@ -620,6 +622,24 @@ mod pruebas {
                 i.hallazgos
             );
         }
+    }
+
+    #[test]
+    fn el_modelo_del_trabajador_usa_el_mismo_vector_que_el_entrenamiento() {
+        // aegis-vectorizar emite aegis_ml::vectorizar; si el trabajador
+        // calculara el vector de otra forma, la tarjeta describiria otro modelo.
+        let bytes = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        let m = aegis_ml::MalwareModel::embedded().unwrap();
+        let p = m.predict(&aegis_ml::vectorizar(&bytes)).unwrap();
+        let i = Analizadores::default()
+            .analizar(Analizador::Modelo, &bytes)
+            .expect("el modelo analiza");
+        let esperado = format!("puntuacion {:.3}", p.score);
+        assert!(
+            i.hallazgos.iter().any(|h| h.porque.contains(&esperado)),
+            "{esperado}: {:?}",
+            i.hallazgos
+        );
     }
 
     #[test]

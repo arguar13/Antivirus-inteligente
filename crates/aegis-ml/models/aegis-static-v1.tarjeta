@@ -1,0 +1,10 @@
+# GENERADO por tools/ml/entrenar.py (orden «referencia»). No editar a mano.
+# Lo lee crates/aegis-ml/src/puerta.rs: clase = referencia -> NoConcluyente.
+version_tarjeta = 1
+clase = "referencia"
+version_modelo = 1
+sha256_modelo = "ba0d05c7f1e87f8633c455e4fbf5349a2f01d2f5c6e7d614312c3399a1b2a482"
+origen = "crates/aegis-ml/tools/build_model.py (pesos fijados a mano)"
+huella_extractor = "sin medir"
+fpr_cota95_bloqueo = "sin medir"
+auc_eval = "sin medir"

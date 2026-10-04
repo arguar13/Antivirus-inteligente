@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Puerta del modelo estatico (FASE 4.4 del MP-16)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  El modelo empotrado (crates/aegis-ml/models/aegis-static-v1.onnx) deja de ser
+#  una REFERENCIA —puntuacion visible, juicio NoConcluyente— solo si su tarjeta
+#  GENERADA (crates/aegis-ml/models/aegis-static-v1.tarjeta) corresponde por hash
+#  al modelo y al extractor, y cumple lo que se declara aqui. La regla la aplica
+#  el agente (crates/aegis-ml/src/puerta.rs), que incrusta este fichero al
+#  compilar; tools/ml/entrenar.py lo lee para elegir los umbrales.
+#
+#  Formato: `clave = valor`, una por linea (el agente lo lee sin biblioteca de
+#  TOML). Nada de tablas en linea ni valores en varias lineas.
+
+# Tasa de falsos positivos maxima en el umbral de BLOQUEO, por binario benigno.
+# Se compara con la COTA SUPERIOR AL 95 % (Clopper-Pearson) medida sobre los
+# benignos posteriores a la fecha de corte, no con la tasa observada.
+# El objetivo de producto es 1e-5 (model.rs); demostrarlo exige ~300.000
+# benignos sin un solo falso positivo. Este es el primer escalon.
+fpr_objetivo = 1.0e-4
+
+# Benignos de evaluacion minimos: con cero falsos positivos, la cota al 95 % es
+# ~3/n, asi que 1e-4 exige al menos ~30.000. Menos no puede cumplir.
+min_benignos_evaluacion = 30000
+
+# Maliciosos de evaluacion minimos para publicar recall y AUC como medida.
+min_maliciosos_evaluacion = 300
+
+# Tasa de falsos positivos en el umbral de VIGILANCIA (solo telemetria reforzada).
+fpr_vigilar = 1.0e-3
+
+# Umbral de contencion: FPR objetivo dividido por este factor.
+factor_contener = 10
+
+# Fecha de corte por defecto (primera vista). Entrena con lo ANTERIOR, evalua con
+# lo POSTERIOR o igual. Se puede sobrescribir con --corte.
+fecha_corte = "2026-06-01"
+
+# Semilla del entrenamiento: misma entrada, mismo modelo, mismo hash.
+semilla = 1322

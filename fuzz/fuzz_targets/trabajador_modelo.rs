@@ -16,15 +16,22 @@ use aegis_trabajador::{Analizador, Analizadores};
 /// Una sola instancia por proceso, como en el trabajador: el modelo se carga
 /// una vez y no en cada entrada (a 2 entradas por segundo, el fuzzing no
 /// llegaba a ningun camino profundo).
+///
+/// Se carga en `init`, que libFuzzer ejecuta UNA vez antes de la primera
+/// entrada y fuera de su plazo por entrada (`-timeout`). Cargada perezosamente
+/// en la primera entrada, la carga del modelo (con su puerta: hash del ONNX y
+/// sondas) contaba como si la entrada vacia tardase mas de 10 s.
 static ANALIZADORES: std::sync::Mutex<Option<Analizadores>> = std::sync::Mutex::new(None);
 
-fuzz_target!(|datos: &[u8]| {
+fuzz_target!(init: {
+    let mut a = Analizadores::default();
+    a.precargar();
+    *ANALIZADORES.lock().unwrap_or_else(|e| e.into_inner()) = Some(a);
+}, |datos: &[u8]| {
     let mut guarda = ANALIZADORES.lock().unwrap_or_else(|e| e.into_inner());
-    let a = guarda.get_or_insert_with(|| {
-        let mut a = Analizadores::default();
-        a.precargar();
-        a
-    });
+    let a = guarda
+        .as_mut()
+        .expect("init carga los analizadores antes de la primera entrada");
     if let Ok(informe) = a.analizar(Analizador::Modelo, datos) {
         // El protocolo tiene que poder llevar lo que el analizador produce.
         let ida = informe.codificar();

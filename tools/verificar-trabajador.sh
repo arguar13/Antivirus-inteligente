@@ -62,6 +62,22 @@ else
     fallo "no compila el agente en release"; sed 's/^/    | /' "$TMP/build.log" | tail -20
 fi
 
+# La carga del modelo y de los analizadores va en el `init:` de fuzz_target!,
+# que libFuzzer ejecuta una vez fuera del plazo por entrada. Cargada en la
+# primera entrada, libFuzzer la contaba como un cuelgue de esa entrada (una
+# entrada vacia «tardaba» mas de 10 s) y la puerta fallaba por algo que no es
+# un defecto del parser.
+echo "==> Trabajador: los objetivos de fuzzing cargan en init, no en la primera entrada"
+perezosos="$(grep -l "precargar()" fuzz/fuzz_targets/trabajador_*.rs | while read -r f; do
+    grep -q "fuzz_target!(init:" "$f" || echo "$f"
+done)"
+if [ -z "$perezosos" ]; then
+    echo "    ${VERDE}OK${FIN}"
+else
+    fallo "objetivos que cargan los analizadores dentro de una entrada:"
+    printf '%s\n' "$perezosos" | sed 's/^/    | /'
+fi
+
 echo "==> Trabajador: fuzzing de sus parsers (${SEGUNDOS_FUZZ} s por objetivo)"
 if AEGIS_EXIGIR_FUZZ=1 FUZZ_OBJETIVOS="trabajador_*" ./tools/fuzz.sh "$SEGUNDOS_FUZZ" > "$TMP/fuzz.log" 2>&1; then
     grep -E "==>|OK" "$TMP/fuzz.log" | sed 's/^/    | /'

@@ -1,0 +1,17 @@
+# Dependencias del entrenamiento (tools/ml/entrenar.py), libres y FIJADAS, con
+# las transitivas: misma entrada + mismas versiones = mismo modelo, mismo hash,
+# misma tarjeta. `referencia` y `comprobar` no necesitan ninguna.
+#
+# Combinacion elegida para el entorno del proyecto (WSL Ubuntu 26.04, Python
+# 3.14): numpy y onnx son las versiones que trae la propia distribucion
+# (python3-numpy 2.3.5, python3-onnx 1.20.0), y todas tienen rueda binaria para
+# CPython 3.14 en x86-64 (numpy y ml_dtypes cp314; onnx y protobuf abi3), asi
+# que no se compila nada:
+#   apt install python3-venv
+#   python3 -m venv /root/aegis-ml-venv
+#   /root/aegis-ml-venv/bin/pip install --only-binary=:all: -r tools/ml/requisitos.txt
+numpy==2.3.5
+onnx==1.20.0
+ml_dtypes==0.5.4
+protobuf==6.33.2
+typing_extensions==4.15.0

@@ -42,6 +42,13 @@ name = "aegis-trabajador-prueba"
 path = "src/bin/aegis-trabajador-prueba.rs"
 required-features = ["prueba-fallos"]
 
+# El vector de cada fichero con el MISMO codigo que el analizador `Modelo`
+# (aegis_ml::vectorizar), para el entrenamiento de tools/ml/entrenar.py.
+# Herramienta de laboratorio: no es un instalable.
+[[bin]]
+name = "aegis-vectorizar"
+path = "src/bin/aegis-vectorizar.rs"
+
 [dev-dependencies]
 # Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo
 # que le falta, falla (H-10/H-20). Solo de pruebas: nunca entra en el binario.

@@ -192,8 +192,15 @@ impl MalwareModel {
     }
 
     /// Carga el modelo empotrado en el binario.
+    ///
+    /// Si la puerta lo da por entrenado (`crate::puerta`), con los umbrales
+    /// que su tarjeta eligio para el FPR objetivo; si no, los de siempre.
     pub fn embedded() -> Result<MalwareModel, ModelError> {
-        Self::load_bytes(crate::EMBEDDED_MODEL)
+        let mut m = Self::load_bytes(crate::EMBEDDED_MODEL)?;
+        if let crate::puerta::EstadoModelo::Entrenado { umbrales, .. } = crate::puerta::estado() {
+            m.thresholds = *umbrales;
+        }
+        Ok(m)
     }
 
     /// Dimension de entrada.

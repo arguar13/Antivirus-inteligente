@@ -15,6 +15,9 @@ workspace = true
 thiserror = "2"
 goblin = "0.9"
 tract-onnx = "0.23"
+# SHA-256 del modelo empotrado y huella del extractor (puerta de la FASE 4.4).
+# Ya estaba en el arbol del agente (aegis-entidad): no es un crate nuevo.
+sha2 = "0.10"
 
 [dev-dependencies]
 # Una prueba que no puede ejercerse lo dice, se cuenta y, si make ci exige lo

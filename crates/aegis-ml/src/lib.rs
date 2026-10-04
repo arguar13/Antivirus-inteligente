@@ -25,9 +25,13 @@
 pub mod entropy;
 pub mod features;
 pub mod model;
+pub mod puerta;
+pub mod vector;
 
 pub use features::{BinaryFeatures, BinaryFormat, FeatureExtractor, SectionInfo, FEATURE_DIM};
 pub use model::{MalwareModel, ModelError, Prediction, Thresholds, Verdict};
+pub use puerta::{modelo_es_referencia, EstadoModelo};
+pub use vector::{huella_extractor, vectorizar, VERSION_VECTOR};
 
 /// Modelo empotrado en el binario.
 ///
@@ -37,15 +41,10 @@ pub use model::{MalwareModel, ModelError, Prediction, Thresholds, Verdict};
 /// Un modelo decide si algo se bloquea; cambiarlo equivale a cambiar el agente.
 pub const EMBEDDED_MODEL: &[u8] = include_bytes!("../models/aegis-static-v1.onnx");
 
-/// Si el modelo empotrado es la LINEA BASE DE REFERENCIA y no un modelo
-/// entrenado.
-///
-/// Lo es: una regresion logistica con pesos fijados a mano a partir de
-/// heuristicas (`tools/build_model.py`), que existe para que la inferencia sea
-/// real de extremo a extremo. Sus puntuaciones son explicables pero NO son
-/// evidencia: sin corpus no hay calibracion, y el primer dia en el agente acuso
-/// de sospechosos a `python3` y a `git` (FASE 1 del MP-16). Mientras esto sea
-/// cierto, quien lo use publica la puntuacion como no concluyente. El modelo
-/// entrenado —y el paso a acusar, gobernado por los falsos positivos medidos—
-/// es la FASE 4.
-pub const EMBEDDED_MODEL_ES_REFERENCIA: bool = true;
+// Si el modelo empotrado es de REFERENCIA (su puntuacion no es evidencia) ya
+// no lo dice una constante escrita a mano: lo decide la puerta
+// (`puerta::estado`, `modelo_es_referencia`) con la tarjeta GENERADA por
+// `tools/ml/entrenar.py`, el hash del modelo empotrado, la huella del
+// extractor y el FPR objetivo de `tools/config/modelo.toml`. El modelo de
+// referencia (pesos a mano, `tools/build_model.py`) no pasa: su tarjeta
+// declara `clase = "referencia"` (FASE 4.4 del MP-16).
