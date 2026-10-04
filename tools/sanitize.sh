@@ -53,7 +53,7 @@ CRATES=(
                       # el corte no ocurre nunca, en silencio
 )
 
-if ! rustup toolchain list 2>/dev/null | grep -q nightly; then
+if ! rustup toolchain list 2>/dev/null | grep >/dev/null nightly; then
     printf '%s== Sanitizadores OMITIDOS: no hay toolchain nightly ==%s\n' "$GRIS" "$FIN"
     exit 0
 fi

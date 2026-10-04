@@ -72,13 +72,13 @@ fi
 
 # `Limpio` no puede tener otro constructor. Se busca lo que NO debe estar.
 if grep -nE 'impl (From<[^>]*> )?for Limpio|impl Limpio \{' "$SRC/redaccion.rs" \
-        | grep -qvE 'impl Limpio \{'; then
+        | grep >/dev/null -vE 'impl Limpio \{'; then
     falla "Limpio ha ganado una conversion: ya se puede construir sin redactar"
 else
     paso "Limpio no tiene From ni constructor publico fuera del redactor"
 fi
 if grep -nE 'pub fn (nuevo|nueva|new|de_bytes|desde)\s*\(' "$SRC/redaccion.rs" \
-        | grep -q 'Limpio'; then
+        | grep >/dev/null 'Limpio'; then
     falla "Limpio ha ganado un constructor publico"
 else
     paso "el unico camino a Limpio sigue siendo Redactor::limpiar"
@@ -91,7 +91,7 @@ else
     falla "la autorizacion ya no sale de un veredicto"
 fi
 if grep -nE 'impl Default for Autorizacion|impl From<[^>]*> for Autorizacion' "$SRC/retencion.rs" \
-        | grep -q .; then
+        | grep >/dev/null .; then
     falla "Autorizacion ha ganado un Default o un From: se puede fabricar sin veredicto"
 else
     paso "Autorizacion no tiene Default ni From"
@@ -104,7 +104,7 @@ fi
 # nueve por ciento que no se guarda crece igual, y quien genera el trafico es de
 # quien hay que defenderse. Es la invariante 9 aplicada aqui — una cota por flujo
 # no es una cota.
-if sin_comentarios 'fn (reservar|redimensionar|crecer|reserve|resize)' | grep -q "anillo.rs"; then
+if sin_comentarios 'fn (reservar|redimensionar|crecer|reserve|resize)' | grep >/dev/null "anillo.rs"; then
     falla "el anillo ha ganado una forma de crecer"
 else
     paso "el anillo no tiene forma de crecer: su tamano se fija al arrancar"
@@ -126,7 +126,7 @@ else
 fi
 
 # Y no puede haber una puerta de atras para quedarse sin techo.
-if sin_comentarios 'fn sin_tope|tope: *usize::MAX' | grep -q .; then
+if sin_comentarios 'fn sin_tope|tope: *usize::MAX' | grep >/dev/null .; then
     falla "hay una forma de construir un indice sin techo"
 else
     paso "no hay forma de construir un indice sin techo: hay que escribir un numero"

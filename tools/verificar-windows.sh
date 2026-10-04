@@ -92,13 +92,13 @@ echo "==> Despacho del driver (PsProcessType / PsThreadType)"
 rama_proceso="$(awk '/Info->ObjectType == \*PsProcessType/,/Info->ObjectType == \*PsThreadType/' "$DRIVER")"
 rama_hilo="$(awk '/Info->ObjectType == \*PsThreadType/,/^    }$/' "$DRIVER")"
 
-if printf '%s' "$rama_proceso" | grep -q "aegis_filtrar_acceso_hilo"; then
+if printf '%s' "$rama_proceso" | grep >/dev/null "aegis_filtrar_acceso_hilo"; then
     echo "  ${ROJO}FALLO${FIN}: la rama de PROCESO llama a la politica de HILO." >&2
     echo "         Un handle de proceso recortado con la mascara de hilo conserva" >&2
     echo "         derechos peligrosos: los numeros coinciden, los significados no." >&2
     FALLOS=$((FALLOS + 1))
 fi
-if printf '%s' "$rama_hilo" | grep -q "aegis_filtrar_acceso_proceso"; then
+if printf '%s' "$rama_hilo" | grep >/dev/null "aegis_filtrar_acceso_proceso"; then
     echo "  ${ROJO}FALLO${FIN}: la rama de HILO llama a la politica de PROCESO." >&2
     FALLOS=$((FALLOS + 1))
 fi

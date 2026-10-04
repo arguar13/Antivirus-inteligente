@@ -83,13 +83,13 @@ fi
 # La comprobacion es del TIPO, no del comportamiento: si el rasgo devolviera
 # bytes para enviar, esto lo veria. Se busca en la definicion del rasgo.
 if grep -q "pub trait Disector" "$SRC/disector.rs" \
-   && ! grep -A40 "pub trait Disector" "$SRC/disector.rs" | grep -qE 'fn (responder|enviar|emitir_bytes|sondear)'; then
+   && ! grep -A40 "pub trait Disector" "$SRC/disector.rs" | grep >/dev/null -E 'fn (responder|enviar|emitir_bytes|sondear)'; then
     paso "el rasgo Disector no tiene ninguna forma de emitir bytes"
 else
     falla "el rasgo Disector ha ganado una forma de responder"
 fi
 
-if ! sin_comentarios 'std::process::Command' | grep -q .; then
+if ! sin_comentarios 'std::process::Command' | grep >/dev/null .; then
     paso "ningun disector lanza un proceso"
 else
     falla "un disector lanza un proceso"

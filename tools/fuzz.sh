@@ -77,7 +77,7 @@ falta() {
     printf '%s== Fuzzing OMITIDO: falta %s ==%s\n' "$GRIS" "$1" "$FIN"
     exit 0
 }
-rustup toolchain list 2>/dev/null | grep -q "^$NIGHTLY" \
+rustup toolchain list 2>/dev/null | grep >/dev/null "^$NIGHTLY" \
     || falta "el toolchain $NIGHTLY (rustup toolchain install $NIGHTLY --profile minimal)"
 cargo "+$NIGHTLY" fuzz --version >/dev/null 2>&1 \
     || falta "cargo-fuzz (cargo install --locked cargo-fuzz)"

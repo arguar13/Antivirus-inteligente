@@ -41,7 +41,7 @@ trap limpiar EXIT
 if [ -z "$CORREDORES" ]; then
     printf '%s==>%s sin AEGIS_KAFKA externo: levantando un corredor Apache Kafka real\n' "$GRIS" "$FIN"
     SALIDA="$(./tools/kafka-broker.sh up 2>/dev/null || true)"
-    if printf '%s' "$SALIDA" | grep -q '^export AEGIS_KAFKA='; then
+    if printf '%s' "$SALIDA" | grep >/dev/null '^export AEGIS_KAFKA='; then
         eval "$SALIDA"
         CORREDORES="$AEGIS_KAFKA"
         PROPIO=1

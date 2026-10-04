@@ -244,7 +244,7 @@ if toca 6; then
     FALTAN=()
     comprobar_variante() {
         local fichero="$1"; local enumerado="$2"; local variante="$3"
-        if ! grep -A 60 "pub enum $enumerado\b" "$fichero" 2>/dev/null | grep -q "^    $variante"; then
+        if ! grep -A 60 "pub enum $enumerado\b" "$fichero" 2>/dev/null | grep >/dev/null "^    $variante"; then
             FALTAN+=("$(basename "$(dirname "$fichero")")::$enumerado sin $variante")
         fi
     }
@@ -527,7 +527,7 @@ if toca 12; then
     presente crates/aegis-invitado/src/protocolo.rs "^    (Ejecutar|Orden|Mandato)" \
         && AUSENCIAS+=("aegis-invitado::protocolo::Evento tiene una variante que es una orden")
     grep -A 12 "pub enum Salida" server/crates/aegis-detonate/src/frontera.rs 2>/dev/null \
-        | grep -qE "^    (Real|RedReal|Internet)" \
+        | grep >/dev/null -E "^    (Real|RedReal|Internet)" \
         && AUSENCIAS+=("aegis-detonate::frontera::Salida tiene una variante de red real")
     SALIDAS=$(grep -A 12 "pub enum Salida" server/crates/aegis-detonate/src/frontera.rs 2>/dev/null | grep -cE "^    (Ninguna|Simulada),")
     # FASE 92: la auditoria de firmware no puede escribir. El unico tipo que abre
@@ -535,11 +535,11 @@ if toca 12; then
     # escritura de memoria, y en todo el crate no hay una sola apertura para
     # escribir. Por lo que FALTA, como el resto de esta invariante.
     if awk '/^impl LecturaSolo/,/^}/' crates/aegis-fwaudit/src/solo_lectura.rs 2>/dev/null \
-        | grep -qE 'fn +(escribir|write|truncar|set_len)'; then
+        | grep >/dev/null -E 'fn +(escribir|write|truncar|set_len)'; then
         AUSENCIAS+=("aegis-fwaudit::LecturaSolo tiene una operacion de escritura")
     fi
     if awk '/^pub trait LectorFisico/,/^}/' crates/aegis-fwaudit/src/msr.rs 2>/dev/null \
-        | grep -qE 'fn +(escribir|write|wrmsr)'; then
+        | grep >/dev/null -E 'fn +(escribir|write|wrmsr)'; then
         AUSENCIAS+=("aegis-fwaudit::LectorFisico tiene una operacion de escritura")
     fi
     # Solo el codigo de produccion: lo que va antes de `#[cfg(test)]`. Las
@@ -547,17 +547,17 @@ if toca 12; then
     for f in crates/aegis-fwaudit/src/*.rs; do
         if awk '/#\[cfg\(test\)\]/{exit} {print}' "$f" \
             | grep -vE '^\s*//' \
-            | grep -qE '\.(write|append|create|truncate)\(true\)|O_WRONLY|O_RDWR|fs::write\(|File::create\(|OpenOptions::new\(\)\.write'; then
+            | grep >/dev/null -E '\.(write|append|create|truncate)\(true\)|O_WRONLY|O_RDWR|fs::write\(|File::create\(|OpenOptions::new\(\)\.write'; then
             AUSENCIAS+=("aegis-fwaudit abre algo para escribir en $(basename "$f")")
         fi
     done
     # FASE 93: el confinamiento no rompe al cliente. El modo por defecto es el que
     # no bloquea nada, y la confirmacion que exige el obligatorio no tiene valor
     # por defecto ni campos publicos con los que fabricarla.
-    if ! grep -B1 -A1 '#\[default\]' crates/aegis-confinar/src/modo.rs 2>/dev/null | grep -q 'Aprendiendo,'; then
+    if ! grep -B1 -A1 '#\[default\]' crates/aegis-confinar/src/modo.rs 2>/dev/null | grep >/dev/null 'Aprendiendo,'; then
         AUSENCIAS+=("aegis-confinar::Modo no tiene Aprendiendo como modo por defecto")
     fi
-    if awk '/^pub struct Confirmacion/,/^}/' crates/aegis-confinar/src/modo.rs 2>/dev/null | grep -qE '^\s+pub '; then
+    if awk '/^pub struct Confirmacion/,/^}/' crates/aegis-confinar/src/modo.rs 2>/dev/null | grep >/dev/null -E '^\s+pub '; then
         AUSENCIAS+=("aegis-confinar::Confirmacion tiene campos publicos: se puede fabricar sin autor ni motivo")
     fi
     if grep -qE 'impl Default for Confirmacion|derive\(.*Default.*\)\]\s*$' <(grep -B3 'pub struct Confirmacion' crates/aegis-confinar/src/modo.rs 2>/dev/null); then
@@ -571,7 +571,7 @@ if toca 12; then
     for f in crates/aegis-sbom/src/*.rs; do
         if awk '/#\[cfg\(test\)\]/{exit} {print}' "$f" \
             | grep -vE '^\s*//' \
-            | grep -qE 'impl +(serde::)?Serialize|derive\([^)]*Serialize|serde_json::to_|to_writer|fn +[a-z_]*(cyclonedx|spdx)|TcpStream|UdpSocket|TcpListener|fs::write\(|File::create\(|\.write\(true\)'; then
+            | grep >/dev/null -E 'impl +(serde::)?Serialize|derive\([^)]*Serialize|serde_json::to_|to_writer|fn +[a-z_]*(cyclonedx|spdx)|TcpStream|UdpSocket|TcpListener|fs::write\(|File::create\(|\.write\(true\)'; then
             AUSENCIAS+=("aegis-sbom puede sacar el inventario en $(basename "$f")")
         fi
     done
@@ -621,7 +621,7 @@ if toca 14; then
     if pruebas servidor aegis-almacen "--test pg" "una_consulta_cara" /tmp/inv-almacen.log \
         && ! grep -q 'OMITIDA' /tmp/inv-almacen.log \
         && [ "$CAMINOS" = "2" ] \
-        && echo "$PLANIFICA" | grep -q 'letplan=self.planifi.*self.leer_y_resolver'; then
+        && echo "$PLANIFICA" | grep >/dev/null 'letplan=self.planifi.*self.leer_y_resolver'; then
         veredicto 14 "una consulta no tumba el almacen" si "rechazada contra PostgreSQL real sin leer un solo segmento; el unico camino de lectura pasa por el planificador"
         porque "Un SIEM que se cuelga con una consulta mal escrita deja al SOC ciego justo"
         porque "cuando alguien, con prisa, la escribe sin acotar. El coste se calcula del"

@@ -54,7 +54,7 @@ if clang --target="$TARGET" -ffreestanding -O2 -Wall -Wextra -Werror \
         echo "    ${ROJO}FALLO${FIN}: maquina inesperada '$maquina' (se esperaba 0x8664)"; FALLOS=$((FALLOS+1))
     fi
     for sim in aegis_filtrar_acceso_proceso aegis_filtrar_acceso_hilo aegis_clasificar_etwti; do
-        if ! llvm-nm "$OUT/politica.obj" 2>/dev/null | grep -q " T $sim$"; then
+        if ! llvm-nm "$OUT/politica.obj" 2>/dev/null | grep >/dev/null " T $sim$"; then
             echo "    ${ROJO}FALLO${FIN}: el objeto no exporta $sim"; FALLOS=$((FALLOS+1))
         fi
     done
@@ -92,7 +92,7 @@ if clang --target="$TARGET" -ffreestanding -O2 -I "$DRV/include" \
         fmt="$(llvm-readobj --file-headers "$OUT/aegis-probe.sys" 2>/dev/null)"
         subsis="$(printf '%s' "$fmt" | awk -F'[()]' '/Subsystem:/{print $2}' | tr -d ' ')"
         maq="$(printf '%s' "$fmt" | awk -F'[()]' '/Machine:/{print $2}' | tr -d ' ')"
-        if printf '%s' "$fmt" | grep -q "Format: COFF-x86-64" && [ "$maq" = "0x8664" ]; then
+        if printf '%s' "$fmt" | grep >/dev/null "Format: COFF-x86-64" && [ "$maq" = "0x8664" ]; then
             echo "    ${VERDE}OK${FIN}  .sys PE x86-64 enlazado (subsistema=$subsis); contiene el codigo real de la politica"
         else
             echo "    ${ROJO}FALLO${FIN}: el .sys enlazado no es PE x86-64 (maquina=$maq)"; FALLOS=$((FALLOS+1))
@@ -111,7 +111,7 @@ if [ -f "$RB_POLITICA" ]; then
     if clang --target="$TARGET" -ffreestanding -O2 -Wall -Wextra -Werror \
          -c "$RB_POLITICA" -o "$OUT/rollback.obj" 2>"$OUT/rbclang.err"; then
         maq="$(llvm-readobj --file-headers "$OUT/rollback.obj" 2>/dev/null | awk -F'[()]' '/Machine:/{print $2}' | tr -d ' ')"
-        if [ "$maq" = "0x8664" ] && llvm-nm "$OUT/rollback.obj" 2>/dev/null | grep -q " T aegis_rb_decidir$"; then
+        if [ "$maq" = "0x8664" ] && llvm-nm "$OUT/rollback.obj" 2>/dev/null | grep >/dev/null " T aegis_rb_decidir$"; then
             echo "    ${VERDE}OK${FIN}  objeto COFF x86-64 con la decision del minifilter"
         else
             echo "    ${ROJO}FALLO${FIN}: la politica de rollback no cross-compilo bien (maquina=$maq)"; FALLOS=$((FALLOS+1))
@@ -128,7 +128,7 @@ if [ -f "$TAMPER_POLITICA" ]; then
     if clang --target="$TARGET" -ffreestanding -O2 -Wall -Wextra -Werror \
          -c "$TAMPER_POLITICA" -o "$OUT/tamper.obj" 2>"$OUT/tamperclang.err"; then
         maq="$(llvm-readobj --file-headers "$OUT/tamper.obj" 2>/dev/null | awk -F'[()]' '/Machine:/{print $2}' | tr -d ' ')"
-        if [ "$maq" = "0x8664" ] && llvm-nm "$OUT/tamper.obj" 2>/dev/null | grep -q " T aegis_decidir_tamper$"; then
+        if [ "$maq" = "0x8664" ] && llvm-nm "$OUT/tamper.obj" 2>/dev/null | grep >/dev/null " T aegis_decidir_tamper$"; then
             echo "    ${VERDE}OK${FIN}  objeto COFF x86-64 con la decision de tamper"
         else
             echo "    ${ROJO}FALLO${FIN}: la politica de tamper no cross-compilo bien (maquina=$maq)"; FALLOS=$((FALLOS+1))

@@ -31,7 +31,7 @@ echo "==> AegisHPC: soporte de PMU (lectura en vivo por perf_event_open) en esta
 # El propio test de sondeo dice, con honestidad, si hay PMU o no (y por que).
 if cargo test -p aegis-hardsense --quiet contadores:: -- --nocapture >/tmp/aegis-hardsense-pmu.log 2>&1; then
     linea="$(grep -m1 'PMU:' /tmp/aegis-hardsense-pmu.log || true)"
-    if echo "$linea" | grep -q 'NO disponible'; then
+    if echo "$linea" | grep >/dev/null 'NO disponible'; then
         echo "    ${GRIS}${linea}${FIN}"
         echo "    ${GRIS}La captura en vivo NO se ejercio aqui; la DECISION (heuristica) SI, arriba.${FIN}"
     else

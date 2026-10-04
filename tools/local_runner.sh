@@ -91,10 +91,10 @@ PY
     local faltan_aqui=() faltan_alla=()
     while IFS= read -r j; do
         [ -z "$j" ] && continue
-        printf '%s\n' "${JOBS[@]}" | grep -qx "$j" || faltan_aqui+=("$j")
+        printf '%s\n' "${JOBS[@]}" | grep >/dev/null -x "$j" || faltan_aqui+=("$j")
     done <<< "$del_yaml"
     for j in "${JOBS[@]}"; do
-        printf '%s\n' "$del_yaml" | grep -qx "$j" || faltan_alla+=("$j")
+        printf '%s\n' "$del_yaml" | grep >/dev/null -x "$j" || faltan_alla+=("$j")
     done
 
     if [ "${#faltan_aqui[@]}" -ne 0 ] || [ "${#faltan_alla[@]}" -ne 0 ]; then

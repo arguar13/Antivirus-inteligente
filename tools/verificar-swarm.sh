@@ -136,7 +136,7 @@ fi
 
 # Y la propiedad que justifica la separacion, comprobada y no prometida.
 echo "==> AegisSwarm: el nucleo NO arrastra libp2p al agente"
-if cargo tree -p aegis-swarm --edges normal 2>/dev/null | grep -qiE 'libp2p|tokio'; then
+if cargo tree -p aegis-swarm --edges normal 2>/dev/null | grep >/dev/null -iE 'libp2p|tokio'; then
     echo "    ${ROJO}FALLO${FIN}: el nucleo del enjambre arrastra libp2p o tokio al agente."
     echo "    ${ROJO}     ${FIN} Eso mete cientos de crates que analizan entrada hostil de red en un"
     echo "    ${ROJO}     ${FIN} proceso privilegiado que corre en cada endpoint, y revienta el"

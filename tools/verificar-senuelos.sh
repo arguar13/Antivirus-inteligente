@@ -95,7 +95,7 @@ else
     falla "la cota de amplificacion ya no mira el transporte"
 fi
 # Y ningun dialogo puede filtrar por su cuenta: eso seria la segunda fuente.
-if sin_comentarios 'fn filtrar' "$SRC/dialogos" | grep -q .; then
+if sin_comentarios 'fn filtrar' "$SRC/dialogos" | grep >/dev/null .; then
     falla "un dialogo aplica su propio filtro: hay dos fuentes y se separaran"
 else
     paso "ningun dialogo aplica filtro propio"

@@ -111,7 +111,7 @@ if [ ! -r "$BTF_K" ]; then
 elif ! command -v bpftool >/dev/null 2>&1; then
     aviso "sin bpftool no se puede comprobar el BTF"
 elif bpftool btf dump file "$BTF_K" format raw 2>/dev/null \
-        | grep -q "STRUCT 'bpf_iter_task'"; then
+        | grep >/dev/null "STRUCT 'bpf_iter_task'"; then
     ok "el BTF de $BTF_K trae struct bpf_iter_task"
 else
     aviso "el BTF de $BTF_K NO trae struct bpf_iter_task."

@@ -37,7 +37,7 @@ echo "==> AegisAttest: la fontaneria del chip TPM esta GATED (no se compila sin 
 # La emision del quote y el acceso a /dev/tpmrm0 viven en emisor.rs, tras la
 # feature tpm-hardware. Se comprueba que el modulo esta gated: el build por defecto
 # —el de produccion en este entorno— no abre el chip.
-if grep -B1 'pub mod emisor;' crates/aegis-attest/src/lib.rs | grep -q 'feature = "tpm-hardware"'; then
+if grep -B1 'pub mod emisor;' crates/aegis-attest/src/lib.rs | grep >/dev/null 'feature = "tpm-hardware"'; then
     echo "    ${VERDE}OK${FIN} (emisor esta tras la feature tpm-hardware: la parte que VERIFICA es"
     echo "    ${VERDE}  ${FIN} Rust portable y se prueba con firmas reales; la que habla con el chip"
     echo "    ${VERDE}  ${FIN} se declara y no se compila donde no hay TPM, en vez de fingir que si)"

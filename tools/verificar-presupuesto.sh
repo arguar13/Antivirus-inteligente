@@ -74,8 +74,8 @@ fi
 
 echo "==> Presupuesto: el drop-in de cgroup v2 que lo obliga desde fuera"
 DROPIN=$(cargo run -q -p aegis-presupuesto --example reparto -- --dropin 2>/dev/null)
-if echo "$DROPIN" | grep -q "MemoryMax=" && echo "$DROPIN" | grep -q "MemoryHigh=" \
-   && echo "$DROPIN" | grep -q "MemorySwapMax=0"; then
+if echo "$DROPIN" | grep >/dev/null "MemoryMax=" && echo "$DROPIN" | grep >/dev/null "MemoryHigh=" \
+   && echo "$DROPIN" | grep >/dev/null "MemorySwapMax=0"; then
     ALTO=$(echo "$DROPIN" | sed -n 's/^MemoryHigh=//p')
     MAXIMO=$(echo "$DROPIN" | sed -n 's/^MemoryMax=//p')
     echo "    ${VERDE}OK${FIN} (MemoryHigh $(mib "$ALTO") MiB blando, MemoryMax $(mib "$MAXIMO") MiB duro)"
@@ -94,12 +94,25 @@ if [ -z "$PRESUPUESTO" ] || [ -z "$LINEA_BASE" ]; then
     echo "    ${ROJO}FALLO${FIN}: no se pudo calcular el presupuesto"
     FALLOS=$((FALLOS + 1))
 elif cargo build --release -p aegis-agent -q 2>/dev/null && [ -x "${CARGO_TARGET_DIR:-target}/release/aegis-agent" ]; then
-    "${CARGO_TARGET_DIR:-target}/release/aegis-agent" --stats-interval 300 >/dev/null 2>/tmp/aegis-presupuesto.err &
-    PID=$!
-    sleep 4
-    RSS_KB=$(awk '/VmRSS/ {print $2}' "/proc/$PID/status" 2>/dev/null)
-    kill -TERM "$PID" 2>/dev/null
-    wait "$PID" 2>/dev/null
+    # La huella OCIOSA es el SUELO, no una muestra suelta. Una sola lectura de
+    # VmRSS a los 4 s se dispara cuando la maquina esta bajo presion de memoria
+    # (glibc crea hasta 8*nproc arenas y el RSS del agente ocioso oscilaba entre
+    # 28 MiB en reposo y 47 MiB durante make ci cargado). Se toman 5 muestras y
+    # se usa el MINIMO: el suelo ocioso filtra los picos del anfitrion, y una
+    # regresion real sube TODAS las muestras, el minimo incluido, asi que la
+    # puerta sigue cazandola.
+    RSS_KB=""
+    for _ in 1 2 3 4 5; do
+        "${CARGO_TARGET_DIR:-target}/release/aegis-agent" --stats-interval 300 >/dev/null 2>/tmp/aegis-presupuesto.err &
+        PID=$!
+        sleep 4
+        m=$(awk '/VmRSS/ {print $2}' "/proc/$PID/status" 2>/dev/null)
+        kill -TERM "$PID" 2>/dev/null
+        wait "$PID" 2>/dev/null
+        if [ -n "$m" ] && { [ -z "$RSS_KB" ] || [ "$m" -lt "$RSS_KB" ]; }; then
+            RSS_KB="$m"
+        fi
+    done
     if [ -z "$RSS_KB" ]; then
         echo "    ${GRIS}omitido: el agente no arranco en este entorno${FIN}"
         echo "    ${GRIS}  causa: $(tail -1 /tmp/aegis-presupuesto.err 2>/dev/null | head -c 160)${FIN}"
